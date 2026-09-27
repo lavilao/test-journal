@@ -1,0 +1,160 @@
+name: Build and Release armeabi-v7a APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: false
+        default: ''
+      release_name:
+        description: 'Release Title'
+        required: false
+        default: 'Mnemosyne armeabi-v7a Release'
+      is_draft:
+        description: 'Draft release'
+        required: false
+        type: boolean
+        default: false
+      is_prerelease:
+        description: 'Pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build armeabi-v7a APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Ensure Gradle Wrapper Executable
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+          else
+            gradle wrapper
+            chmod +x ./gradlew
+          fi
+
+      - name: Prepare Signing Keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Using repository secret for signing keystore..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/my-upload-key.jks"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          elif [ -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
+            echo "Using project debug keystore for build signing..."
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/debug.keystore" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+          else
+            echo "Generating self-signed release key for CI build..."
+            keytool -genkeypair -v \
+              -keystore "$GITHUB_WORKSPACE/my-upload-key.jks" \
+              -alias upload \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Mnemosyne, OU=Build, O=Mnemosyne, L=Local, ST=State, C=US"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+          fi
+
+      - name: Build armeabi-v7a Release APK
+        run: |
+          ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Locate and Package armeabi-v7a APK
+        id: locate_apk
+        run: |
+          mkdir -p release-artifacts
+          # Find the generated armeabi-v7a APK
+          APK_PATH=$(find app/build/outputs/apk/release -name "*armeabi-v7a*.apk" | head -n 1)
+
+          if [ -z "$APK_PATH" ]; then
+            # Fallback check in all build outputs
+            APK_PATH=$(find app/build/outputs/apk/ -name "*armeabi-v7a*.apk" | head -n 1)
+          fi
+
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: armeabi-v7a APK was not found!"
+            find app/build/outputs/apk/ -type f
+            exit 1
+          fi
+
+          echo "Found APK at: $APK_PATH"
+          RELEASE_APK="release-artifacts/mnemosyne-armeabi-v7a.apk"
+          cp "$APK_PATH" "$RELEASE_APK"
+          echo "apk_path=$RELEASE_APK" >> $GITHUB_OUTPUT
+
+          # Generate SHA256 checksum
+          cd release-artifacts
+          sha256sum mnemosyne-armeabi-v7a.apk > mnemosyne-armeabi-v7a.apk.sha256
+          cd ..
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnemosyne-armeabi-v7a-apk
+          path: release-artifacts/
+          if-no-files-found: error
+
+      - name: Determine Release Tag
+        id: release_tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v1.0.0-$(date +'%Y%m%d%H%M%S')"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ github.event.inputs.release_name || steps.release_tag.outputs.tag }}
+          draft: ${{ github.event.inputs.is_draft || false }}
+          prerelease: ${{ github.event.inputs.is_prerelease || false }}
+          files: |
+            release-artifacts/mnemosyne-armeabi-v7a.apk
+            release-artifacts/mnemosyne-armeabi-v7a.apk.sha256
+          body: |
+            ### Mnemosyne Semantic Journal - armeabi-v7a APK Release
+
+            **Architecture:** `armeabi-v7a` (32-bit ARM Android)
+            **Release Tag:** `${{ steps.release_tag.outputs.tag }}`
+
+            - 100% Offline-First Semantic Journal & Personal Knowledge Graph
+            - Built with Room SQLite database, on-device Google ML Kit models, and MindForger-inspired IR
+            - Optimized for low memory and older 32-bit ARM hardware
+
+            #### Verification
+            SHA256 checksums are attached for integrity verification.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
