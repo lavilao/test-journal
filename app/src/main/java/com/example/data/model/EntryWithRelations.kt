@@ -34,7 +34,19 @@ data class EntryWithRelations(
         parentColumn = "id",
         entityColumn = "entryId"
     )
-    val mediaItems: List<MediaItem> = emptyList()
+    val mediaItems: List<MediaItem> = emptyList(),
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "entryId"
+    )
+    val entityMentions: List<EntityMention> = emptyList(),
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "entryId"
+    )
+    val suggestedTags: List<SuggestedTag> = emptyList()
 )
 
 data class RelatedEntryDetail(
@@ -55,7 +67,13 @@ data class EntityWithEntries(
             entityColumn = "entryId"
         )
     )
-    val entries: List<JournalEntry> = emptyList()
+    val entries: List<JournalEntry> = emptyList(),
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "entityId"
+    )
+    val mentions: List<EntityMention> = emptyList()
 )
 
 // Graph Models for Visual Canvas
@@ -65,7 +83,9 @@ enum class GraphNodeType {
     PLACE,
     ORGANIZATION,
     TOPIC,
-    TAG
+    TAG,
+    EVENT,
+    PROJECT
 }
 
 data class GraphNode(
@@ -98,5 +118,6 @@ data class HybridSearchResult(
     val matchedReason: String,
     val snippet: String,
     val matchedTags: List<String> = emptyList(),
-    val matchedEntities: List<String> = emptyList()
+    val matchedEntities: List<String> = emptyList(),
+    val matchedOcrTerms: List<String> = emptyList()
 )

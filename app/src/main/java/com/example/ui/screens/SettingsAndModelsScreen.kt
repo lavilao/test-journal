@@ -19,12 +19,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
@@ -73,14 +73,19 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
 
     val entries by viewModel.entries.collectAsState()
     val entities by viewModel.entities.collectAsState()
+    val events by viewModel.events.collectAsState()
+    val isRebuilding by viewModel.isRebuildingMetadata.collectAsState()
 
     var exportDialogContent by remember { mutableStateOf<String?>(null) }
     var exportDialogTitle by remember { mutableStateOf("") }
 
     val downloadedModels = remember { mutableStateMapOf<String, Boolean>() }
     var downloadingModelCode by remember { mutableStateOf<String?>(null) }
+    var isEntityModelDownloaded by remember { mutableStateOf(false) }
+    var isDownloadingEntityModel by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        isEntityModelDownloaded = MlKitAnalyzer.isEntityModelDownloaded()
         MlKitAnalyzer.POPULAR_LANGUAGES.forEach { lang ->
             downloadedModels[lang.code] = MlKitAnalyzer.isModelDownloaded(lang.code)
         }
@@ -130,7 +135,7 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Zero tracking. Zero remote LLM calls. All entities, embeddings, TF-IDF scores, and journals stay strictly on this device.",
+                        text = "Zero tracking. Zero remote LLM calls. All entities, offsets, TF-IDF scores, and journals stay strictly on this device.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                     )
@@ -161,7 +166,7 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Discovered Entities (People/Places/Topics):", style = MaterialTheme.typography.bodyMedium)
+                    Text("Extracted Entities & Concepts:", style = MaterialTheme.typography.bodyMedium)
                     Text("${entities.size}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -169,8 +174,16 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    Text("Grouped Episodes / Events:", style = MaterialTheme.typography.bodyMedium)
+                    Text("${events.size}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text("Database Engine:", style = MaterialTheme.typography.bodyMedium)
-                    Text("SQLite / Room (Encrypted ready)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = ForestPrimary))
+                    Text("SQLite / Room v2", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = ForestPrimary))
                 }
             }
         }
@@ -210,12 +223,53 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 ModelStatusRow(
                     title = "MindForger Semantic Engine",
-                    subtitle = "TF-IDF, BM25, and graph link clustering",
+                    subtitle = "TF-IDF, BM25, and autolink association",
                     statusText = "Active (Zero overhead)",
                     isReady = true
                 )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // ML Kit Entity Extraction
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("ML Kit Entity Extraction", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                        Text(
+                            "Extracts Dates, Money, URLs, Addresses on-device",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (isDownloadingEntityModel) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ForestPrimary)
+                    } else if (isEntityModelDownloaded) {
+                        Surface(color = ForestPrimary.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
+                            Text("Ready", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                isDownloadingEntityModel = true
+                                scope.launch {
+                                    val success = MlKitAnalyzer.downloadEntityModel()
+                                    isDownloadingEntityModel = false
+                                    isEntityModelDownloaded = success
+                                    Toast.makeText(context, if (success) "Entity model downloaded!" else "Download failed", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.testTag("download_entity_model_button")
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = "Offline Translation Language Packs:",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
@@ -285,6 +339,53 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
 
         Spacer(modifier = Modifier.height(22.dp))
 
+        // Rebuild Semantic Layer
+        Text(
+            text = "Rebuild Semantic Metadata",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Re-indexes all journal entries, re-derives entities, offsets, and relationships from original notes.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        EditorialCard {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Re-index & Re-derive", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("Original journal writing remains untouched", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                if (isRebuilding) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = ForestPrimary)
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.rebuildAllSemanticMetadata {
+                                Toast.makeText(context, "Semantic metadata re-derived successfully!", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                        modifier = Modifier.testTag("rebuild_metadata_button")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Rebuild")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
         // Open Data Export & Backup (Zero Lock-In)
         Text(
             text = "Data Sovereignty & Export",
@@ -316,7 +417,7 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                         modifier = Modifier.weight(1f).testTag("export_markdown_button")
                     ) {
-                        Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Export Markdown")
                     }

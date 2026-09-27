@@ -4,14 +4,18 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityItem
-import com.example.data.model.EntityType
 import com.example.data.model.EntityWithEntries
 import com.example.data.model.EntryWithRelations
+import com.example.data.model.EventItem
+import com.example.data.model.FacePersonAssociation
 import com.example.data.model.HybridSearchResult
 import com.example.data.model.JournalEntry
 import com.example.data.model.KnowledgeGraphData
+import com.example.data.model.MediaItem
 import com.example.data.model.RelatedEntryDetail
+import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
 import com.example.repository.JournalRepository
 import com.example.semantic.MlKitAnalyzer
@@ -55,6 +59,15 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val tags: StateFlow<List<Tag>> = repository.allTags
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val events: StateFlow<List<EventItem>> = repository.allEvents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val forgottenThreads: StateFlow<List<EntityItem>> = repository.getForgottenThreads()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _onThisDayMemories = MutableStateFlow<List<JournalEntry>>(emptyList())
+    val onThisDayMemories: StateFlow<List<JournalEntry>> = _onThisDayMemories.asStateFlow()
+
     // Selected Entry for Detail / Edit
     private val _selectedEntryId = MutableStateFlow<Long?>(null)
     val selectedEntryId: StateFlow<Long?> = _selectedEntryId.asStateFlow()
@@ -65,9 +78,18 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     private val _relatedEntries = MutableStateFlow<List<RelatedEntryDetail>>(emptyList())
     val relatedEntries: StateFlow<List<RelatedEntryDetail>> = _relatedEntries.asStateFlow()
 
+    private val _autolinks = MutableStateFlow<List<AutolinkSpan>>(emptyList())
+    val autolinks: StateFlow<List<AutolinkSpan>> = _autolinks.asStateFlow()
+
+    private val _suggestedTags = MutableStateFlow<List<SuggestedTag>>(emptyList())
+    val suggestedTags: StateFlow<List<SuggestedTag>> = _suggestedTags.asStateFlow()
+
     // Selected Entity
     private val _selectedEntityDetail = MutableStateFlow<EntityWithEntries?>(null)
     val selectedEntityDetail: StateFlow<EntityWithEntries?> = _selectedEntityDetail.asStateFlow()
+
+    private val _selectedEntityMedia = MutableStateFlow<List<MediaItem>>(emptyList())
+    val selectedEntityMedia: StateFlow<List<MediaItem>> = _selectedEntityMedia.asStateFlow()
 
     // Knowledge Graph
     private val _graphData = MutableStateFlow(KnowledgeGraphData())
@@ -87,6 +109,8 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val timelineFilterTag = MutableStateFlow<String?>(null)
     val timelineFilterEntity = MutableStateFlow<String?>(null)
 
+    val isRebuildingMetadata = MutableStateFlow(false)
+
     val filteredEntries: StateFlow<List<EntryWithRelations>> = combine(
         entries,
         timelineFilterTag,
@@ -103,6 +127,13 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.seedInitialDataIfEmpty()
             refreshGraph()
+            refreshOnThisDay()
+        }
+    }
+
+    fun refreshOnThisDay() {
+        viewModelScope.launch {
+            _onThisDayMemories.value = repository.getOnThisDayMemories()
         }
     }
 
@@ -138,6 +169,14 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 _relatedEntries.value = it
             }
         }
+        viewModelScope.launch {
+            _autolinks.value = repository.getAutolinksForEntry(id)
+        }
+        viewModelScope.launch {
+            repository.getSuggestedTagsForEntry(id).collect {
+                _suggestedTags.value = it
+            }
+        }
     }
 
     fun selectEntity(entityId: Long) {
@@ -146,16 +185,24 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 _selectedEntityDetail.value = it
             }
         }
+        viewModelScope.launch {
+            repository.getMediaForPerson(entityId).collect {
+                _selectedEntityMedia.value = it
+            }
+        }
     }
 
     fun clearSelectedEntity() {
         _selectedEntityDetail.value = null
+        _selectedEntityMedia.value = emptyList()
     }
 
     fun clearSelectedEntry() {
         _selectedEntryId.value = null
         _selectedEntryDetail.value = null
         _relatedEntries.value = emptyList()
+        _autolinks.value = emptyList()
+        _suggestedTags.value = emptyList()
         translationState.value = TranslationUiState()
     }
 
@@ -181,6 +228,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             )
             val savedId = repository.saveEntry(entry, manualTags, attachedImageUri)
             refreshGraph()
+            refreshOnThisDay()
             onComplete(savedId)
         }
     }
@@ -190,6 +238,36 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             repository.deleteEntry(entryId)
             clearSelectedEntry()
             refreshGraph()
+            refreshOnThisDay()
+        }
+    }
+
+    fun acceptSuggestedTag(suggestedTag: SuggestedTag) {
+        viewModelScope.launch {
+            repository.acceptSuggestedTag(suggestedTag)
+        }
+    }
+
+    fun dismissSuggestedTag(suggestedTagId: Long) {
+        viewModelScope.launch {
+            repository.dismissSuggestedTag(suggestedTagId)
+        }
+    }
+
+    fun associateFaceWithPerson(mediaId: Long, faceIndex: Int, personEntityId: Long) {
+        viewModelScope.launch {
+            repository.associateFaceWithPerson(mediaId, faceIndex, personEntityId)
+        }
+    }
+
+    fun rebuildAllSemanticMetadata(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            isRebuildingMetadata.value = true
+            repository.rebuildAllSemanticMetadata()
+            refreshGraph()
+            refreshOnThisDay()
+            isRebuildingMetadata.value = false
+            onComplete()
         }
     }
 

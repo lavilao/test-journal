@@ -12,6 +12,11 @@ enum class EntityType {
     DATE,
     TOPIC,
     URL,
+    EMAIL,
+    PHONE,
+    ADDRESS,
+    MONEY,
+    PROJECT,
     OTHER
 }
 
@@ -30,7 +35,8 @@ data class EntityItem(
     val type: EntityType,
     val mentionCount: Int = 1,
     val firstSeen: Long = System.currentTimeMillis(),
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeen: Long = System.currentTimeMillis(),
+    val aliases: String = "" // comma-separated aliases for autolinking
 )
 
 @Entity(
@@ -46,4 +52,24 @@ data class EntryEntityCrossRef(
     val entityId: Long,
     val confidence: Float = 1.0f,
     val mentionCount: Int = 1
+)
+
+@Entity(
+    tableName = "entity_mentions",
+    indices = [
+        Index(value = ["entryId"]),
+        Index(value = ["entityId"]),
+        Index(value = ["entryId", "startOffset"])
+    ]
+)
+data class EntityMention(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val entryId: Long,
+    val entityId: Long,
+    val startOffset: Int,
+    val endOffset: Int,
+    val rawText: String,
+    val normalizedValue: String = "",
+    val confidence: Float = 1.0f
 )

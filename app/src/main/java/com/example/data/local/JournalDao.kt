@@ -8,14 +8,18 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import com.example.data.model.EntityItem
+import com.example.data.model.EntityMention
 import com.example.data.model.EntityType
 import com.example.data.model.EntityWithEntries
 import com.example.data.model.EntryEntityCrossRef
 import com.example.data.model.EntryTagCrossRef
 import com.example.data.model.EntryWithRelations
+import com.example.data.model.EventItem
+import com.example.data.model.FacePersonAssociation
 import com.example.data.model.JournalEntry
 import com.example.data.model.MediaItem
 import com.example.data.model.Relationship
+import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
 import kotlinx.coroutines.flow.Flow
 
@@ -56,8 +60,11 @@ interface JournalDao {
     @Query("SELECT COUNT(*) FROM journal_entries")
     suspend fun getEntryCount(): Int
 
-    @Query("SELECT * FROM journal_entries")
+    @Query("SELECT * FROM journal_entries ORDER BY journalDate DESC")
     suspend fun getAllEntriesSnapshot(): List<JournalEntry>
+
+    @Query("SELECT * FROM journal_entries WHERE journalDate BETWEEN :startTime AND :endTime ORDER BY journalDate DESC")
+    suspend fun getEntriesInRange(startTime: Long, endTime: Long): List<JournalEntry>
 
     // === Tags ===
     @Query("SELECT * FROM tags ORDER BY name ASC")
@@ -77,6 +84,22 @@ interface JournalDao {
 
     @Query("SELECT t.* FROM tags t INNER JOIN entry_tags et ON t.id = et.tagId WHERE et.entryId = :entryId")
     suspend fun getTagsForEntry(entryId: Long): List<Tag>
+
+    // === Suggested Tags ===
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSuggestedTag(tag: SuggestedTag): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSuggestedTags(tags: List<SuggestedTag>)
+
+    @Query("SELECT * FROM suggested_tags WHERE entryId = :entryId ORDER BY confidence DESC")
+    fun getSuggestedTagsForEntry(entryId: Long): Flow<List<SuggestedTag>>
+
+    @Query("UPDATE suggested_tags SET status = :status WHERE id = :id")
+    suspend fun updateSuggestedTagStatus(id: Long, status: String)
+
+    @Query("DELETE FROM suggested_tags WHERE entryId = :entryId")
+    suspend fun clearSuggestedTagsForEntry(entryId: Long)
 
     // === Entities ===
     @Query("SELECT * FROM entities ORDER BY mentionCount DESC, canonicalName ASC")
@@ -107,6 +130,32 @@ interface JournalDao {
     @Query("SELECT e.* FROM entities e INNER JOIN entry_entities ee ON e.id = ee.entityId WHERE ee.entryId = :entryId")
     suspend fun getEntitiesForEntry(entryId: Long): List<EntityItem>
 
+    @Query("SELECT * FROM entities ORDER BY lastSeen DESC")
+    suspend fun getAllEntitiesSnapshot(): List<EntityItem>
+
+    // Forgotten threads: recurring entities (>= 2 mentions) where lastSeen is older than cutoff
+    @Query("SELECT * FROM entities WHERE mentionCount >= :minMentions AND lastSeen < :cutoffTimestamp ORDER BY lastSeen ASC")
+    fun getForgottenThreads(cutoffTimestamp: Long, minMentions: Int = 2): Flow<List<EntityItem>>
+
+    // === Entity Mentions (Offsets & In-Text Annotations) ===
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEntityMention(mention: EntityMention): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEntityMentions(mentions: List<EntityMention>)
+
+    @Query("SELECT * FROM entity_mentions WHERE entryId = :entryId ORDER BY startOffset ASC")
+    fun getMentionsForEntry(entryId: Long): Flow<List<EntityMention>>
+
+    @Query("SELECT * FROM entity_mentions WHERE entryId = :entryId ORDER BY startOffset ASC")
+    suspend fun getMentionsForEntrySnapshot(entryId: Long): List<EntityMention>
+
+    @Query("DELETE FROM entity_mentions WHERE entryId = :entryId")
+    suspend fun clearMentionsForEntry(entryId: Long)
+
+    @Query("SELECT * FROM entity_mentions WHERE entityId = :entityId")
+    fun getMentionsForEntity(entityId: Long): Flow<List<EntityMention>>
+
     // === Relationships ===
     @Query("SELECT * FROM relationships WHERE sourceEntryId = :entryId OR targetEntryId = :entryId ORDER BY score DESC")
     fun getRelationshipsForEntry(entryId: Long): Flow<List<Relationship>>
@@ -132,4 +181,43 @@ interface JournalDao {
 
     @Query("DELETE FROM media_items WHERE entryId = :entryId")
     suspend fun deleteMediaForEntry(entryId: Long)
+
+    @Query("SELECT m.* FROM media_items m INNER JOIN face_person_associations fpa ON m.id = fpa.mediaId WHERE fpa.personEntityId = :personEntityId")
+    fun getMediaForPerson(personEntityId: Long): Flow<List<MediaItem>>
+
+    // === Face Person Associations ===
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFacePersonAssociation(association: FacePersonAssociation): Long
+
+    @Query("SELECT * FROM face_person_associations WHERE mediaId = :mediaId")
+    fun getFaceAssociationsForMedia(mediaId: Long): Flow<List<FacePersonAssociation>>
+
+    @Query("DELETE FROM face_person_associations WHERE mediaId = :mediaId AND faceIndex = :faceIndex")
+    suspend fun deleteFaceAssociation(mediaId: Long, faceIndex: Int)
+
+    // === Events (Timeline Grouping) ===
+    @Query("SELECT * FROM events ORDER BY startDate DESC")
+    fun getAllEvents(): Flow<List<EventItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvent(event: EventItem): Long
+
+    @Query("DELETE FROM events")
+    suspend fun clearAllEvents()
+
+    // === Rebuild Derived Metadata ===
+    @Query("DELETE FROM entity_mentions")
+    suspend fun clearAllEntityMentions()
+
+    @Query("DELETE FROM entry_entities")
+    suspend fun clearAllEntryEntities()
+
+    @Query("DELETE FROM relationships")
+    suspend fun clearAllRelationships()
+
+    @Query("DELETE FROM suggested_tags")
+    suspend fun clearAllSuggestedTags()
+
+    @Query("UPDATE journal_entries SET processedContentHash = ''")
+    suspend fun resetAllProcessedContentHashes()
 }

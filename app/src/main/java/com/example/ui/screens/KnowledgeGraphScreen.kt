@@ -177,6 +177,8 @@ fun KnowledgeGraphScreen(
                         GraphNodeType.PLACE -> TerracottaAccent
                         GraphNodeType.TOPIC, GraphNodeType.TAG -> AmberNode
                         GraphNodeType.ORGANIZATION -> Color(0xFF4338CA)
+                        GraphNodeType.EVENT -> TerracottaAccent
+                        GraphNodeType.PROJECT -> Color(0xFF6D28D9)
                     }
 
                     val radius = if (isSelected) node.size + 6f else node.size
@@ -300,6 +302,8 @@ fun KnowledgeGraphScreen(
                                     GraphNodeType.PLACE -> TerracottaAccent
                                     GraphNodeType.TOPIC, GraphNodeType.TAG -> AmberNode
                                     GraphNodeType.ORGANIZATION -> Color(0xFF4338CA)
+                                    GraphNodeType.EVENT -> TerracottaAccent
+                                    GraphNodeType.PROJECT -> Color(0xFF6D28D9)
                                 },
                                 modifier = Modifier.size(14.dp)
                             ) {}

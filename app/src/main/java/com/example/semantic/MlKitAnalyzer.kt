@@ -3,9 +3,18 @@ package com.example.semantic
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import com.example.data.model.EntityType
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.nl.entityextraction.DateTimeEntity
+import com.google.mlkit.nl.entityextraction.Entity
+import com.google.mlkit.nl.entityextraction.EntityAnnotation
+import com.google.mlkit.nl.entityextraction.EntityExtraction
+import com.google.mlkit.nl.entityextraction.EntityExtractionParams
+import com.google.mlkit.nl.entityextraction.EntityExtractor
+import com.google.mlkit.nl.entityextraction.EntityExtractorOptions
+import com.google.mlkit.nl.entityextraction.MoneyEntity
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.TranslateRemoteModel
@@ -32,6 +41,15 @@ data class SupportedLanguage(
     val displayName: String
 )
 
+data class MlKitRawEntity(
+    val rawText: String,
+    val startOffset: Int,
+    val endOffset: Int,
+    val type: EntityType,
+    val normalizedValue: String = "",
+    val confidence: Float = 0.90f
+)
+
 object MlKitAnalyzer {
 
     val POPULAR_LANGUAGES = listOf(
@@ -49,7 +67,6 @@ object MlKitAnalyzer {
 
     /**
      * Identify the language of the text using ML Kit on-device Language Identification.
-     * Returns "en" if undetermined or failed.
      */
     suspend fun identifyLanguage(text: String): String = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext "en"
@@ -62,6 +79,113 @@ object MlKitAnalyzer {
         } catch (_: Exception) {
             "en"
         }
+    }
+
+    /**
+     * Checks if ML Kit Entity Extraction model is downloaded on device.
+     */
+    suspend fun isEntityModelDownloaded(modelIdentifier: String = EntityExtractorOptions.ENGLISH): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val extractor = EntityExtraction.getClient(
+                EntityExtractorOptions.Builder(modelIdentifier).build()
+            )
+            val downloaded = Tasks.await(extractor.isModelDownloaded) ?: false
+            extractor.close()
+            downloaded
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Downloads the ML Kit Entity Extraction model if needed.
+     */
+    suspend fun downloadEntityModel(modelIdentifier: String = EntityExtractorOptions.ENGLISH): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val extractor = EntityExtraction.getClient(
+                EntityExtractorOptions.Builder(modelIdentifier).build()
+            )
+            val conditions = DownloadConditions.Builder().build()
+            val task = extractor.downloadModelIfNeeded(conditions)
+            Tasks.await(task)
+            extractor.close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Extracts entities using Google ML Kit on-device Entity Extraction.
+     * Extracts Dates, Addresses, URLs, Phone numbers, Emails, Money, etc. with exact offsets.
+     */
+    suspend fun extractEntitiesWithMlKit(
+        text: String,
+        modelIdentifier: String = EntityExtractorOptions.ENGLISH
+    ): List<MlKitRawEntity> = withContext(Dispatchers.IO) {
+        if (text.isBlank()) return@withContext emptyList()
+        val results = mutableListOf<MlKitRawEntity>()
+        try {
+            val extractor = EntityExtraction.getClient(
+                EntityExtractorOptions.Builder(modelIdentifier).build()
+            )
+            // Attempt to download if not present or run if downloaded
+            val isDownloaded = isEntityModelDownloaded(modelIdentifier)
+            if (!isDownloaded) {
+                try {
+                    val conditions = DownloadConditions.Builder().build()
+                    Tasks.await(extractor.downloadModelIfNeeded(conditions))
+                } catch (_: Exception) {
+                    // Fall back to rule-based engine if model download fails or offline
+                    extractor.close()
+                    return@withContext emptyList()
+                }
+            }
+
+            val params = EntityExtractionParams.Builder(text).build()
+            val annotations = Tasks.await(extractor.annotate(params))
+
+            for (annotation in annotations) {
+                val rawText = annotation.annotatedText
+                val start = annotation.start
+                val end = annotation.end
+
+                for (entity in annotation.entities) {
+                    val (type, normalized) = when (entity.type) {
+                        Entity.TYPE_DATE_TIME -> {
+                            val dt = entity.asDateTimeEntity()
+                            EntityType.DATE to (dt?.timestampMillis?.toString() ?: rawText)
+                        }
+                        Entity.TYPE_ADDRESS -> EntityType.ADDRESS to rawText
+                        Entity.TYPE_EMAIL -> EntityType.EMAIL to rawText.lowercase()
+                        Entity.TYPE_PHONE -> EntityType.PHONE to rawText
+                        Entity.TYPE_URL -> EntityType.URL to rawText
+                        Entity.TYPE_MONEY -> {
+                            val money = entity.asMoneyEntity()
+                            EntityType.MONEY to ("${money?.unnormalizedCurrency ?: ""} ${money?.integerPart ?: ""}.${money?.fractionalPart ?: ""}".trim())
+                        }
+                        else -> EntityType.OTHER to rawText
+                    }
+
+                    if (type != EntityType.OTHER) {
+                        results.add(
+                            MlKitRawEntity(
+                                rawText = rawText,
+                                startOffset = start,
+                                endOffset = end,
+                                type = type,
+                                normalizedValue = normalized,
+                                confidence = 0.95f
+                            )
+                        )
+                    }
+                }
+            }
+            extractor.close()
+        } catch (_: Exception) {
+            // Graceful fallback
+        }
+        results
     }
 
     /**
@@ -132,7 +256,6 @@ object MlKitAnalyzer {
                 .build()
             val translator = Translation.getClient(options)
 
-            // Ensure model conditions
             val conditions = DownloadConditions.Builder().build()
             Tasks.await(translator.downloadModelIfNeeded(conditions))
 
@@ -159,7 +282,6 @@ object MlKitAnalyzer {
         try {
             val inputImage = InputImage.fromBitmap(bitmap, 0)
 
-            // 1. Image Labels
             runCatching {
                 val labeler = ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
                 val labelTask = labeler.process(inputImage)
@@ -168,7 +290,6 @@ object MlKitAnalyzer {
                 labeler.close()
             }
 
-            // 2. Face Detection
             runCatching {
                 val faceOptions = FaceDetectorOptions.Builder()
                     .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -180,7 +301,6 @@ object MlKitAnalyzer {
                 detector.close()
             }
 
-            // 3. OCR Text Recognition
             runCatching {
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 val ocrTask = recognizer.process(inputImage)
@@ -213,7 +333,11 @@ object MlKitAnalyzer {
             }
 
             runCatching {
-                val detector = FaceDetection.getClient(FaceDetectorOptions.Builder().setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST).build())
+                val detector = FaceDetection.getClient(
+                    FaceDetectorOptions.Builder()
+                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                        .build()
+                )
                 val faces = Tasks.await(detector.process(inputImage))
                 faceCount = faces.size
                 detector.close()

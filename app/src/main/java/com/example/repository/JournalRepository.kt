@@ -3,12 +3,16 @@ package com.example.repository
 import android.content.Context
 import android.net.Uri
 import com.example.data.local.AppDatabase
+import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityItem
+import com.example.data.model.EntityMention
 import com.example.data.model.EntityType
 import com.example.data.model.EntityWithEntries
 import com.example.data.model.EntryEntityCrossRef
 import com.example.data.model.EntryTagCrossRef
 import com.example.data.model.EntryWithRelations
+import com.example.data.model.EventItem
+import com.example.data.model.FacePersonAssociation
 import com.example.data.model.GraphEdge
 import com.example.data.model.GraphNode
 import com.example.data.model.GraphNodeType
@@ -18,6 +22,7 @@ import com.example.data.model.KnowledgeGraphData
 import com.example.data.model.MediaItem
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.Relationship
+import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
 import com.example.semantic.MindForgerSemanticEngine
 import com.example.semantic.MlKitAnalyzer
@@ -31,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
@@ -45,6 +51,7 @@ class JournalRepository(
     val allEntriesWithRelations: Flow<List<EntryWithRelations>> = dao.getAllEntriesWithRelations()
     val allEntities: Flow<List<EntityItem>> = dao.getAllEntities()
     val allTags: Flow<List<Tag>> = dao.getAllTags()
+    val allEvents: Flow<List<EventItem>> = dao.getAllEvents()
 
     fun getEntryWithRelations(id: Long): Flow<EntryWithRelations?> = dao.getEntryWithRelationsFlow(id)
 
@@ -60,6 +67,44 @@ class JournalRepository(
                 } else null
             }
         }
+    }
+
+    fun getSuggestedTagsForEntry(entryId: Long): Flow<List<SuggestedTag>> =
+        dao.getSuggestedTagsForEntry(entryId)
+
+    fun getFaceAssociationsForMedia(mediaId: Long): Flow<List<FacePersonAssociation>> =
+        dao.getFaceAssociationsForMedia(mediaId)
+
+    fun getMediaForPerson(personId: Long): Flow<List<MediaItem>> =
+        dao.getMediaForPerson(personId)
+
+    fun getForgottenThreads(): Flow<List<EntityItem>> {
+        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
+        return dao.getForgottenThreads(cutoffTimestamp = thirtyDaysAgo, minMentions = 2)
+    }
+
+    suspend fun getOnThisDayMemories(): List<JournalEntry> = withContext(Dispatchers.IO) {
+        val all = dao.getAllEntriesSnapshot()
+        val calToday = Calendar.getInstance()
+        val currentMonth = calToday.get(Calendar.MONTH)
+        val currentDay = calToday.get(Calendar.DAY_OF_MONTH)
+        val currentYear = calToday.get(Calendar.YEAR)
+
+        all.filter { entry ->
+            val cal = Calendar.getInstance().apply { timeInMillis = entry.journalDate }
+            cal.get(Calendar.MONTH) == currentMonth &&
+                    cal.get(Calendar.DAY_OF_MONTH) == currentDay &&
+                    cal.get(Calendar.YEAR) < currentYear
+        }
+    }
+
+    /**
+     * Compute Autolink Spans for an entry without modifying original source text.
+     */
+    suspend fun getAutolinksForEntry(entryId: Long): List<AutolinkSpan> = withContext(Dispatchers.IO) {
+        val entry = dao.getEntryById(entryId) ?: return@withContext emptyList()
+        val knownEntities = dao.getAllEntitiesSnapshot()
+        MindForgerSemanticEngine.findAutolinks(entry.body, knownEntities)
     }
 
     /**
@@ -113,16 +158,6 @@ class JournalRepository(
                         ocrText = analysis.ocrText
                     )
                 )
-
-                // If OCR detected text or labels, enrich tags
-                analysis.labels.take(3).forEach { label ->
-                    val norm = label.lowercase(Locale.ROOT)
-                    val existingTag = dao.getTagByNormalized(norm)
-                    val tagId = existingTag?.id ?: dao.insertTag(
-                        Tag(name = label, normalizedName = norm, source = "AUTO", confidence = 0.80f)
-                    )
-                    dao.insertEntryTagCrossRef(EntryTagCrossRef(entryId = entryId, tagId = tagId, source = "AUTO"))
-                }
             }
         }
 
@@ -137,14 +172,48 @@ class JournalRepository(
     suspend fun deleteEntry(entryId: Long) = withContext(Dispatchers.IO) {
         dao.clearTagsForEntry(entryId)
         dao.clearEntitiesForEntry(entryId)
+        dao.clearMentionsForEntry(entryId)
+        dao.clearSuggestedTagsForEntry(entryId)
         dao.deleteRelationshipsForEntry(entryId)
         dao.deleteMediaForEntry(entryId)
         dao.deleteEntryById(entryId)
     }
 
     /**
-     * Background Semantic Pipeline (MindForger-inspired + ML Kit).
-     * Safe, idempotent, cancellable.
+     * Accept a suggested tag: marks as ACCEPTED and adds to permanent tags.
+     */
+    suspend fun acceptSuggestedTag(suggestedTag: SuggestedTag) = withContext(Dispatchers.IO) {
+        dao.updateSuggestedTagStatus(suggestedTag.id, "ACCEPTED")
+        val existingTag = dao.getTagByNormalized(suggestedTag.normalizedName)
+        val tagId = existingTag?.id ?: dao.insertTag(
+            Tag(name = suggestedTag.name, normalizedName = suggestedTag.normalizedName, source = "AUTO", confidence = suggestedTag.confidence)
+        )
+        dao.insertEntryTagCrossRef(EntryTagCrossRef(entryId = suggestedTag.entryId, tagId = tagId, confidence = suggestedTag.confidence, source = "AUTO"))
+    }
+
+    /**
+     * Dismiss a suggested tag.
+     */
+    suspend fun dismissSuggestedTag(suggestedTagId: Long) = withContext(Dispatchers.IO) {
+        dao.updateSuggestedTagStatus(suggestedTagId, "DISMISSED")
+    }
+
+    /**
+     * Associates a detected face in a media item with a Person Entity.
+     */
+    suspend fun associateFaceWithPerson(mediaId: Long, faceIndex: Int, personEntityId: Long) = withContext(Dispatchers.IO) {
+        dao.insertFacePersonAssociation(
+            FacePersonAssociation(
+                mediaId = mediaId,
+                faceIndex = faceIndex,
+                personEntityId = personEntityId
+            )
+        )
+    }
+
+    /**
+     * Background Semantic Pipeline (ML Kit + MindForger).
+     * Extracts entities & precise text offsets, creates suggested tags, computes explainable links, and clusters events.
      */
     suspend fun processSemanticIntelligence(entryId: Long) = withContext(Dispatchers.IO) {
         val entry = dao.getEntryById(entryId) ?: return@withContext
@@ -153,14 +222,22 @@ class JournalRepository(
         // 1. Language Detection via MLKit
         val detectedLang = MlKitAnalyzer.identifyLanguage("${entry.title} ${entry.body}")
 
-        // 2. Local Entity Extraction
-        val extractedEntities = MindForgerSemanticEngine.extractEntities(entry.title, entry.body)
+        // 2. ML Kit + MindForger Entity Extraction
+        val fullText = "${entry.title}\n${entry.body}"
+        val mlKitEntities = MlKitAnalyzer.extractEntitiesWithMlKit(fullText)
+        val ruleBasedMentions = MindForgerSemanticEngine.extractEntitiesWithOffsets(fullText)
 
-        // Clear existing automatic entities for this entry
+        // Clear existing derived metadata for this entry
         dao.clearEntitiesForEntry(entryId)
+        dao.clearMentionsForEntry(entryId)
+        dao.clearSuggestedTagsForEntry(entryId)
 
-        extractedEntities.forEach { entityItem ->
-            val existing = dao.getEntityByCanonicalAndType(entityItem.canonicalName, entityItem.type)
+        val insertedEntityIds = mutableListOf<Long>()
+        val mentionsToInsert = mutableListOf<EntityMention>()
+
+        // Process Rule-Based Entities (People, Places, Organizations, Projects, Topics)
+        ruleBasedMentions.forEach { draft ->
+            val existing = dao.getEntityByCanonicalAndType(draft.entity.canonicalName, draft.entity.type)
             val entityId = if (existing != null) {
                 dao.updateEntity(
                     existing.copy(
@@ -170,39 +247,95 @@ class JournalRepository(
                 )
                 existing.id
             } else {
-                dao.insertEntity(entityItem)
+                dao.insertEntity(draft.entity)
             }
-            dao.insertEntryEntityCrossRef(
-                EntryEntityCrossRef(entryId = entryId, entityId = entityId, confidence = 0.88f)
-            )
-        }
+            insertedEntityIds.add(entityId)
+            dao.insertEntryEntityCrossRef(EntryEntityCrossRef(entryId = entryId, entityId = entityId, confidence = draft.confidence))
 
-        // 3. Keyword Extraction (TF-IDF) & Automatic Tagging
-        val keywords = MindForgerSemanticEngine.extractKeywords(entry, allEntries)
-        val generatedTags = MindForgerSemanticEngine.generateTags(entry, extractedEntities, keywords)
-
-        generatedTags.forEach { autoTag ->
-            val existing = dao.getTagByNormalized(autoTag.normalizedName)
-            val tagId = existing?.id ?: dao.insertTag(autoTag)
-            dao.insertEntryTagCrossRef(
-                EntryTagCrossRef(
+            mentionsToInsert.add(
+                EntityMention(
                     entryId = entryId,
-                    tagId = tagId,
-                    confidence = autoTag.confidence,
-                    source = autoTag.source
+                    entityId = entityId,
+                    startOffset = draft.startOffset,
+                    endOffset = draft.endOffset,
+                    rawText = draft.rawText,
+                    normalizedValue = draft.normalizedValue,
+                    confidence = draft.confidence
                 )
             )
         }
 
-        // 4. Semantic Linking / Relationship Discovery
+        // Process ML Kit Entities (Dates, Money, URLs, Emails, Phones, Addresses)
+        mlKitEntities.forEach { mlEntity ->
+            val canonical = mlEntity.normalizedValue.ifBlank { mlEntity.rawText }.lowercase(Locale.ROOT)
+            val existing = dao.getEntityByCanonicalAndType(canonical, mlEntity.type)
+            val entityId = if (existing != null) {
+                dao.updateEntity(existing.copy(mentionCount = existing.mentionCount + 1, lastSeen = System.currentTimeMillis()))
+                existing.id
+            } else {
+                dao.insertEntity(
+                    EntityItem(
+                        canonicalName = canonical,
+                        displayName = mlEntity.rawText,
+                        type = mlEntity.type,
+                        mentionCount = 1
+                    )
+                )
+            }
+            insertedEntityIds.add(entityId)
+            dao.insertEntryEntityCrossRef(EntryEntityCrossRef(entryId = entryId, entityId = entityId, confidence = mlEntity.confidence))
+
+            mentionsToInsert.add(
+                EntityMention(
+                    entryId = entryId,
+                    entityId = entityId,
+                    startOffset = mlEntity.startOffset,
+                    endOffset = mlEntity.endOffset,
+                    rawText = mlEntity.rawText,
+                    normalizedValue = mlEntity.normalizedValue,
+                    confidence = mlEntity.confidence
+                )
+            )
+        }
+
+        if (mentionsToInsert.isNotEmpty()) {
+            dao.insertEntityMentions(mentionsToInsert)
+        }
+
+        // 3. Keyword Extraction & Suggested Tags (kept PENDING for user review)
         val currentEntities = dao.getEntitiesForEntry(entryId)
+        val keywords = MindForgerSemanticEngine.extractKeywords(entry, allEntries)
+        val mediaList = dao.getMediaForEntry(entryId).first()
+        val imageLabels = mediaList.flatMap {
+            try {
+                val arr = JSONArray(it.labelsJson)
+                (0 until arr.length()).map { i -> arr.getString(i) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        val suggestedTags = MindForgerSemanticEngine.generateSuggestedTags(entry, currentEntities, keywords, imageLabels)
+        dao.insertSuggestedTags(suggestedTags)
+
+        // 4. Semantic Linking / Relationship Discovery
         val currentTags = dao.getTagsForEntry(entryId)
+        val currentOcr = mediaList.joinToString(" ") { it.ocrText }
 
         dao.deleteRelationshipsForEntry(entryId)
 
         allEntries.filter { it.id != entryId }.forEach { otherEntry ->
             val otherEntities = dao.getEntitiesForEntry(otherEntry.id)
             val otherTags = dao.getTagsForEntry(otherEntry.id)
+            val otherMedia = dao.getMediaForEntry(otherEntry.id).first()
+            val otherOcr = otherMedia.joinToString(" ") { it.ocrText }
+            val otherLabels = otherMedia.flatMap {
+                try {
+                    val arr = JSONArray(it.labelsJson)
+                    (0 until arr.length()).map { i -> arr.getString(i) }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
 
             val rel = MindForgerSemanticEngine.computeRelationship(
                 source = entry,
@@ -210,13 +343,24 @@ class JournalRepository(
                 sourceEntities = currentEntities,
                 targetEntities = otherEntities,
                 sourceTags = currentTags,
-                targetTags = otherTags
+                targetTags = otherTags,
+                sourceOcr = currentOcr,
+                targetOcr = otherOcr,
+                sourceLabels = imageLabels,
+                targetLabels = otherLabels
             )
 
             if (rel != null) {
                 dao.insertRelationship(rel)
             }
         }
+
+        // 5. Update Episodic Events
+        val entitiesMap = mutableMapOf<Long, List<EntityItem>>()
+        allEntries.forEach { e -> entitiesMap[e.id] = dao.getEntitiesForEntry(e.id) }
+        val events = MindForgerSemanticEngine.detectEvents(allEntries, entitiesMap)
+        dao.clearAllEvents()
+        events.forEach { dao.insertEvent(it) }
 
         // Mark as processed
         dao.updateEntry(
@@ -228,7 +372,25 @@ class JournalRepository(
     }
 
     /**
-     * Hybrid Search combining Exact Text, BM25 tokens, Tags, and Extracted Entities.
+     * Completely rebuilds all derived semantic metadata from scratch.
+     * Original journal text is preserved untouched.
+     */
+    suspend fun rebuildAllSemanticMetadata() = withContext(Dispatchers.IO) {
+        dao.clearAllEntityMentions()
+        dao.clearAllEntryEntities()
+        dao.clearAllRelationships()
+        dao.clearAllSuggestedTags()
+        dao.clearAllEvents()
+        dao.resetAllProcessedContentHashes()
+
+        val allEntries = dao.getAllEntriesSnapshot()
+        allEntries.forEach { entry ->
+            processSemanticIntelligence(entry.id)
+        }
+    }
+
+    /**
+     * Smart Hybrid Search combining Exact Text, BM25 tokens, Tags, Extracted Entities, and OCR.
      */
     suspend fun searchHybrid(query: String): List<HybridSearchResult> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
@@ -245,6 +407,7 @@ class JournalRepository(
             val reasons = mutableListOf<String>()
             val matchedTags = mutableListOf<String>()
             val matchedEntities = mutableListOf<String>()
+            val matchedOcrTerms = mutableListOf<String>()
 
             val lowerTitle = entry.title.lowercase(Locale.ROOT)
             val lowerBody = entry.body.lowercase(Locale.ROOT)
@@ -261,7 +424,7 @@ class JournalRepository(
                 reasons.add("Exact body match")
             }
 
-            // 3. Token overlap (BM25-style keyword matching)
+            // 3. Token overlap (BM25 keyword matching)
             val entryTokens = MindForgerSemanticEngine.tokenize("${entry.title} ${entry.body}").toSet()
             val sharedTokens = queryTokens.intersect(entryTokens)
             if (sharedTokens.isNotEmpty()) {
@@ -275,7 +438,7 @@ class JournalRepository(
                 if (entity.displayName.lowercase(Locale.ROOT).contains(trimmed.lowercase(Locale.ROOT)) ||
                     queryTokens.any { entity.canonicalName.contains(it) }
                 ) {
-                    score += 0.35f
+                    score += 0.38f
                     matchedEntities.add(entity.displayName)
                     reasons.add("Entity: ${entity.displayName} (${entity.type.name})")
                 }
@@ -292,8 +455,16 @@ class JournalRepository(
                 }
             }
 
+            // 6. OCR Text match
+            item.mediaItems.forEach { media ->
+                if (media.ocrText.lowercase(Locale.ROOT).contains(trimmed.lowercase(Locale.ROOT))) {
+                    score += 0.28f
+                    matchedOcrTerms.add(trimmed)
+                    reasons.add("OCR text in photo")
+                }
+            }
+
             if (score > 0.15f) {
-                // Generate contextual snippet
                 val snippetIndex = lowerBody.indexOf(trimmed.lowercase(Locale.ROOT))
                 val snippet = if (snippetIndex >= 0) {
                     val start = (snippetIndex - 40).coerceAtLeast(0)
@@ -310,7 +481,8 @@ class JournalRepository(
                         matchedReason = reasons.distinct().take(3).joinToString(" • "),
                         snippet = snippet,
                         matchedTags = matchedTags,
-                        matchedEntities = matchedEntities
+                        matchedEntities = matchedEntities,
+                        matchedOcrTerms = matchedOcrTerms
                     )
                 )
             }
@@ -321,7 +493,6 @@ class JournalRepository(
 
     /**
      * Builds data for interactive 2D Knowledge Graph visualization.
-     * Computes initial node positions around a ring for organic force layout.
      */
     suspend fun getKnowledgeGraphData(): KnowledgeGraphData = withContext(Dispatchers.IO) {
         val entries = dao.getAllEntriesWithRelations().first()
@@ -355,13 +526,14 @@ class JournalRepository(
             }
 
             // Add Entity Nodes & connecting edges
-            item.entities.take(4).forEach { entity ->
+            item.entities.take(5).forEach { entity ->
                 val entityNodeId = "entity_${entity.id}"
                 if (seenNodeIds.add(entityNodeId)) {
                     val nodeType = when (entity.type) {
                         EntityType.PERSON -> GraphNodeType.PERSON
-                        EntityType.PLACE -> GraphNodeType.PLACE
+                        EntityType.PLACE, EntityType.ADDRESS -> GraphNodeType.PLACE
                         EntityType.ORGANIZATION -> GraphNodeType.ORGANIZATION
+                        EntityType.PROJECT -> GraphNodeType.PROJECT
                         else -> GraphNodeType.TOPIC
                     }
                     val offsetAngle = index * 0.7f
@@ -409,9 +581,6 @@ class JournalRepository(
         KnowledgeGraphData(nodes = nodes, edges = edges)
     }
 
-    /**
-     * Complete offline JSON export for zero lock-in privacy.
-     */
     suspend fun exportToJson(): String = withContext(Dispatchers.IO) {
         val entries = dao.getAllEntriesWithRelations().first()
         val jsonArray = JSONArray()
@@ -446,9 +615,6 @@ class JournalRepository(
         jsonArray.toString(2)
     }
 
-    /**
-     * Markdown bundle export with YAML frontmatter.
-     */
     suspend fun exportToMarkdownBundle(): String = withContext(Dispatchers.IO) {
         val entries = dao.getAllEntriesWithRelations().first()
         val builder = StringBuilder()
@@ -469,9 +635,6 @@ class JournalRepository(
         builder.toString()
     }
 
-    /**
-     * Seeds initial interconnected sample journal entries so the user experiences the knowledge graph immediately.
-     */
     suspend fun seedInitialDataIfEmpty() = withContext(Dispatchers.IO) {
         if (dao.getEntryCount() > 0) return@withContext
 
@@ -518,7 +681,6 @@ class JournalRepository(
         )
         val id4 = saveEntry(seed4, listOf("philosophy", "memory", "pkm"))
 
-        // Run semantic pipeline for all seeds to generate immediate relationships
         processSemanticIntelligence(id1)
         processSemanticIntelligence(id2)
         processSemanticIntelligence(id3)

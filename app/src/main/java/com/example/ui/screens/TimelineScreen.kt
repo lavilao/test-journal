@@ -21,15 +21,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +44,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,8 +79,13 @@ fun TimelineScreen(
 ) {
     val entries by viewModel.filteredEntries.collectAsState()
     val allEntities by viewModel.entities.collectAsState()
+    val events by viewModel.events.collectAsState()
+    val forgottenThreads by viewModel.forgottenThreads.collectAsState()
+    val onThisDay by viewModel.onThisDayMemories.collectAsState()
     val filterTag by viewModel.timelineFilterTag.collectAsState()
     val filterEntity by viewModel.timelineFilterEntity.collectAsState()
+
+    var showEventsView by remember { mutableStateOf(false) }
 
     val dateFormat = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
 
@@ -93,7 +106,7 @@ fun TimelineScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Offline Semantic Journal & Knowledge Graph",
+                        text = "Offline Semantic Journal & Memory Graph",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -131,38 +144,107 @@ fun TimelineScreen(
                                 color = TerracottaAccent
                             )
                             Text(
-                                text = "Extracted Entities",
+                                text = "Entities",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Column {
                             Text(
-                                text = "100% Local",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                text = "${events.size}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = AmberNode
                             )
                             Text(
-                                text = "Private Database",
+                                text = "Episodes",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // View Mode Switcher
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = !showEventsView,
+                            onClick = { showEventsView = false },
+                            label = { Text("Daily Timeline") },
+                            modifier = Modifier.testTag("filter_daily_timeline")
+                        )
+                        FilterChip(
+                            selected = showEventsView,
+                            onClick = { showEventsView = true },
+                            label = { Text("Grouped Episodes (${events.size})") },
+                            modifier = Modifier.testTag("filter_grouped_episodes")
+                        )
+                    }
+                }
+            }
+
+            // On This Day Resurfacing Card
+            if (onThisDay.isNotEmpty()) {
+                item {
+                    val memory = onThisDay.first()
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToDetail(memory.id) }
+                            .testTag("on_this_day_card")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarMonth,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "On This Day in the Past",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = memory.title.ifBlank { "Untitled memory" },
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
             }
 
-            // Spotlight Memory Insight Card (MindForger / PKM inspired)
-            if (entries.size >= 2) {
+            // Forgotten Threads Card
+            if (forgottenThreads.isNotEmpty()) {
+                val thread = forgottenThreads.first()
                 item {
                     Card(
                         shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("memory_spotlight_card")
+                            .clickable { onNavigateToEntity(thread.id) }
+                            .testTag("forgotten_thread_card")
                     ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
@@ -171,11 +253,11 @@ fun TimelineScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = AmberNode.copy(alpha = 0.2f),
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
+                                        imageVector = Icons.Default.History,
                                         contentDescription = null,
                                         tint = AmberNode,
                                         modifier = Modifier.size(20.dp)
@@ -185,16 +267,14 @@ fun TimelineScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Semantic Connection Rediscovered",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    text = "Forgotten Thread: ${thread.displayName}",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Multiple entries link around 'Sarah' and 'MindForger architecture'. Explore their shared thread.",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = "${thread.mentionCount} mentions in your journal. Hasn't been written about recently.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -245,43 +325,99 @@ fun TimelineScreen(
                 }
             }
 
-            // Journal Entries Stream
-            if (entries.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
+            // Grouped Episodes View OR Daily Timeline
+            if (showEventsView) {
+                if (events.isEmpty()) {
+                    item {
                         Text(
-                            text = "No journal entries found",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "No grouped episodes detected yet. Continue journaling to form timeline clusters.",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = "Tap the + button to record your first private memory",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                        )
+                    }
+                } else {
+                    items(events, key = { it.id }) { event ->
+                        EditorialCard(modifier = Modifier.testTag("event_card_${event.id}")) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = event.title,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Surface(
+                                        color = AmberNode.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "${event.entryCount} entries",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = AmberNode,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = event.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (!event.location.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(event.location, style = MaterialTheme.typography.labelSmall, color = ForestPrimary)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } else {
-                items(entries, key = { it.entry.id }) { item ->
-                    JournalEntryTimelineCard(
-                        item = item,
-                        formattedDate = dateFormat.format(Date(item.entry.journalDate)),
-                        onClick = { onNavigateToDetail(item.entry.id) },
-                        onEntityClick = onNavigateToEntity,
-                        onTagClick = { tag -> viewModel.setTagFilter(tag) }
-                    )
+                // Journal Entries Stream
+                if (entries.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No journal entries found",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Tap the + button to record your first private memory",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                } else {
+                    items(entries, key = { it.entry.id }) { item ->
+                        JournalEntryTimelineCard(
+                            item = item,
+                            formattedDate = dateFormat.format(Date(item.entry.journalDate)),
+                            onClick = { onNavigateToDetail(item.entry.id) },
+                            onEntityClick = onNavigateToEntity,
+                            onTagClick = { tag -> viewModel.setTagFilter(tag) }
+                        )
+                    }
                 }
             }
         }

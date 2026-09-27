@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,16 +16,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
@@ -61,13 +68,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.model.AutolinkSpan
+import com.example.data.model.EntityType
+import com.example.data.model.SuggestedTag
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
@@ -96,10 +111,14 @@ fun EntryDetailScreen(
 
     val itemWithRelations by viewModel.selectedEntryDetail.collectAsState()
     val relatedEntries by viewModel.relatedEntries.collectAsState()
+    val autolinkSpans by viewModel.autolinks.collectAsState()
+    val suggestedTags by viewModel.suggestedTags.collectAsState()
     val translationState by viewModel.translationState.collectAsState()
+    val allEntities by viewModel.entities.collectAsState()
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showTranslateSheet by remember { mutableStateOf(false) }
+    var faceToLinkIndex by remember { mutableStateOf<Int?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy • h:mm a", Locale.getDefault())
@@ -241,15 +260,30 @@ fun EntryDetailScreen(
                                 )
                             }
                             if (media.faceCount > 0) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Face, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "${media.faceCount} face${if (media.faceCount > 1) "s" else ""} detected locally",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Face, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "${media.faceCount} face${if (media.faceCount > 1) "s" else ""} detected",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { faceToLinkIndex = 0 },
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp).testTag("link_face_button")
+                                    ) {
+                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Identify Person", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                    }
                                 }
                             }
                             if (media.labelsJson.isNotBlank() && media.labelsJson != "[]") {
@@ -266,7 +300,7 @@ fun EntryDetailScreen(
                                     Icon(Icons.Default.TextFields, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(13.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Extracted text: ${media.ocrText.take(100)}${if (media.ocrText.length > 100) "..." else ""}",
+                                        text = "OCR text: ${media.ocrText.take(120)}${if (media.ocrText.length > 120) "..." else ""}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -279,15 +313,97 @@ fun EntryDetailScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Body
-            Text(
-                text = entry.body,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 17.sp,
-                    lineHeight = 28.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            // Body with Autolinking Annotations (MindForger style)
+            if (autolinkSpans.isEmpty()) {
+                Text(
+                    text = entry.body,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 17.sp,
+                        lineHeight = 28.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            } else {
+                AutolinkedText(
+                    fullText = entry.body,
+                    spans = autolinkSpans,
+                    onEntityClick = onNavigateToEntity
+                )
+            }
+
+            // Autolinks Summary Row if discovered
+            if (autolinkSpans.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.Link, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Autolink active: tap highlighted terms in text to explore knowledge pages",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Suggested Topics / Tags (Review section)
+            val pendingSuggested = suggestedTags.filter { it.status == "PENDING" }
+            if (pendingSuggested.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(18.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = AmberNode.copy(alpha = 0.08f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("suggested_tags_card")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Suggested Topics (Auto-detected)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            pendingSuggested.forEach { suggested ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, AmberNode.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
+                                    ) {
+                                        Text("#${suggested.name}", style = MaterialTheme.typography.labelSmall)
+                                        IconButton(
+                                            onClick = { viewModel.acceptSuggestedTag(suggested) },
+                                            modifier = Modifier.size(24.dp).testTag("accept_tag_${suggested.name}")
+                                        ) {
+                                            Icon(Icons.Default.Check, contentDescription = "Accept Tag", tint = ForestPrimary, modifier = Modifier.size(13.dp))
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.dismissSuggestedTag(suggested.id) },
+                                            modifier = Modifier.size(24.dp).testTag("dismiss_tag_${suggested.name}")
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Dismiss Tag", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(13.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Extracted Entities
             if (!itemWithRelations?.entities.isNullOrEmpty()) {
@@ -315,7 +431,7 @@ fun EntryDetailScreen(
                 }
             }
 
-            // Tags
+            // Permanent Tags
             if (!itemWithRelations?.tags.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
@@ -409,6 +525,44 @@ fun EntryDetailScreen(
         }
     }
 
+    // Face Link Dialog
+    faceToLinkIndex?.let { faceIdx ->
+        val people = allEntities.filter { it.type == EntityType.PERSON }
+        val mediaId = itemWithRelations?.mediaItems?.firstOrNull()?.id ?: 0L
+
+        AlertDialog(
+            onDismissRequest = { faceToLinkIndex = null },
+            title = { Text("Link Face to Person") },
+            text = {
+                Column {
+                    Text("Select a known person entity to associate with this face:", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (people.isEmpty()) {
+                        Text("No person entities detected yet.", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        people.forEach { person ->
+                            TextButton(
+                                onClick = {
+                                    viewModel.associateFaceWithPerson(mediaId, faceIdx, person.id)
+                                    faceToLinkIndex = null
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(person.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { faceToLinkIndex = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Delete Confirmation Dialog
     if (showDeleteConfirm) {
         AlertDialog(
@@ -435,7 +589,7 @@ fun EntryDetailScreen(
         )
     }
 
-    // Offline Translation Bottom Sheet (ML Kit on-device)
+    // Offline Translation Bottom Sheet
     if (showTranslateSheet) {
         ModalBottomSheet(
             onDismissRequest = { showTranslateSheet = false },
@@ -457,14 +611,13 @@ fun EntryDetailScreen(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Powered by Google ML Kit. Models run entirely on-device with zero internet required once downloaded.",
+                    text = "Powered by Google ML Kit. Models execute entirely locally on-device without internet once downloaded.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Language Selector
                 var expanded by remember { mutableStateOf(false) }
                 val targetLang = translationState.targetLanguage
                 val selectedLangName = MlKitAnalyzer.POPULAR_LANGUAGES.find { it.code == targetLang }?.displayName ?: targetLang
@@ -501,7 +654,6 @@ fun EntryDetailScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Action Button: Download model if needed or Translate
                 Button(
                     onClick = {
                         viewModel.translateEntry(
@@ -515,7 +667,7 @@ fun EntryDetailScreen(
                     modifier = Modifier.fillMaxWidth().testTag("perform_translate_button")
                 ) {
                     if (translationState.isTranslating) {
-                        CircularProgressIndicator(color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(18.dp))
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Translating On-Device...")
                     } else {
@@ -526,7 +678,7 @@ fun EntryDetailScreen(
                 if (translationState.errorMessage != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Notice: ${translationState.errorMessage}. You can download language packs in Settings.",
+                        text = "Notice: ${translationState.errorMessage}. Language pack can be downloaded in Settings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -559,4 +711,67 @@ fun EntryDetailScreen(
             }
         }
     }
+}
+
+/**
+ * Renders body text with interactive autolink spans.
+ * Tapping an annotated entity jumps directly to its knowledge page.
+ */
+@Composable
+private fun AutolinkedText(
+    fullText: String,
+    spans: List<AutolinkSpan>,
+    onEntityClick: (Long) -> Unit
+) {
+    val annotatedString = buildAnnotatedString {
+        var currentIndex = 0
+        val sortedSpans = spans.sortedBy { it.startOffset }
+
+        for (span in sortedSpans) {
+            if (span.startOffset < currentIndex || span.endOffset > fullText.length) continue
+
+            // Text before the entity
+            if (span.startOffset > currentIndex) {
+                append(fullText.substring(currentIndex, span.startOffset))
+            }
+
+            // Entity Span
+            pushStringAnnotation(tag = "ENTITY_LINK", annotation = span.entityId.toString())
+            pushStyle(
+                SpanStyle(
+                    color = ForestPrimary,
+                    fontWeight = FontWeight.Bold,
+                    textDecoration = TextDecoration.Underline
+                )
+            )
+            append(fullText.substring(span.startOffset, span.endOffset))
+            pop()
+            pop()
+
+            currentIndex = span.endOffset
+        }
+
+        // Remainder of text
+        if (currentIndex < fullText.length) {
+            append(fullText.substring(currentIndex))
+        }
+    }
+
+    ClickableText(
+        text = annotatedString,
+        style = TextStyle(
+            fontSize = 17.sp,
+            lineHeight = 28.sp,
+            fontFamily = FontFamily.SansSerif,
+            color = MaterialTheme.colorScheme.onSurface
+        ),
+        onClick = { offset ->
+            annotatedString.getStringAnnotations(tag = "ENTITY_LINK", start = offset, end = offset)
+                .firstOrNull()?.let { annotation ->
+                    annotation.item.toLongOrNull()?.let { entityId ->
+                        onEntityClick(entityId)
+                    }
+                }
+        }
+    )
 }
