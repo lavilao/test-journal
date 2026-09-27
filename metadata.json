@@ -1,0 +1,6 @@
+{
+  "name": "Mnemosyne",
+  "description": "Offline-first semantic journal and personal knowledge graph with local MLKit and MindForger-inspired intelligence",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

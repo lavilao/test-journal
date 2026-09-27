@@ -1,0 +1,266 @@
+package com.example.viewmodel
+
+import android.app.Application
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.model.EntityItem
+import com.example.data.model.EntityType
+import com.example.data.model.EntityWithEntries
+import com.example.data.model.EntryWithRelations
+import com.example.data.model.HybridSearchResult
+import com.example.data.model.JournalEntry
+import com.example.data.model.KnowledgeGraphData
+import com.example.data.model.RelatedEntryDetail
+import com.example.data.model.Tag
+import com.example.repository.JournalRepository
+import com.example.semantic.MlKitAnalyzer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+enum class MainNavTab {
+    TIMELINE,
+    GRAPH,
+    ENTITIES,
+    SEARCH,
+    SETTINGS
+}
+
+data class TranslationUiState(
+    val isTranslating: Boolean = false,
+    val sourceLanguage: String = "en",
+    val targetLanguage: String = "es",
+    val translatedText: String? = null,
+    val errorMessage: String? = null,
+    val isModelDownloaded: Boolean = false
+)
+
+class JournalViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repository = JournalRepository(application)
+
+    val currentTab = MutableStateFlow(MainNavTab.TIMELINE)
+
+    val entries: StateFlow<List<EntryWithRelations>> = repository.allEntriesWithRelations
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val entities: StateFlow<List<EntityItem>> = repository.allEntities
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val tags: StateFlow<List<Tag>> = repository.allTags
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Selected Entry for Detail / Edit
+    private val _selectedEntryId = MutableStateFlow<Long?>(null)
+    val selectedEntryId: StateFlow<Long?> = _selectedEntryId.asStateFlow()
+
+    private val _selectedEntryDetail = MutableStateFlow<EntryWithRelations?>(null)
+    val selectedEntryDetail: StateFlow<EntryWithRelations?> = _selectedEntryDetail.asStateFlow()
+
+    private val _relatedEntries = MutableStateFlow<List<RelatedEntryDetail>>(emptyList())
+    val relatedEntries: StateFlow<List<RelatedEntryDetail>> = _relatedEntries.asStateFlow()
+
+    // Selected Entity
+    private val _selectedEntityDetail = MutableStateFlow<EntityWithEntries?>(null)
+    val selectedEntityDetail: StateFlow<EntityWithEntries?> = _selectedEntityDetail.asStateFlow()
+
+    // Knowledge Graph
+    private val _graphData = MutableStateFlow(KnowledgeGraphData())
+    val graphData: StateFlow<KnowledgeGraphData> = _graphData.asStateFlow()
+    val isGraphLoading = MutableStateFlow(false)
+
+    // Search
+    val searchQuery = MutableStateFlow("")
+    private val _searchResults = MutableStateFlow<List<HybridSearchResult>>(emptyList())
+    val searchResults: StateFlow<List<HybridSearchResult>> = _searchResults.asStateFlow()
+    val isSearching = MutableStateFlow(false)
+
+    // Translation
+    val translationState = MutableStateFlow(TranslationUiState())
+
+    // Timeline Filter
+    val timelineFilterTag = MutableStateFlow<String?>(null)
+    val timelineFilterEntity = MutableStateFlow<String?>(null)
+
+    val filteredEntries: StateFlow<List<EntryWithRelations>> = combine(
+        entries,
+        timelineFilterTag,
+        timelineFilterEntity
+    ) { all, tagFilter, entityFilter ->
+        all.filter { item ->
+            val matchTag = tagFilter == null || item.tags.any { it.name.equals(tagFilter, ignoreCase = true) }
+            val matchEntity = entityFilter == null || item.entities.any { it.displayName.equals(entityFilter, ignoreCase = true) }
+            matchTag && matchEntity
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        viewModelScope.launch {
+            repository.seedInitialDataIfEmpty()
+            refreshGraph()
+        }
+    }
+
+    fun selectTab(tab: MainNavTab) {
+        currentTab.value = tab
+        if (tab == MainNavTab.GRAPH) {
+            refreshGraph()
+        }
+    }
+
+    fun setTagFilter(tag: String?) {
+        timelineFilterTag.value = tag
+    }
+
+    fun setEntityFilter(entity: String?) {
+        timelineFilterEntity.value = entity
+    }
+
+    fun clearFilters() {
+        timelineFilterTag.value = null
+        timelineFilterEntity.value = null
+    }
+
+    fun selectEntry(id: Long) {
+        _selectedEntryId.value = id
+        viewModelScope.launch {
+            repository.getEntryWithRelations(id).collect {
+                _selectedEntryDetail.value = it
+            }
+        }
+        viewModelScope.launch {
+            repository.getRelatedEntries(id).collect {
+                _relatedEntries.value = it
+            }
+        }
+    }
+
+    fun selectEntity(entityId: Long) {
+        viewModelScope.launch {
+            repository.getEntityWithEntries(entityId).collect {
+                _selectedEntityDetail.value = it
+            }
+        }
+    }
+
+    fun clearSelectedEntity() {
+        _selectedEntityDetail.value = null
+    }
+
+    fun clearSelectedEntry() {
+        _selectedEntryId.value = null
+        _selectedEntryDetail.value = null
+        _relatedEntries.value = emptyList()
+        translationState.value = TranslationUiState()
+    }
+
+    fun saveEntry(
+        id: Long = 0,
+        title: String,
+        body: String,
+        journalDate: Long = System.currentTimeMillis(),
+        mood: String? = null,
+        location: String? = null,
+        manualTags: List<String> = emptyList(),
+        attachedImageUri: Uri? = null,
+        onComplete: (Long) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val entry = JournalEntry(
+                id = id,
+                title = title.trim(),
+                body = body.trim(),
+                journalDate = journalDate,
+                mood = mood,
+                location = location?.trim()?.ifBlank { null }
+            )
+            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri)
+            refreshGraph()
+            onComplete(savedId)
+        }
+    }
+
+    fun deleteEntry(entryId: Long) {
+        viewModelScope.launch {
+            repository.deleteEntry(entryId)
+            clearSelectedEntry()
+            refreshGraph()
+        }
+    }
+
+    fun onSearchQueryChanged(query: String) {
+        searchQuery.value = query
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            isSearching.value = true
+            _searchResults.value = repository.searchHybrid(query)
+            isSearching.value = false
+        }
+    }
+
+    fun refreshGraph() {
+        viewModelScope.launch {
+            isGraphLoading.value = true
+            _graphData.value = repository.getKnowledgeGraphData()
+            isGraphLoading.value = false
+        }
+    }
+
+    fun checkTranslationModel(targetLang: String) {
+        viewModelScope.launch {
+            val downloaded = MlKitAnalyzer.isModelDownloaded(targetLang)
+            translationState.value = translationState.value.copy(
+                targetLanguage = targetLang,
+                isModelDownloaded = downloaded
+            )
+        }
+    }
+
+    fun translateEntry(entryText: String, sourceLang: String = "en", targetLang: String) {
+        viewModelScope.launch {
+            translationState.value = translationState.value.copy(
+                isTranslating = true,
+                targetLanguage = targetLang,
+                errorMessage = null
+            )
+            val result = MlKitAnalyzer.translateText(entryText, sourceLang, targetLang)
+            result.fold(
+                onSuccess = { translated ->
+                    translationState.value = translationState.value.copy(
+                        isTranslating = false,
+                        translatedText = translated,
+                        isModelDownloaded = true
+                    )
+                },
+                onFailure = { error ->
+                    translationState.value = translationState.value.copy(
+                        isTranslating = false,
+                        errorMessage = error.localizedMessage ?: "Translation failed"
+                    )
+                }
+            )
+        }
+    }
+
+    fun downloadTranslationModel(targetLang: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = MlKitAnalyzer.downloadTranslationModel(targetLang)
+            if (success) {
+                checkTranslationModel(targetLang)
+            }
+            onDone(success)
+        }
+    }
+
+    suspend fun getExportJson(): String = repository.exportToJson()
+
+    suspend fun getExportMarkdown(): String = repository.exportToMarkdownBundle()
+}
