@@ -1,10 +1,14 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,19 +32,27 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Mood
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -60,14 +73,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.example.data.model.JournalPage
+import com.example.data.model.JournalTemplate
+import com.example.media.RecordingState
+import com.example.media.VoiceJournalManager
 import com.example.semantic.MindForgerSemanticEngine
+import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
-import com.example.ui.components.TagChip
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
@@ -81,7 +100,11 @@ fun EntryEditScreen(
     onBack: () -> Unit,
     onSaved: (Long) -> Unit
 ) {
+    val context = LocalContext.current
     val existingEntryDetail by viewModel.selectedEntryDetail.collectAsState()
+    val recordingState by viewModel.voiceManager.recordingState.collectAsState()
+    val isRecording = recordingState == RecordingState.RECORDING || recordingState == RecordingState.PAUSED
+    val isPaused = recordingState == RecordingState.PAUSED
 
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
@@ -91,6 +114,12 @@ fun EntryEditScreen(
     val tagsList = remember { mutableStateListOf<String>() }
     var newTagInput by remember { mutableStateOf("") }
 
+    // Multi-page sections
+    val pages = remember { mutableStateListOf<JournalPage>() }
+    var showAddPageDialog by remember { mutableStateOf(false) }
+    var newPageTitle by remember { mutableStateOf("") }
+    var newPageBody by remember { mutableStateOf("") }
+
     val moods = listOf("Thoughtful", "Inspired", "Peaceful", "Focused", "Joyful", "Adventurous")
 
     // Image Picker using zero-permission Android Photo Picker
@@ -99,6 +128,17 @@ fun EntryEditScreen(
     ) { uri ->
         if (uri != null) {
             attachedImageUri = uri
+        }
+    }
+
+    // Audio recording permission launcher
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.startVoiceRecording()
+        } else {
+            Toast.makeText(context, "Microphone permission is required for voice journal notes", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -119,6 +159,8 @@ fun EntryEditScreen(
             item.entry.imageUri?.let { attachedImageUri = Uri.parse(it) }
             tagsList.clear()
             tagsList.addAll(item.tags.map { it.name })
+            pages.clear()
+            pages.addAll(item.pages)
         }
     }
 
@@ -165,6 +207,7 @@ fun EntryEditScreen(
                                     location = location,
                                     manualTags = tagsList.toList(),
                                     attachedImageUri = attachedImageUri,
+                                    pages = pages.toList(),
                                     onComplete = onSaved
                                 )
                             }
@@ -191,6 +234,45 @@ fun EntryEditScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp)
         ) {
+            // Quick Reusable Templates Picker
+            if (entryId == null || entryId == 0L) {
+                Text(
+                    text = "Journal Templates",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    JournalTemplate.ALL_TEMPLATES.forEach { tmpl ->
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                if (title.isBlank()) title = tmpl.defaultTitle.ifBlank { tmpl.name }
+                                if (body.isBlank()) {
+                                    body = tmpl.defaultBody
+                                } else {
+                                    body = "$body\n\n${tmpl.defaultBody}"
+                                }
+                                tmpl.defaultTags.forEach { t ->
+                                    if (t !in tagsList) tagsList.add(t)
+                                }
+                                tmpl.defaultMood?.let { m -> selectedMood = m }
+                            },
+                            label = { Text(tmpl.name) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(14.dp))
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
             // Title Input
             OutlinedTextField(
                 value = title,
@@ -220,7 +302,7 @@ fun EntryEditScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 moods.forEach { mood ->
@@ -300,6 +382,92 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Voice Journal Recording Bar
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isRecording) TerracottaAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("voice_recorder_card")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isRecording) TerracottaAccent else ForestPrimary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = null,
+                                    tint = if (isRecording) androidx.compose.ui.graphics.Color.White else ForestPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = if (isRecording) "Recording Voice Note..." else "Voice Journal Note",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = if (isRecording) "Transcribing locally after stop" else "Tap mic to record audio with offline speech-to-text",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (!isRecording) {
+                        IconButton(
+                            onClick = {
+                                val hasPerm = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPerm) {
+                                    viewModel.startVoiceRecording()
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            modifier = Modifier.testTag("start_voice_recording_btn")
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = "Start Voice Recording", tint = ForestPrimary)
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isPaused) {
+                                IconButton(onClick = { viewModel.resumeVoiceRecording() }) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Resume", tint = ForestPrimary)
+                                }
+                            } else {
+                                IconButton(onClick = { viewModel.pauseVoiceRecording() }) {
+                                    Icon(Icons.Default.Pause, contentDescription = "Pause", tint = ForestPrimary)
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    val targetId = entryId ?: 0L
+                                    viewModel.stopVoiceRecording(targetId, title = "Voice Note (${title.ifBlank { "Journal" }})")
+                                },
+                                modifier = Modifier.testTag("stop_voice_recording_btn")
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = "Stop & Transcribe", tint = TerracottaAccent)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Body Editor
             OutlinedTextField(
                 value = body,
@@ -317,6 +485,62 @@ fun EntryEditScreen(
                     .fillMaxWidth()
                     .testTag("entry_body_input")
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Multi-Page / Section Support
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sections & Sub-Pages (${pages.size})",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                OutlinedButton(
+                    onClick = { showAddPageDialog = true },
+                    modifier = Modifier.testTag("add_page_button")
+                ) {
+                    Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Section")
+                }
+            }
+
+            if (pages.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                pages.forEachIndexed { index, page ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = page.title.ifBlank { "Section ${index + 1}" },
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = page.body.take(150),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(onClick = { pages.removeAt(index) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete section", tint = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -436,5 +660,58 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+
+    // Add Section / Sub-Page Dialog
+    if (showAddPageDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAddPageDialog = false },
+            title = { Text("Add Section / Page") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newPageTitle,
+                        onValueChange = { newPageTitle = it },
+                        label = { Text("Section Title (e.g. Day 2, Quotes)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newPageBody,
+                        onValueChange = { newPageBody = it },
+                        label = { Text("Content") },
+                        minLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newPageTitle.isNotBlank() || newPageBody.isNotBlank()) {
+                            pages.add(
+                                JournalPage(
+                                    entryId = entryId ?: 0L,
+                                    pageIndex = pages.size,
+                                    title = newPageTitle.trim(),
+                                    body = newPageBody.trim()
+                                )
+                            )
+                            newPageTitle = ""
+                            newPageBody = ""
+                            showAddPageDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showAddPageDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

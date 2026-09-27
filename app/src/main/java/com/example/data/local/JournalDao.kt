@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import com.example.data.model.AudioRecordItem
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityMention
 import com.example.data.model.EntityType
@@ -17,6 +18,7 @@ import com.example.data.model.EntryWithRelations
 import com.example.data.model.EventItem
 import com.example.data.model.FacePersonAssociation
 import com.example.data.model.JournalEntry
+import com.example.data.model.JournalPage
 import com.example.data.model.MediaItem
 import com.example.data.model.Relationship
 import com.example.data.model.SuggestedTag
@@ -220,4 +222,64 @@ interface JournalDao {
 
     @Query("UPDATE journal_entries SET processedContentHash = ''")
     suspend fun resetAllProcessedContentHashes()
+
+    // === Multi-page Support ===
+    @Query("SELECT * FROM journal_pages WHERE entryId = :entryId ORDER BY pageIndex ASC")
+    fun getPagesForEntry(entryId: Long): Flow<List<JournalPage>>
+
+    @Query("SELECT * FROM journal_pages WHERE entryId = :entryId ORDER BY pageIndex ASC")
+    suspend fun getPagesForEntrySnapshot(entryId: Long): List<JournalPage>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPage(page: JournalPage): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPages(pages: List<JournalPage>)
+
+    @Update
+    suspend fun updatePage(page: JournalPage)
+
+    @Delete
+    suspend fun deletePage(page: JournalPage)
+
+    @Query("DELETE FROM journal_pages WHERE entryId = :entryId")
+    suspend fun deletePagesForEntry(entryId: Long)
+
+    @Query("DELETE FROM journal_pages WHERE id = :pageId")
+    suspend fun deletePageById(pageId: Long)
+
+    // === Audio Records (Voice Journal) ===
+    @Query("SELECT * FROM audio_records WHERE entryId = :entryId ORDER BY createdAt DESC")
+    fun getAudioRecordsForEntry(entryId: Long): Flow<List<AudioRecordItem>>
+
+    @Query("SELECT * FROM audio_records WHERE entryId = :entryId ORDER BY createdAt DESC")
+    suspend fun getAudioRecordsForEntrySnapshot(entryId: Long): List<AudioRecordItem>
+
+    @Query("SELECT * FROM audio_records")
+    suspend fun getAllAudioRecordsSnapshot(): List<AudioRecordItem>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAudioRecord(item: AudioRecordItem): Long
+
+    @Update
+    suspend fun updateAudioRecord(item: AudioRecordItem)
+
+    @Query("DELETE FROM audio_records WHERE id = :id")
+    suspend fun deleteAudioRecordById(id: Long)
+
+    @Query("DELETE FROM audio_records WHERE entryId = :entryId")
+    suspend fun deleteAudioRecordsForEntry(entryId: Long)
+
+    // === Media Item Updates ===
+    @Update
+    suspend fun updateMediaItem(item: MediaItem)
+
+    @Query("SELECT * FROM media_items WHERE id = :id LIMIT 1")
+    suspend fun getMediaById(id: Long): MediaItem?
+
+    @Query("DELETE FROM media_items WHERE id = :id")
+    suspend fun deleteMediaById(id: Long)
+
+    @Query("SELECT * FROM media_items")
+    suspend fun getAllMediaSnapshot(): List<MediaItem>
 }

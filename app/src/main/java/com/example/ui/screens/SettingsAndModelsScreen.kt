@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Lock
@@ -83,8 +84,10 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
     var downloadingModelCode by remember { mutableStateOf<String?>(null) }
     var isEntityModelDownloaded by remember { mutableStateOf(false) }
     var isDownloadingEntityModel by remember { mutableStateOf(false) }
+    val storageBreakdown by viewModel.storageBreakdown.collectAsState()
 
     LaunchedEffect(Unit) {
+        viewModel.refreshStorageBreakdown()
         isEntityModelDownloaded = MlKitAnalyzer.isEntityModelDownloaded()
         MlKitAnalyzer.POPULAR_LANGUAGES.forEach { lang ->
             downloadedModels[lang.code] = MlKitAnalyzer.isModelDownloaded(lang.code)
@@ -333,6 +336,83 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // Storage & Cache Management
+        Text(
+            text = "Storage & Regenerable Cache",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Inspect local device storage usage. OCR cache and semantic indices can be safely pruned and regenerated anytime.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        EditorialCard {
+            Column(modifier = Modifier.padding(16.dp)) {
+                val breakdown = storageBreakdown
+                val totalBytes = breakdown.textEstimatedBytes + breakdown.photoBytes + breakdown.audioBytes + breakdown.databaseBytes
+                fun fmt(b: Long): String {
+                    return when {
+                        b >= 1024 * 1024 -> String.format(java.util.Locale.getDefault(), "%.1f MB", b / (1024f * 1024f))
+                        b >= 1024 -> String.format(java.util.Locale.getDefault(), "%.1f KB", b / 1024f)
+                        else -> "$b B"
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Total Storage Used", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Text(fmt(totalBytes), style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val items = listOf<Pair<String, Long>>(
+                    "Journal Text (${breakdown.entryCount} entries, ${breakdown.pageCount} pages)" to breakdown.textEstimatedBytes,
+                    "Photos & Media (${breakdown.photoCount} photos)" to breakdown.photoBytes,
+                    "Voice Notes (${breakdown.audioCount} recordings)" to breakdown.audioBytes,
+                    "OCR Cache (${breakdown.ocrCharCount} chars extracted)" to (breakdown.ocrCharCount * 2L),
+                    "Semantic Graph (${breakdown.entityCount} entities, ${breakdown.relationshipCount} links)" to (breakdown.entityCount * 64L + breakdown.relationshipCount * 32L),
+                    "SQLite Database" to breakdown.databaseBytes
+                )
+
+                items.forEach { (label, bytes) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(fmt(bytes), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        viewModel.clearOcrCache {
+                            Toast.makeText(context, "OCR cache cleared! Can be regenerated anytime.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("clear_ocr_cache_button")
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Clear OCR Cache (Safe)")
                 }
             }
         }

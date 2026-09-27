@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.AudioRecordItem
 import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityWithEntries
@@ -12,11 +13,17 @@ import com.example.data.model.EventItem
 import com.example.data.model.FacePersonAssociation
 import com.example.data.model.HybridSearchResult
 import com.example.data.model.JournalEntry
+import com.example.data.model.JournalPage
+import com.example.data.model.JournalTemplate
 import com.example.data.model.KnowledgeGraphData
 import com.example.data.model.MediaItem
 import com.example.data.model.RelatedEntryDetail
+import com.example.data.model.StorageBreakdown
 import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
+import com.example.media.PlaybackState
+import com.example.media.RecordingState
+import com.example.media.VoiceJournalManager
 import com.example.repository.JournalRepository
 import com.example.semantic.MlKitAnalyzer
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,6 +102,18 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     private val _graphData = MutableStateFlow(KnowledgeGraphData())
     val graphData: StateFlow<KnowledgeGraphData> = _graphData.asStateFlow()
     val isGraphLoading = MutableStateFlow(false)
+
+    // Voice Journal Manager
+    val voiceManager = VoiceJournalManager(application)
+    val recordingState: StateFlow<RecordingState> = voiceManager.recordingState
+    val playbackState: StateFlow<PlaybackState> = voiceManager.playbackState
+    val currentPlayingPath: StateFlow<String?> = voiceManager.currentPlayingPath
+
+    // Storage Management
+    private val _storageBreakdown = MutableStateFlow(StorageBreakdown())
+    val storageBreakdown: StateFlow<StorageBreakdown> = _storageBreakdown.asStateFlow()
+
+    val availableTemplates = JournalTemplate.ALL_TEMPLATES
 
     // Search
     val searchQuery = MutableStateFlow("")
@@ -215,6 +234,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         location: String? = null,
         manualTags: List<String> = emptyList(),
         attachedImageUri: Uri? = null,
+        pages: List<JournalPage> = emptyList(),
         onComplete: (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -226,12 +246,109 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 mood = mood,
                 location = location?.trim()?.ifBlank { null }
             )
-            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri)
+            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages)
             refreshGraph()
             refreshOnThisDay()
             onComplete(savedId)
         }
     }
+
+    // Voice Journal Actions
+    fun startVoiceRecording() {
+        voiceManager.startRecording()
+    }
+
+    fun pauseVoiceRecording() {
+        voiceManager.pauseRecording()
+    }
+
+    fun resumeVoiceRecording() {
+        voiceManager.resumeRecording()
+    }
+
+    fun stopVoiceRecording(entryId: Long, title: String = "Voice Note") {
+        viewModelScope.launch {
+            val (file, duration) = voiceManager.stopRecording()
+            if (file != null && file.exists()) {
+                val filePath = file.absolutePath
+                voiceManager.transcribeAudioOffline { transcript, status ->
+                    viewModelScope.launch {
+                        repository.addAudioRecord(
+                            entryId = entryId,
+                            title = title,
+                            filePath = filePath,
+                            durationMs = duration,
+                            transcript = transcript,
+                            status = status
+                        )
+                        selectEntry(entryId)
+                    }
+                }
+            }
+        }
+    }
+
+    fun playAudio(path: String) {
+        voiceManager.startPlayback(path)
+    }
+
+    fun pauseAudio() {
+        voiceManager.pausePlayback()
+    }
+
+    fun resumeAudio() {
+        voiceManager.resumePlayback()
+    }
+
+    fun stopAudio() {
+        voiceManager.stopPlayback()
+    }
+
+    fun deleteAudio(audioId: Long, entryId: Long) {
+        viewModelScope.launch {
+            repository.deleteAudioRecord(audioId, entryId)
+            selectEntry(entryId)
+        }
+    }
+
+    // Photo Album Actions
+    fun addPhoto(entryId: Long, uri: Uri, caption: String = "") {
+        viewModelScope.launch {
+            repository.addPhotoToEntry(entryId, uri, caption)
+            selectEntry(entryId)
+        }
+    }
+
+    fun updatePhotoCaption(mediaId: Long, caption: String, entryId: Long) {
+        viewModelScope.launch {
+            repository.updatePhotoCaption(mediaId, caption)
+            selectEntry(entryId)
+        }
+    }
+
+    fun deletePhoto(mediaId: Long, entryId: Long) {
+        viewModelScope.launch {
+            repository.deletePhoto(mediaId)
+            selectEntry(entryId)
+        }
+    }
+
+    // Multi-page Actions
+    fun savePage(page: JournalPage, entryId: Long) {
+        viewModelScope.launch {
+            repository.savePage(page)
+            selectEntry(entryId)
+        }
+    }
+
+    fun deletePage(pageId: Long, entryId: Long) {
+        viewModelScope.launch {
+            repository.deletePage(pageId, entryId)
+            selectEntry(entryId)
+        }
+    }
+
+
 
     fun deleteEntry(entryId: Long) {
         viewModelScope.launch {
@@ -335,6 +452,20 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 checkTranslationModel(targetLang)
             }
             onDone(success)
+        }
+    }
+
+    fun refreshStorageBreakdown() {
+        viewModelScope.launch {
+            _storageBreakdown.value = repository.getStorageBreakdown()
+        }
+    }
+
+    fun clearOcrCache(onCleared: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.clearOcrCache()
+            refreshStorageBreakdown()
+            onCleared()
         }
     }
 

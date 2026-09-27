@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.model.AudioRecordItem
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityMention
 import com.example.data.model.EntryEntityCrossRef
@@ -14,6 +15,7 @@ import com.example.data.model.EntryTagCrossRef
 import com.example.data.model.EventItem
 import com.example.data.model.FacePersonAssociation
 import com.example.data.model.JournalEntry
+import com.example.data.model.JournalPage
 import com.example.data.model.MediaItem
 import com.example.data.model.Relationship
 import com.example.data.model.SuggestedTag
@@ -22,6 +24,8 @@ import com.example.data.model.Tag
 @Database(
     entities = [
         JournalEntry::class,
+        JournalPage::class,
+        AudioRecordItem::class,
         Tag::class,
         EntryTagCrossRef::class,
         EntityItem::class,
@@ -33,7 +37,7 @@ import com.example.data.model.Tag
         Relationship::class,
         MediaItem::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -110,6 +114,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `journal_pages` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `entryId` INTEGER NOT NULL,
+                        `pageIndex` INTEGER NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `body` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `contentHash` TEXT NOT NULL,
+                        `processedContentHash` TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_journal_pages_entryId` ON `journal_pages` (`entryId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_journal_pages_entryId_pageIndex` ON `journal_pages` (`entryId`, `pageIndex`)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `audio_records` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `entryId` INTEGER NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `filePath` TEXT NOT NULL,
+                        `durationMs` INTEGER NOT NULL,
+                        `transcript` TEXT NOT NULL,
+                        `transcriptionStatus` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_audio_records_entryId` ON `audio_records` (`entryId`)")
+
+                db.execSQL("ALTER TABLE `media_items` ADD COLUMN `caption` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `media_items` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_items_entryId_sortOrder` ON `media_items` (`entryId`, `sortOrder`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -117,7 +159,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

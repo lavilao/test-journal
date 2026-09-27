@@ -46,7 +46,19 @@ data class EntryWithRelations(
         parentColumn = "id",
         entityColumn = "entryId"
     )
-    val suggestedTags: List<SuggestedTag> = emptyList()
+    val suggestedTags: List<SuggestedTag> = emptyList(),
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "entryId"
+    )
+    val pages: List<JournalPage> = emptyList(),
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "entryId"
+    )
+    val audioRecords: List<AudioRecordItem> = emptyList()
 )
 
 data class RelatedEntryDetail(

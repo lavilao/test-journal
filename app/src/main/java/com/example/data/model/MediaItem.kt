@@ -6,7 +6,10 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "media_items",
-    indices = [Index(value = ["entryId"])]
+    indices = [
+        Index(value = ["entryId"]),
+        Index(value = ["entryId", "sortOrder"])
+    ]
 )
 data class MediaItem(
     @PrimaryKey(autoGenerate = true)
@@ -17,5 +20,7 @@ data class MediaItem(
     val labelsJson: String = "", // JSON list of detected labels
     val faceCount: Int = 0,
     val ocrText: String = "",
+    val caption: String = "",
+    val sortOrder: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )

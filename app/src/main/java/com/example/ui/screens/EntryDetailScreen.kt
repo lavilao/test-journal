@@ -25,13 +25,19 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
@@ -83,6 +89,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityType
 import com.example.data.model.SuggestedTag
+import com.example.media.PlaybackState
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
@@ -115,6 +122,8 @@ fun EntryDetailScreen(
     val suggestedTags by viewModel.suggestedTags.collectAsState()
     val translationState by viewModel.translationState.collectAsState()
     val allEntities by viewModel.entities.collectAsState()
+    val playbackState by viewModel.voiceManager.playbackState.collectAsState()
+    val currentPlayingPath by viewModel.voiceManager.currentPlayingPath.collectAsState()
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showTranslateSheet by remember { mutableStateOf(false) }
@@ -347,6 +356,121 @@ fun EntryDetailScreen(
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            // Multi-Page Sections
+            val pages = itemWithRelations?.pages.orEmpty()
+            if (pages.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Sections & Sub-Pages (${pages.size})",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                pages.forEachIndexed { idx, p ->
+                    EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("entry_page_${p.id}")) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = p.title.ifBlank { "Section ${idx + 1}" },
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = p.body,
+                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Voice Journal / Audio Recordings
+            val audioRecords = itemWithRelations?.audioRecords.orEmpty()
+            if (audioRecords.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Voice Journal (${audioRecords.size})",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                audioRecords.forEach { record ->
+                    val isThisPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath
+                    EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("audio_record_${record.id}")) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = record.title.ifBlank { "Voice Note" },
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    val durationSec = record.durationMs / 1000
+                                    Text(
+                                        text = "${durationSec / 60}m ${durationSec % 60}s • Local audio recording",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (isThisPlaying) {
+                                            viewModel.stopAudio()
+                                        } else {
+                                            viewModel.playAudio(record.filePath)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("play_pause_audio_${record.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isThisPlaying) "Pause" else "Play",
+                                        tint = ForestPrimary,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
+                            if (record.transcript.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "On-Device Transcription:",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = ForestPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = record.transcript,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

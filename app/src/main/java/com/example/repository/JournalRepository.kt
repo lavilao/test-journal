@@ -3,6 +3,7 @@ package com.example.repository
 import android.content.Context
 import android.net.Uri
 import com.example.data.local.AppDatabase
+import com.example.data.model.AudioRecordItem
 import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityMention
@@ -18,12 +19,15 @@ import com.example.data.model.GraphNode
 import com.example.data.model.GraphNodeType
 import com.example.data.model.HybridSearchResult
 import com.example.data.model.JournalEntry
+import com.example.data.model.JournalPage
 import com.example.data.model.KnowledgeGraphData
 import com.example.data.model.MediaItem
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.Relationship
+import com.example.data.model.StorageBreakdown
 import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
+import java.io.File
 import com.example.semantic.MindForgerSemanticEngine
 import com.example.semantic.MlKitAnalyzer
 import kotlinx.coroutines.CoroutineScope
@@ -109,14 +113,17 @@ class JournalRepository(
 
     /**
      * Immediate save of journal entry, followed by background asynchronous semantic processing.
+     * Auto-save calls this frequently without blocking the UI.
      */
     suspend fun saveEntry(
         entry: JournalEntry,
         manualTags: List<String> = emptyList(),
-        attachedImageUri: Uri? = null
+        attachedImageUri: Uri? = null,
+        pages: List<JournalPage> = emptyList()
     ): Long = withContext(Dispatchers.IO) {
         val wordCount = entry.body.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
-        val currentHash = MindForgerSemanticEngine.computeContentHash(entry.title, entry.body)
+        val pagesText = pages.joinToString("\n") { "${it.title}\n${it.body}" }
+        val currentHash = MindForgerSemanticEngine.computeContentHash(entry.title, "${entry.body}\n$pagesText")
 
         val entryToSave = entry.copy(
             wordCount = wordCount,
@@ -130,6 +137,19 @@ class JournalRepository(
         } else {
             dao.updateEntry(entryToSave)
             entryToSave.id
+        }
+
+        // Save pages
+        if (pages.isNotEmpty()) {
+            pages.forEachIndexed { idx, page ->
+                val pHash = MindForgerSemanticEngine.computeContentHash(page.title, page.body)
+                val pageToSave = page.copy(entryId = entryId, pageIndex = idx, contentHash = pHash, updatedAt = System.currentTimeMillis())
+                if (pageToSave.id == 0L) {
+                    dao.insertPage(pageToSave)
+                } else {
+                    dao.updatePage(pageToSave)
+                }
+            }
         }
 
         // Insert manual tags
@@ -155,7 +175,8 @@ class JournalRepository(
                         uri = uri.toString(),
                         labelsJson = labelsJson,
                         faceCount = analysis.faceCount,
-                        ocrText = analysis.ocrText
+                        ocrText = analysis.ocrText,
+                        caption = ""
                     )
                 )
             }
@@ -169,6 +190,101 @@ class JournalRepository(
         entryId
     }
 
+    suspend fun savePage(page: JournalPage): Long = withContext(Dispatchers.IO) {
+        val pHash = MindForgerSemanticEngine.computeContentHash(page.title, page.body)
+        val toSave = page.copy(contentHash = pHash, updatedAt = System.currentTimeMillis())
+        val id = if (toSave.id == 0L) {
+            dao.insertPage(toSave)
+        } else {
+            dao.updatePage(toSave)
+            toSave.id
+        }
+        semanticScope.launch {
+            processSemanticIntelligence(toSave.entryId)
+        }
+        id
+    }
+
+    suspend fun deletePage(pageId: Long, entryId: Long) = withContext(Dispatchers.IO) {
+        dao.deletePageById(pageId)
+        semanticScope.launch {
+            processSemanticIntelligence(entryId)
+        }
+    }
+
+    suspend fun addPhotoToEntry(entryId: Long, uri: Uri, caption: String = ""): Long = withContext(Dispatchers.IO) {
+        val mediaId = dao.insertMediaItem(
+            MediaItem(
+                entryId = entryId,
+                uri = uri.toString(),
+                caption = caption
+            )
+        )
+        semanticScope.launch {
+            val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
+            val labelsJson = JSONArray(analysis.labels).toString()
+            val existing = dao.getMediaById(mediaId)
+            if (existing != null) {
+                dao.updateMediaItem(
+                    existing.copy(
+                        labelsJson = labelsJson,
+                        faceCount = analysis.faceCount,
+                        ocrText = analysis.ocrText
+                    )
+                )
+            }
+            processSemanticIntelligence(entryId)
+        }
+        mediaId
+    }
+
+    suspend fun updatePhotoCaption(mediaId: Long, caption: String) = withContext(Dispatchers.IO) {
+        val media = dao.getMediaById(mediaId) ?: return@withContext
+        dao.updateMediaItem(media.copy(caption = caption))
+    }
+
+    suspend fun deletePhoto(mediaId: Long) = withContext(Dispatchers.IO) {
+        val media = dao.getMediaById(mediaId)
+        dao.deleteMediaById(mediaId)
+        media?.let {
+            semanticScope.launch {
+                processSemanticIntelligence(it.entryId)
+            }
+        }
+    }
+
+    suspend fun addAudioRecord(
+        entryId: Long,
+        title: String,
+        filePath: String,
+        durationMs: Long,
+        transcript: String,
+        status: String
+    ): Long = withContext(Dispatchers.IO) {
+        val id = dao.insertAudioRecord(
+            AudioRecordItem(
+                entryId = entryId,
+                title = title,
+                filePath = filePath,
+                durationMs = durationMs,
+                transcript = transcript,
+                transcriptionStatus = status
+            )
+        )
+        // Voice -> Memory: Asynchronously process semantic intelligence from transcript
+        semanticScope.launch {
+            processSemanticIntelligence(entryId)
+        }
+        id
+    }
+
+    suspend fun deleteAudioRecord(audioId: Long, entryId: Long) = withContext(Dispatchers.IO) {
+        dao.deleteAudioRecordById(audioId)
+        semanticScope.launch {
+            processSemanticIntelligence(entryId)
+        }
+    }
+
     suspend fun deleteEntry(entryId: Long) = withContext(Dispatchers.IO) {
         dao.clearTagsForEntry(entryId)
         dao.clearEntitiesForEntry(entryId)
@@ -176,6 +292,8 @@ class JournalRepository(
         dao.clearSuggestedTagsForEntry(entryId)
         dao.deleteRelationshipsForEntry(entryId)
         dao.deleteMediaForEntry(entryId)
+        dao.deletePagesForEntry(entryId)
+        dao.deleteAudioRecordsForEntry(entryId)
         dao.deleteEntryById(entryId)
     }
 
@@ -218,12 +336,37 @@ class JournalRepository(
     suspend fun processSemanticIntelligence(entryId: Long) = withContext(Dispatchers.IO) {
         val entry = dao.getEntryById(entryId) ?: return@withContext
         val allEntries = dao.getAllEntriesSnapshot()
+        val pages = dao.getPagesForEntrySnapshot(entryId)
+        val audioRecords = dao.getAudioRecordsForEntrySnapshot(entryId)
+        val mediaList = dao.getMediaForEntry(entryId).first()
+
+        val fullText = buildString {
+            append(entry.title).append("\n").append(entry.body)
+            pages.forEach { p ->
+                append("\n\n").append(p.title).append("\n").append(p.body)
+            }
+            audioRecords.forEach { a ->
+                if (a.transcript.isNotBlank()) {
+                    append("\n\nVoice: ").append(a.transcript)
+                }
+            }
+            mediaList.forEach { m ->
+                if (m.ocrText.isNotBlank()) {
+                    append("\n\nPhoto Text: ").append(m.ocrText)
+                }
+            }
+        }
+
+        val fullHash = MindForgerSemanticEngine.computeContentHash(entry.title, fullText)
+        if (fullHash == entry.processedContentHash && entry.processedContentHash.isNotBlank()) {
+            // Unchanged content, skip re-processing to save battery
+            return@withContext
+        }
 
         // 1. Language Detection via MLKit
-        val detectedLang = MlKitAnalyzer.identifyLanguage("${entry.title} ${entry.body}")
+        val detectedLang = MlKitAnalyzer.identifyLanguage(fullText)
 
         // 2. ML Kit + MindForger Entity Extraction
-        val fullText = "${entry.title}\n${entry.body}"
         val mlKitEntities = MlKitAnalyzer.extractEntitiesWithMlKit(fullText)
         val ruleBasedMentions = MindForgerSemanticEngine.extractEntitiesWithOffsets(fullText)
 
@@ -305,7 +448,6 @@ class JournalRepository(
         // 3. Keyword Extraction & Suggested Tags (kept PENDING for user review)
         val currentEntities = dao.getEntitiesForEntry(entryId)
         val keywords = MindForgerSemanticEngine.extractKeywords(entry, allEntries)
-        val mediaList = dao.getMediaForEntry(entryId).first()
         val imageLabels = mediaList.flatMap {
             try {
                 val arr = JSONArray(it.labelsJson)
@@ -366,7 +508,7 @@ class JournalRepository(
         dao.updateEntry(
             entry.copy(
                 language = detectedLang,
-                processedContentHash = entry.contentHash
+                processedContentHash = fullHash
             )
         )
     }
@@ -390,89 +532,154 @@ class JournalRepository(
     }
 
     /**
-     * Smart Hybrid Search combining Exact Text, BM25 tokens, Tags, Extracted Entities, and OCR.
+     * Smart Hybrid Search combining Exact Text, BM25 tokens, Tags, Extracted Entities, Multi-pages, Voice Transcripts, and OCR.
+     * Supports metadata filters like `place:Miami`, `after:2024`, `before:2026`, `type:audio`, `type:photo`.
      */
     suspend fun searchHybrid(query: String): List<HybridSearchResult> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return@withContext emptyList()
 
+        var placeFilter: String? = null
+        var afterYear: Int? = null
+        var beforeYear: Int? = null
+        var typeFilter: String? = null
+
+        val tokensList = trimmed.split(Regex("\\s+")).toMutableList()
+        val iterator = tokensList.iterator()
+        while (iterator.hasNext()) {
+            val token = iterator.next()
+            if (token.startsWith("place:", ignoreCase = true)) {
+                placeFilter = token.substring(6).trim().lowercase(Locale.ROOT)
+                iterator.remove()
+            } else if (token.startsWith("after:", ignoreCase = true)) {
+                afterYear = token.substring(6).toIntOrNull()
+                iterator.remove()
+            } else if (token.startsWith("before:", ignoreCase = true)) {
+                beforeYear = token.substring(7).toIntOrNull()
+                iterator.remove()
+            } else if (token.startsWith("type:", ignoreCase = true)) {
+                typeFilter = token.substring(5).trim().lowercase(Locale.ROOT)
+                iterator.remove()
+            }
+        }
+
+        val cleanSearch = tokensList.joinToString(" ").trim()
         val allEntries = dao.getAllEntriesWithRelations().first()
-        val queryTokens = MindForgerSemanticEngine.tokenize(trimmed).toSet()
+        val queryTokens = if (cleanSearch.isNotBlank()) MindForgerSemanticEngine.tokenize(cleanSearch).toSet() else emptySet()
 
         val results = mutableListOf<HybridSearchResult>()
 
         allEntries.forEach { item ->
             val entry = item.entry
+
+            // Apply metadata filters
+            if (placeFilter != null) {
+                val matchesLocation = entry.location?.lowercase(Locale.ROOT)?.contains(placeFilter) == true
+                val matchesEntityPlace = item.entities.any { (it.type == EntityType.PLACE || it.type == EntityType.ADDRESS) && it.canonicalName.contains(placeFilter) }
+                if (!matchesLocation && !matchesEntityPlace) return@forEach
+            }
+
+            if (afterYear != null || beforeYear != null) {
+                val cal = Calendar.getInstance().apply { timeInMillis = entry.journalDate }
+                val entryYear = cal.get(Calendar.YEAR)
+                if (afterYear != null && entryYear < afterYear) return@forEach
+                if (beforeYear != null && entryYear > beforeYear) return@forEach
+            }
+
+            if (typeFilter != null) {
+                if (typeFilter == "audio" && item.audioRecords.isEmpty()) return@forEach
+                if (typeFilter == "photo" && item.mediaItems.isEmpty() && item.entry.imageUri.isNullOrBlank()) return@forEach
+            }
+
             var score = 0.0f
             val reasons = mutableListOf<String>()
             val matchedTags = mutableListOf<String>()
             val matchedEntities = mutableListOf<String>()
             val matchedOcrTerms = mutableListOf<String>()
 
-            val lowerTitle = entry.title.lowercase(Locale.ROOT)
-            val lowerBody = entry.body.lowercase(Locale.ROOT)
+            if (cleanSearch.isBlank()) {
+                // Query was only metadata filters
+                score = 0.85f
+                reasons.add("Matches filter")
+            } else {
+                val lowerTitle = entry.title.lowercase(Locale.ROOT)
+                val lowerBody = entry.body.lowercase(Locale.ROOT)
+                val searchLower = cleanSearch.lowercase(Locale.ROOT)
 
-            // 1. Exact match in title
-            if (lowerTitle.contains(trimmed.lowercase(Locale.ROOT))) {
-                score += 0.50f
-                reasons.add("Exact title match")
-            }
-
-            // 2. Exact match in body
-            if (lowerBody.contains(trimmed.lowercase(Locale.ROOT))) {
-                score += 0.35f
-                reasons.add("Exact body match")
-            }
-
-            // 3. Token overlap (BM25 keyword matching)
-            val entryTokens = MindForgerSemanticEngine.tokenize("${entry.title} ${entry.body}").toSet()
-            val sharedTokens = queryTokens.intersect(entryTokens)
-            if (sharedTokens.isNotEmpty()) {
-                val tokenScore = (sharedTokens.size.toFloat() / queryTokens.size) * 0.40f
-                score += tokenScore
-                reasons.add("Keywords: ${sharedTokens.joinToString(", ")}")
-            }
-
-            // 4. Entity match
-            item.entities.forEach { entity ->
-                if (entity.displayName.lowercase(Locale.ROOT).contains(trimmed.lowercase(Locale.ROOT)) ||
-                    queryTokens.any { entity.canonicalName.contains(it) }
-                ) {
-                    score += 0.38f
-                    matchedEntities.add(entity.displayName)
-                    reasons.add("Entity: ${entity.displayName} (${entity.type.name})")
+                // 1. Exact match in title
+                if (lowerTitle.contains(searchLower)) {
+                    score += 0.50f
+                    reasons.add("Exact title match")
                 }
-            }
 
-            // 5. Tag match
-            item.tags.forEach { tag ->
-                if (tag.name.lowercase(Locale.ROOT).contains(trimmed.lowercase(Locale.ROOT)) ||
-                    queryTokens.any { tag.normalizedName.contains(it) }
-                ) {
-                    score += 0.30f
-                    matchedTags.add("#${tag.name}")
-                    reasons.add("Tag: #${tag.name}")
+                // 2. Exact match in body
+                if (lowerBody.contains(searchLower)) {
+                    score += 0.35f
+                    reasons.add("Exact body match")
                 }
-            }
 
-            // 6. OCR Text match
-            item.mediaItems.forEach { media ->
-                if (media.ocrText.lowercase(Locale.ROOT).contains(trimmed.lowercase(Locale.ROOT))) {
-                    score += 0.28f
-                    matchedOcrTerms.add(trimmed)
-                    reasons.add("OCR text in photo")
+                // 3. Multi-page match
+                item.pages.forEach { page ->
+                    if (page.title.lowercase(Locale.ROOT).contains(searchLower) || page.body.lowercase(Locale.ROOT).contains(searchLower)) {
+                        score += 0.30f
+                        reasons.add("In section: ${page.title}")
+                    }
+                }
+
+                // 4. Voice transcript match
+                item.audioRecords.forEach { audio ->
+                    if (audio.transcript.lowercase(Locale.ROOT).contains(searchLower)) {
+                        score += 0.35f
+                        reasons.add("In voice note")
+                    }
+                }
+
+                // 5. Token overlap (BM25 keyword matching)
+                val allTokens = MindForgerSemanticEngine.tokenize("${entry.title} ${entry.body} ${item.pages.joinToString(" ") { it.body }}").toSet()
+                val sharedTokens = queryTokens.intersect(allTokens)
+                if (sharedTokens.isNotEmpty()) {
+                    val tokenScore = (sharedTokens.size.toFloat() / queryTokens.size.coerceAtLeast(1)) * 0.40f
+                    score += tokenScore
+                    reasons.add("Keywords: ${sharedTokens.joinToString(", ")}")
+                }
+
+                // 6. Entity match
+                item.entities.forEach { entity ->
+                    if (entity.displayName.lowercase(Locale.ROOT).contains(searchLower) ||
+                        queryTokens.any { entity.canonicalName.contains(it) }
+                    ) {
+                        score += 0.38f
+                        matchedEntities.add(entity.displayName)
+                        reasons.add("Entity: ${entity.displayName} (${entity.type.name})")
+                    }
+                }
+
+                // 7. Tag match
+                item.tags.forEach { tag ->
+                    if (tag.name.lowercase(Locale.ROOT).contains(searchLower) ||
+                        queryTokens.any { tag.normalizedName.contains(it) }
+                    ) {
+                        score += 0.30f
+                        matchedTags.add("#${tag.name}")
+                        reasons.add("Tag: #${tag.name}")
+                    }
+                }
+
+                // 8. OCR Text match
+                item.mediaItems.forEach { media ->
+                    if (media.ocrText.lowercase(Locale.ROOT).contains(searchLower) ||
+                        media.caption.lowercase(Locale.ROOT).contains(searchLower)
+                    ) {
+                        score += 0.28f
+                        matchedOcrTerms.add(cleanSearch)
+                        reasons.add("In photo text/caption")
+                    }
                 }
             }
 
             if (score > 0.15f) {
-                val snippetIndex = lowerBody.indexOf(trimmed.lowercase(Locale.ROOT))
-                val snippet = if (snippetIndex >= 0) {
-                    val start = (snippetIndex - 40).coerceAtLeast(0)
-                    val end = (snippetIndex + trimmed.length + 80).coerceAtMost(entry.body.length)
-                    "..." + entry.body.substring(start, end).replace("\n", " ") + "..."
-                } else {
-                    entry.body.take(120).replace("\n", " ") + (if (entry.body.length > 120) "..." else "")
-                }
+                val snippetText = if (entry.body.isNotBlank()) entry.body else item.pages.firstOrNull()?.body ?: ""
+                val snippet = snippetText.take(120).replace("\n", " ") + (if (snippetText.length > 120) "..." else "")
 
                 results.add(
                     HybridSearchResult(
@@ -489,6 +696,67 @@ class JournalRepository(
         }
 
         results.sortedByDescending { it.matchedScore }
+    }
+
+    suspend fun getStorageBreakdown(): StorageBreakdown = withContext(Dispatchers.IO) {
+        val entries = dao.getAllEntriesSnapshot()
+        val allMedia = dao.getAllMediaSnapshot()
+        val allAudio = dao.getAllAudioRecordsSnapshot()
+        val allEntities = dao.getAllEntitiesSnapshot()
+        val allRel = dao.getAllRelationshipsSnapshot()
+
+        var textBytes = 0L
+        entries.forEach {
+            textBytes += (it.title.length + it.body.length) * 2L
+        }
+
+        var photoBytes = 0L
+        allMedia.forEach { m ->
+            try {
+                if (m.uri.startsWith("file://") || m.uri.startsWith("/")) {
+                    val path = m.uri.removePrefix("file://")
+                    val f = File(path)
+                    if (f.exists()) photoBytes += f.length()
+                }
+            } catch (_: Exception) {}
+        }
+
+        var audioBytes = 0L
+        allAudio.forEach { a ->
+            try {
+                val f = File(a.filePath)
+                if (f.exists()) audioBytes += f.length()
+            } catch (_: Exception) {}
+        }
+
+        var ocrChars = 0
+        allMedia.forEach { ocrChars += it.ocrText.length }
+
+        val dbFile = context.getDatabasePath("mnemosyne_journal.db")
+        val dbBytes = if (dbFile.exists()) dbFile.length() else 0L
+
+        StorageBreakdown(
+            entryCount = entries.size,
+            pageCount = 0,
+            textEstimatedBytes = textBytes,
+            photoCount = allMedia.size,
+            photoBytes = photoBytes,
+            audioCount = allAudio.size,
+            audioBytes = audioBytes,
+            entityCount = allEntities.size,
+            relationshipCount = allRel.size,
+            ocrCharCount = ocrChars,
+            databaseBytes = dbBytes
+        )
+    }
+
+    suspend fun clearOcrCache() = withContext(Dispatchers.IO) {
+        val allMedia = dao.getAllMediaSnapshot()
+        allMedia.forEach { m ->
+            if (m.ocrText.isNotBlank()) {
+                dao.updateMediaItem(m.copy(ocrText = ""))
+            }
+        }
     }
 
     /**

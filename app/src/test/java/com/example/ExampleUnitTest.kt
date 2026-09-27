@@ -80,4 +80,40 @@ class ExampleUnitTest {
         assertTrue("Score should be significant", rel!!.score >= 0.28f)
         assertTrue("Explanation should mention Sarah or shared context", rel.explanation.contains("Sarah", ignoreCase = true) || rel.explanation.contains("match", ignoreCase = true))
     }
+
+    @Test
+    fun testV2TemplatesExistAndPopulated() {
+        val templates = com.example.data.model.JournalTemplate.ALL_TEMPLATES
+        assertTrue("Templates count should be at least 10", templates.size >= 10)
+        val daily = templates.find { it.id == "daily_reflection" }
+        assertNotNull("Daily template should exist", daily)
+        assertTrue("Daily template has tags", daily!!.defaultTags.isNotEmpty())
+        val travel = templates.find { it.id == "travel_trip" }
+        assertNotNull("Travel template should exist", travel)
+    }
+
+    @Test
+    fun testVoiceTranscriptSemanticParticipation() {
+        val transcript = "Met Alex at Tokyo station to review Project Apollo architecture"
+        val tokens = MindForgerSemanticEngine.tokenize(transcript)
+        assertTrue("Should extract key nouns", tokens.contains("alex") || tokens.contains("tokyo") || tokens.contains("apollo"))
+        val entities = MindForgerSemanticEngine.extractEntities("Voice Note", transcript)
+        assertTrue("Should detect at least one entity from voice note", entities.isNotEmpty())
+    }
+
+    @Test
+    fun testMultiPageContentHash() {
+        val page1 = "Day 1 in Kyoto exploring temples"
+        val page2 = "Day 2 in Arashiyama bamboo forest"
+        val unified1 = "$page1\n\n$page2"
+        val unified2 = "$page1\n\n$page2"
+        val unified3 = "$page1\n\nDay 2 altered content"
+
+        val hash1 = MindForgerSemanticEngine.computeContentHash("Trip to Kyoto", unified1)
+        val hash2 = MindForgerSemanticEngine.computeContentHash("Trip to Kyoto", unified2)
+        val hash3 = MindForgerSemanticEngine.computeContentHash("Trip to Kyoto", unified3)
+
+        assertEquals("Equal multi-page content should yield equal hashes", hash1, hash2)
+        assertTrue("Altered page should yield different hash", hash1 != hash3)
+    }
 }

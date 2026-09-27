@@ -68,3 +68,17 @@ data class AutolinkSpan(
     val entityName: String,
     val type: EntityType
 )
+
+data class StorageBreakdown(
+    val entryCount: Int = 0,
+    val pageCount: Int = 0,
+    val textEstimatedBytes: Long = 0,
+    val photoCount: Int = 0,
+    val photoBytes: Long = 0,
+    val audioCount: Int = 0,
+    val audioBytes: Long = 0,
+    val entityCount: Int = 0,
+    val relationshipCount: Int = 0,
+    val ocrCharCount: Int = 0,
+    val databaseBytes: Long = 0
+)
