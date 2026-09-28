@@ -119,7 +119,8 @@ class JournalRepository(
         entry: JournalEntry,
         manualTags: List<String> = emptyList(),
         attachedImageUri: Uri? = null,
-        pages: List<JournalPage> = emptyList()
+        pages: List<JournalPage> = emptyList(),
+        audioRecords: List<AudioRecordItem> = emptyList()
     ): Long = withContext(Dispatchers.IO) {
         val wordCount = entry.body.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
         val pagesText = pages.joinToString("\n") { "${it.title}\n${it.body}" }
@@ -148,6 +149,17 @@ class JournalRepository(
                     dao.insertPage(pageToSave)
                 } else {
                     dao.updatePage(pageToSave)
+                }
+            }
+        }
+
+        // Save pending or edited audio recordings
+        if (audioRecords.isNotEmpty()) {
+            audioRecords.forEach { audio ->
+                if (audio.id == 0L) {
+                    dao.insertAudioRecord(audio.copy(entryId = entryId))
+                } else {
+                    dao.updateAudioRecord(audio.copy(entryId = entryId))
                 }
             }
         }
@@ -276,6 +288,23 @@ class JournalRepository(
             processSemanticIntelligence(entryId)
         }
         id
+    }
+
+    suspend fun updateAudioRecordTranscript(
+        audioId: Long,
+        entryId: Long,
+        transcript: String,
+        status: String = "COMPLETED"
+    ) = withContext(Dispatchers.IO) {
+        dao.updateAudioTranscript(audioId, transcript.trim(), status)
+        // Reset processedContentHash on the entry so semantic extraction incorporates new transcript
+        val entry = dao.getEntryById(entryId)
+        if (entry != null) {
+            dao.updateEntry(entry.copy(processedContentHash = ""))
+        }
+        semanticScope.launch {
+            processSemanticIntelligence(entryId)
+        }
     }
 
     suspend fun deleteAudioRecord(audioId: Long, entryId: Long) = withContext(Dispatchers.IO) {

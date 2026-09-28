@@ -1,7 +1,15 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +30,8 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -37,9 +47,13 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
+import com.example.ui.components.VoiceTranscriptionModal
+import com.example.data.model.AudioRecordItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -70,7 +84,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,10 +102,14 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.ui.platform.LocalContext
 import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityType
+import com.example.data.model.JournalPage
 import com.example.data.model.SuggestedTag
 import com.example.media.PlaybackState
+import com.example.media.RecordingState
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
@@ -128,7 +148,37 @@ fun EntryDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showTranslateSheet by remember { mutableStateOf(false) }
     var faceToLinkIndex by remember { mutableStateOf<Int?>(null) }
+    var transcribingRecord by remember { mutableStateOf<AudioRecordItem?>(null) }
+    var showDictateNoteDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val recordingState by viewModel.voiceManager.recordingState.collectAsState()
+    val isRecording = recordingState == RecordingState.RECORDING || recordingState == RecordingState.PAUSED
+
+    var showAddSectionDialog by remember { mutableStateOf(false) }
+    var newSectionTitle by remember { mutableStateOf("") }
+    var newSectionBody by remember { mutableStateOf("") }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.addPhoto(entryId, uri)
+            Toast.makeText(context, "Photo attached and scanned with ML Kit OCR!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.startVoiceRecording()
+        } else {
+            Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy • h:mm a", Locale.getDefault())
 
@@ -239,12 +289,15 @@ fun EntryDetailScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Action Pills Row: Offline Translation
+            // Action Pills Row: Quick tools
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Translate Memory
                 OutlinedButton(
                     onClick = { showTranslateSheet = true },
                     shape = RoundedCornerShape(8.dp),
@@ -265,16 +318,70 @@ fun EntryDetailScreen(
                     )
                 }
 
-                Surface(
-                    color = ForestPrimary.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(8.dp)
+                // Record Voice Note
+                if (!isRecording) {
+                    OutlinedButton(
+                        onClick = {
+                            val hasPerm = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasPerm) {
+                                viewModel.startVoiceRecording()
+                            } else {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("record_voice_pill_button")
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Record Voice", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TerracottaAccent)
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.stopVoiceRecording(entryId, title = "Voice Note (${entry.title.ifBlank { "Memory" }})")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("stop_voice_pill_button")
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Stop & Transcribe", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                    }
+                }
+
+                // Attach Photo
+                OutlinedButton(
+                    onClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.testTag("add_photo_pill_button")
                 ) {
-                    Text(
-                        text = "On-Device ML",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                        color = ForestPrimary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                    )
+                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Attach Photo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                }
+
+                // Add Section
+                OutlinedButton(
+                    onClick = { showAddSectionDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.testTag("add_section_pill_button")
+                ) {
+                    Icon(Icons.Default.NoteAdd, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add Section", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
                 }
             }
 
@@ -402,16 +509,44 @@ fun EntryDetailScreen(
 
             // Multi-Page Sections
             val pages = itemWithRelations?.pages.orEmpty()
-            if (pages.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = "Sections & Sub-Pages (${pages.size})",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { showAddSectionDialog = true },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp).testTag("detail_add_section_btn")
+                ) {
+                    Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Section", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (pages.isEmpty()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Organize this memory into sub-pages or chapters (e.g. Day 1, Quotes, Decisions). Tap 'Add Section' above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            } else {
                 pages.forEachIndexed { idx, p ->
                     EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("entry_page_${p.id}")) {
                         Column(modifier = Modifier.padding(14.dp)) {
@@ -436,10 +571,14 @@ fun EntryDetailScreen(
 
             // Voice Journal / Audio Recordings
             val audioRecords = itemWithRelations?.audioRecords.orEmpty()
-            if (audioRecords.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -449,7 +588,91 @@ fun EntryDetailScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+
+                if (!isRecording) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = {
+                                val hasPerm = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPerm) {
+                                    viewModel.startVoiceRecording()
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp).testTag("detail_record_note_btn")
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Record Note", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        OutlinedButton(
+                            onClick = { showDictateNoteDialog = true },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp).testTag("detail_dictate_note_btn")
+                        ) {
+                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Dictate Note", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.stopVoiceRecording(entryId, title = "Voice Note (${entry.title.ifBlank { "Memory" }})")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp).testTag("detail_stop_record_btn")
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Stop Recording", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isRecording) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = TerracottaAccent.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = TerracottaAccent, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Recording voice reflection... Tap Stop when done to save and transcribe.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TerracottaAccent
+                        )
+                    }
+                }
+            }
+
+            if (audioRecords.isEmpty() && !isRecording) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "No audio reflections recorded for this memory yet. Tap 'Record Note' to record audio or 'Dictate Note' to transcribe speech on-device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            } else {
                 audioRecords.forEach { record ->
                     val isThisPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath
                     EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("audio_record_${record.id}")) {
@@ -471,36 +694,78 @@ fun EntryDetailScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                IconButton(
-                                    onClick = {
-                                        if (isThisPlaying) {
-                                            viewModel.stopAudio()
-                                        } else {
-                                            viewModel.playAudio(record.filePath)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (record.filePath.isNotBlank()) {
+                                        IconButton(
+                                            onClick = {
+                                                if (isThisPlaying) {
+                                                    viewModel.stopAudio()
+                                                } else {
+                                                    viewModel.playAudio(record.filePath)
+                                                }
+                                            },
+                                            modifier = Modifier.testTag("play_pause_audio_${record.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = if (isThisPlaying) "Pause" else "Play",
+                                                tint = ForestPrimary,
+                                                modifier = Modifier.size(28.dp)
+                                            )
                                         }
-                                    },
-                                    modifier = Modifier.testTag("play_pause_audio_${record.id}")
-                                ) {
-                                    Icon(
-                                        imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (isThisPlaying) "Pause" else "Play",
-                                        tint = ForestPrimary,
-                                        modifier = Modifier.size(32.dp)
-                                    )
+                                    }
+                                    IconButton(
+                                        onClick = { transcribingRecord = record },
+                                        modifier = Modifier.testTag("transcribe_audio_btn_${record.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.EditNote,
+                                            contentDescription = "Transcribe / Dictate",
+                                            tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.deleteAudio(record.id, entryId) },
+                                        modifier = Modifier.testTag("delete_audio_${record.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                             if (record.transcript.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = "On-Device Transcription:",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = ForestPrimary
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "On-Device Transcription:",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = ForestPrimary
+                                            )
+                                            TextButton(
+                                                onClick = { transcribingRecord = record },
+                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                                modifier = Modifier.height(24.dp).testTag("edit_transcript_btn_${record.id}")
+                                            ) {
+                                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text("Edit", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                            }
+                                        }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = record.transcript,
@@ -508,6 +773,17 @@ fun EntryDetailScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { transcribingRecord = record },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("transcribe_audio_action_btn_${record.id}")
+                                ) {
+                                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
@@ -875,6 +1151,102 @@ fun EntryDetailScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    if (showAddSectionDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddSectionDialog = false },
+            title = { Text("Add Section / Page") },
+            text = {
+                Column {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = newSectionTitle,
+                        onValueChange = { newSectionTitle = it },
+                        label = { Text("Section Title (e.g. Day 2, Quotes)") },
+                        modifier = Modifier.fillMaxWidth().testTag("new_section_title_input")
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = newSectionBody,
+                        onValueChange = { newSectionBody = it },
+                        label = { Text("Content") },
+                        minLines = 4,
+                        modifier = Modifier.fillMaxWidth().testTag("new_section_body_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newSectionTitle.isNotBlank() || newSectionBody.isNotBlank()) {
+                            val newPage = JournalPage(
+                                entryId = entryId,
+                                pageIndex = itemWithRelations?.pages?.size ?: 0,
+                                title = newSectionTitle.trim(),
+                                body = newSectionBody.trim()
+                            )
+                            viewModel.savePage(newPage, entryId)
+                            newSectionTitle = ""
+                            newSectionBody = ""
+                            showAddSectionDialog = false
+                            Toast.makeText(context, "Section added to memory!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    modifier = Modifier.testTag("confirm_add_section_btn")
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddSectionDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (transcribingRecord != null) {
+        VoiceTranscriptionModal(
+            title = "Transcribe Voice Note",
+            initialTranscript = transcribingRecord?.transcript.orEmpty(),
+            audioFilePath = transcribingRecord?.filePath,
+            durationMs = transcribingRecord?.durationMs ?: 0L,
+            viewModel = viewModel,
+            onDismiss = { transcribingRecord = null },
+            onSaveTranscript = { newTranscript ->
+                transcribingRecord?.let { rec ->
+                    viewModel.updateAudioTranscript(rec.id, entryId, newTranscript)
+                    Toast.makeText(context, "Transcript saved and knowledge connections updated!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    if (showDictateNoteDialog) {
+        VoiceTranscriptionModal(
+            title = "Dictate Spoken Reflection",
+            initialTranscript = "",
+            audioFilePath = null,
+            durationMs = 0L,
+            viewModel = viewModel,
+            onDismiss = { showDictateNoteDialog = false },
+            onSaveTranscript = { newTranscript ->
+                if (newTranscript.isNotBlank()) {
+                    viewModel.addAudioRecord(
+                        entryId = entryId,
+                        title = "Dictated Thought",
+                        filePath = "",
+                        durationMs = 0L,
+                        transcript = newTranscript,
+                        status = "COMPLETED",
+                        onDone = {
+                            Toast.makeText(context, "Dictated reflection saved and linked in knowledge graph!", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            }
+        )
     }
 }
 

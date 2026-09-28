@@ -108,6 +108,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val recordingState: StateFlow<RecordingState> = voiceManager.recordingState
     val playbackState: StateFlow<PlaybackState> = voiceManager.playbackState
     val currentPlayingPath: StateFlow<String?> = voiceManager.currentPlayingPath
+    val isDictating: StateFlow<Boolean> = voiceManager.isDictating
 
     // Storage Management
     private val _storageBreakdown = MutableStateFlow(StorageBreakdown())
@@ -235,6 +236,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         manualTags: List<String> = emptyList(),
         attachedImageUri: Uri? = null,
         pages: List<JournalPage> = emptyList(),
+        audioRecords: List<AudioRecordItem> = emptyList(),
         onComplete: (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -246,11 +248,20 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 mood = mood,
                 location = location?.trim()?.ifBlank { null }
             )
-            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages)
+            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages, audioRecords)
             refreshGraph()
             refreshOnThisDay()
             onComplete(savedId)
         }
+    }
+
+    // Voice Dictation & Transcription
+    fun startDictation(onResult: (String) -> Unit, onError: () -> Unit = {}) {
+        voiceManager.startLiveDictation(onResult, onError)
+    }
+
+    fun stopDictation() {
+        voiceManager.stopLiveDictation()
     }
 
     // Voice Journal Actions
@@ -271,20 +282,64 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             val (file, duration) = voiceManager.stopRecording()
             if (file != null && file.exists()) {
                 val filePath = file.absolutePath
+                // Insert immediately so audio note is instantly visible
+                val recordId = repository.addAudioRecord(
+                    entryId = entryId,
+                    title = title,
+                    filePath = filePath,
+                    durationMs = duration,
+                    transcript = "",
+                    status = "RECORDED"
+                )
+                selectEntry(entryId)
+                // Asynchronously attempt speech recognition
                 voiceManager.transcribeAudioOffline { transcript, status ->
-                    viewModelScope.launch {
-                        repository.addAudioRecord(
-                            entryId = entryId,
-                            title = title,
-                            filePath = filePath,
-                            durationMs = duration,
-                            transcript = transcript,
-                            status = status
-                        )
-                        selectEntry(entryId)
+                    if (transcript.isNotBlank()) {
+                        viewModelScope.launch {
+                            repository.updateAudioRecordTranscript(recordId, entryId, transcript, status)
+                            selectEntry(entryId)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    fun updateAudioTranscript(audioId: Long, entryId: Long, transcript: String) {
+        viewModelScope.launch {
+            repository.updateAudioRecordTranscript(audioId, entryId, transcript, "COMPLETED")
+            selectEntry(entryId)
+        }
+    }
+
+    fun addAudioRecord(
+        entryId: Long,
+        title: String,
+        filePath: String,
+        durationMs: Long,
+        transcript: String,
+        status: String = "COMPLETED",
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.addAudioRecord(entryId, title, filePath, durationMs, transcript, status)
+            selectEntry(entryId)
+            onDone()
+        }
+    }
+
+    fun createQuickVoiceMemory(title: String, transcript: String, onCreated: (Long) -> Unit = {}) {
+        viewModelScope.launch {
+            val id = repository.saveEntry(
+                entry = com.example.data.model.JournalEntry(
+                    title = title.ifBlank { "Spoken Reflection" },
+                    body = transcript,
+                    mood = "Thoughtful",
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+            selectEntry(id)
+            onCreated(id)
         }
     }
 

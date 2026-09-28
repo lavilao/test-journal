@@ -17,10 +17,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ManageSearch
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -33,6 +39,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.example.ui.components.VoiceTranscriptionModal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -54,9 +66,29 @@ fun HybridSearchScreen(
     viewModel: JournalViewModel,
     onNavigateToEntry: (Long) -> Unit
 ) {
+    val context = LocalContext.current
     val query by viewModel.searchQuery.collectAsState()
     val results by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
+    val isDictating by viewModel.isDictating.collectAsState()
+    var showVoiceSearchModal by remember { mutableStateOf(false) }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.startDictation(
+                onResult = { recognized ->
+                    viewModel.onSearchQueryChanged(recognized)
+                },
+                onError = {
+                    showVoiceSearchModal = true
+                }
+            )
+        } else {
+            showVoiceSearchModal = true
+        }
+    }
 
     val quickQueries = listOf("Sarah", "Everglades", "Coffee", "ML Kit", "#pkm", "Architecture")
     val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
@@ -90,12 +122,45 @@ fun HybridSearchScreen(
                     Icon(Icons.Default.Search, contentDescription = null, tint = ForestPrimary)
                 },
                 trailingIcon = {
-                    if (query.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (query.isNotBlank()) {
+                            IconButton(
+                                onClick = { viewModel.onSearchQueryChanged("") },
+                                modifier = Modifier.testTag("clear_search_button")
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                            }
+                        }
                         IconButton(
-                            onClick = { viewModel.onSearchQueryChanged("") },
-                            modifier = Modifier.testTag("clear_search_button")
+                            onClick = {
+                                if (isDictating) {
+                                    viewModel.stopDictation()
+                                } else {
+                                    val hasPerm = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPerm) {
+                                        viewModel.startDictation(
+                                            onResult = { recognized ->
+                                                viewModel.onSearchQueryChanged(recognized)
+                                            },
+                                            onError = {
+                                                showVoiceSearchModal = true
+                                            }
+                                        )
+                                    } else {
+                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.testTag("voice_search_button")
                         ) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                            Icon(
+                                imageVector = if (isDictating) Icons.Default.Stop else Icons.Default.Mic,
+                                contentDescription = if (isDictating) "Stop Voice Search" else "Voice Search",
+                                tint = if (isDictating) TerracottaAccent else ForestPrimary
+                            )
                         }
                     }
                 },
@@ -192,6 +257,20 @@ fun HybridSearchScreen(
                 }
             }
         }
+    }
+
+    if (showVoiceSearchModal) {
+        VoiceTranscriptionModal(
+            title = "Voice Search & Dictation",
+            initialTranscript = query,
+            audioFilePath = null,
+            durationMs = 0L,
+            viewModel = viewModel,
+            onDismiss = { showVoiceSearchModal = false },
+            onSaveTranscript = { newQuery ->
+                viewModel.onSearchQueryChanged(newQuery)
+            }
+        )
     }
 }
 

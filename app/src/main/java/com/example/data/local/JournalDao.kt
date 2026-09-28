@@ -264,6 +264,12 @@ interface JournalDao {
     @Update
     suspend fun updateAudioRecord(item: AudioRecordItem)
 
+    @Query("UPDATE audio_records SET transcript = :transcript, transcriptionStatus = :status WHERE id = :id")
+    suspend fun updateAudioTranscript(id: Long, transcript: String, status: String)
+
+    @Query("SELECT * FROM audio_records WHERE id = :id LIMIT 1")
+    suspend fun getAudioRecordById(id: Long): AudioRecordItem?
+
     @Query("DELETE FROM audio_records WHERE id = :id")
     suspend fun deleteAudioRecordById(id: Long)
 

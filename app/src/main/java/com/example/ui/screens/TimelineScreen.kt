@@ -31,16 +31,19 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.example.ui.components.VoiceTranscriptionModal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -86,6 +89,7 @@ fun TimelineScreen(
     val filterEntity by viewModel.timelineFilterEntity.collectAsState()
 
     var showEventsView by remember { mutableStateOf(false) }
+    var showQuickDictateModal by remember { mutableStateOf(false) }
 
     val dateFormat = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
 
@@ -422,22 +426,62 @@ fun TimelineScreen(
             }
         }
 
-        // Floating Action Button to Add Entry
-        FloatingActionButton(
-            onClick = onNavigateToNewEntry,
-            containerColor = ForestPrimary,
-            contentColor = androidx.compose.ui.graphics.Color.White,
+        // Floating Action Buttons (Quick Dictate & Add Entry)
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(24.dp)
-                .testTag("create_entry_fab")
+                .padding(24.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "New Journal Entry",
-                modifier = Modifier.size(26.dp)
-            )
+            SmallFloatingActionButton(
+                onClick = { showQuickDictateModal = true },
+                containerColor = TerracottaAccent,
+                contentColor = androidx.compose.ui.graphics.Color.White,
+                modifier = Modifier.testTag("quick_dictate_fab")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Quick Voice Dictation",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            FloatingActionButton(
+                onClick = onNavigateToNewEntry,
+                containerColor = ForestPrimary,
+                contentColor = androidx.compose.ui.graphics.Color.White,
+                modifier = Modifier.testTag("create_entry_fab")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "New Journal Entry",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
+    }
+
+    if (showQuickDictateModal) {
+        VoiceTranscriptionModal(
+            title = "Quick Spoken Reflection",
+            initialTranscript = "",
+            audioFilePath = null,
+            durationMs = 0L,
+            viewModel = viewModel,
+            onDismiss = { showQuickDictateModal = false },
+            onSaveTranscript = { transcript ->
+                if (transcript.isNotBlank()) {
+                    viewModel.createQuickVoiceMemory(
+                        title = "Spoken Reflection",
+                        transcript = transcript,
+                        onCreated = { newId ->
+                            onNavigateToDetail(newId)
+                        }
+                    )
+                }
+            }
+        )
     }
 }
 

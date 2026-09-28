@@ -41,7 +41,10 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Stop
+import com.example.ui.components.VoiceTranscriptionModal
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -58,8 +61,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -80,8 +85,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.example.data.model.AudioRecordItem
 import com.example.data.model.JournalPage
 import com.example.data.model.JournalTemplate
+import com.example.media.PlaybackState
 import com.example.media.RecordingState
 import com.example.media.VoiceJournalManager
 import com.example.semantic.MindForgerSemanticEngine
@@ -101,10 +108,17 @@ fun EntryEditScreen(
     onSaved: (Long) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val existingEntryDetail by viewModel.selectedEntryDetail.collectAsState()
     val recordingState by viewModel.voiceManager.recordingState.collectAsState()
     val isRecording = recordingState == RecordingState.RECORDING || recordingState == RecordingState.PAUSED
     val isPaused = recordingState == RecordingState.PAUSED
+    val isDictating by viewModel.isDictating.collectAsState()
+    val playbackState by viewModel.voiceManager.playbackState.collectAsState()
+    val currentPlayingPath by viewModel.voiceManager.currentPlayingPath.collectAsState()
+    val audioRecords = remember { mutableStateListOf<AudioRecordItem>() }
+    var editingAudioIndex by remember { mutableStateOf<Int?>(null) }
+    var showBodyDictationModal by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
@@ -161,6 +175,8 @@ fun EntryEditScreen(
             tagsList.addAll(item.tags.map { it.name })
             pages.clear()
             pages.addAll(item.pages)
+            audioRecords.clear()
+            audioRecords.addAll(item.audioRecords)
         }
     }
 
@@ -208,6 +224,7 @@ fun EntryEditScreen(
                                     manualTags = tagsList.toList(),
                                     attachedImageUri = attachedImageUri,
                                     pages = pages.toList(),
+                                    audioRecords = audioRecords.toList(),
                                     onComplete = onSaved
                                 )
                             }
@@ -454,12 +471,122 @@ fun EntryEditScreen(
                             }
                             IconButton(
                                 onClick = {
-                                    val targetId = entryId ?: 0L
-                                    viewModel.stopVoiceRecording(targetId, title = "Voice Note (${title.ifBlank { "Journal" }})")
+                                    val (file, duration) = viewModel.voiceManager.stopRecording()
+                                    if (file != null && file.exists()) {
+                                        val filePath = file.absolutePath
+                                        val newRecord = AudioRecordItem(
+                                            entryId = entryId ?: 0L,
+                                            filePath = filePath,
+                                            durationMs = duration,
+                                            transcript = "",
+                                            transcriptionStatus = "RECORDED",
+                                            title = "Voice Note (${title.ifBlank { "Memory" }})"
+                                        )
+                                        audioRecords.add(newRecord)
+                                        val recordIdx = audioRecords.size - 1
+                                        scope.launch {
+                                            viewModel.voiceManager.transcribeAudioOffline { transcript, status ->
+                                                if (transcript.isNotBlank() && recordIdx in audioRecords.indices) {
+                                                    audioRecords[recordIdx] = audioRecords[recordIdx].copy(
+                                                        transcript = transcript,
+                                                        transcriptionStatus = status
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.testTag("stop_voice_recording_btn")
                             ) {
-                                Icon(Icons.Default.Stop, contentDescription = "Stop & Transcribe", tint = TerracottaAccent)
+                                Icon(Icons.Default.Stop, contentDescription = "Stop Recording", tint = TerracottaAccent)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Attached Voice Notes in Editor
+            if (audioRecords.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                audioRecords.forEachIndexed { index, record ->
+                    val isPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("recorded_audio_$index")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(record.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    val sec = record.durationMs / 1000
+                                    Text("${sec / 60}m ${sec % 60}s • Attached Audio", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (record.filePath.isNotBlank()) {
+                                        IconButton(onClick = {
+                                            if (isPlaying) viewModel.stopAudio() else viewModel.playAudio(record.filePath)
+                                        }) {
+                                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = ForestPrimary)
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { editingAudioIndex = index },
+                                        modifier = Modifier.testTag("transcribe_audio_edit_btn_$index")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.EditNote,
+                                            contentDescription = "Transcribe / Dictate",
+                                            tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary
+                                        )
+                                    }
+                                    IconButton(onClick = { audioRecords.removeAt(index) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                            if (record.transcript.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Transcript: ${record.transcript}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(
+                                            onClick = { editingAudioIndex = index },
+                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(24.dp).testTag("edit_transcript_edit_screen_btn_$index")
+                                        ) {
+                                            Text("Edit", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                        }
+                                    }
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = { editingAudioIndex = index },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("transcribe_audio_prompt_btn_$index")
+                                ) {
+                                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
+                                }
                             }
                         }
                     }
@@ -468,11 +595,73 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Reflection & Live Dictation Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Journal Reflection",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isDictating) {
+                        Button(
+                            onClick = { viewModel.stopDictation() },
+                            colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
+                            modifier = Modifier.testTag("dictate_stop_button")
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Listening... Stop")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                val hasPerm = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPerm) {
+                                    viewModel.startDictation(
+                                        onResult = { recognized ->
+                                            body = if (body.isBlank()) recognized else "$body $recognized"
+                                        },
+                                        onError = {
+                                            showBodyDictationModal = true
+                                        }
+                                    )
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            modifier = Modifier.testTag("dictate_button")
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Dictate")
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = { showBodyDictationModal = true },
+                            modifier = Modifier.size(36.dp).testTag("dictate_sheet_button")
+                        ) {
+                            Icon(Icons.Default.RecordVoiceOver, contentDescription = "Dictation Tool", tint = ForestPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
             // Body Editor
             OutlinedTextField(
                 value = body,
                 onValueChange = { body = it },
-                label = { Text("Journal Entry / Reflection") },
+                label = { Text("Write or dictate your thoughts") },
                 placeholder = { Text("Write freely... People (e.g. Sarah), places (e.g. Starbucks), and concepts will be extracted automatically into your knowledge graph.") },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp),
                 minLines = 8,
@@ -711,6 +900,44 @@ fun EntryEditScreen(
                 androidx.compose.material3.TextButton(onClick = { showAddPageDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (editingAudioIndex != null) {
+        val idx = editingAudioIndex!!
+        if (idx in audioRecords.indices) {
+            val rec = audioRecords[idx]
+            VoiceTranscriptionModal(
+                title = "Transcribe Attached Audio",
+                initialTranscript = rec.transcript,
+                audioFilePath = rec.filePath,
+                durationMs = rec.durationMs,
+                viewModel = viewModel,
+                onDismiss = { editingAudioIndex = null },
+                onSaveTranscript = { newTranscript ->
+                    if (idx in audioRecords.indices) {
+                        audioRecords[idx] = audioRecords[idx].copy(
+                            transcript = newTranscript,
+                            transcriptionStatus = "COMPLETED"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    if (showBodyDictationModal) {
+        VoiceTranscriptionModal(
+            title = "Dictate Journal Reflection",
+            initialTranscript = body,
+            audioFilePath = null,
+            durationMs = 0L,
+            viewModel = viewModel,
+            onDismiss = { showBodyDictationModal = false },
+            onSaveTranscript = { newTranscript ->
+                body = newTranscript
+                Toast.makeText(context, "Spoken text applied to reflection!", Toast.LENGTH_SHORT).show()
             }
         )
     }

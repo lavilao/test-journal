@@ -48,6 +48,10 @@ class VoiceJournalManager(private val context: Context) {
     private val _currentPlayingPath = MutableStateFlow<String?>(null)
     val currentPlayingPath: StateFlow<String?> = _currentPlayingPath.asStateFlow()
 
+    private var dictationRecognizer: SpeechRecognizer? = null
+    private val _isDictating = MutableStateFlow(false)
+    val isDictating: StateFlow<Boolean> = _isDictating.asStateFlow()
+
     fun isOfflineSpeechRecognitionSupported(): Boolean {
         return SpeechRecognizer.isRecognitionAvailable(context)
     }
@@ -260,7 +264,80 @@ class VoiceJournalManager(private val context: Context) {
         }
     }
 
+    /**
+     * Real-time Speech-to-Text dictation directly into journal text.
+     */
+    fun startLiveDictation(
+        onResult: (text: String) -> Unit,
+        onError: () -> Unit = {}
+    ) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            onError()
+            return
+        }
+        stopLiveDictation()
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+        }
+
+        try {
+            dictationRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        _isDictating.value = true
+                    }
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {
+                        _isDictating.value = false
+                    }
+                    override fun onError(error: Int) {
+                        _isDictating.value = false
+                        onError()
+                    }
+                    override fun onResults(results: Bundle?) {
+                        _isDictating.value = false
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull() ?: ""
+                        if (text.isNotBlank()) {
+                            onResult(text)
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull() ?: ""
+                        if (text.isNotBlank()) {
+                            onResult(text)
+                        }
+                    }
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                startListening(intent)
+            }
+        } catch (_: Exception) {
+            _isDictating.value = false
+            onError()
+        }
+    }
+
+    fun stopLiveDictation() {
+        try {
+            dictationRecognizer?.stopListening()
+            dictationRecognizer?.destroy()
+        } catch (_: Exception) {}
+        dictationRecognizer = null
+        _isDictating.value = false
+    }
+
     fun release() {
+        stopLiveDictation()
         try {
             mediaRecorder?.release()
             mediaPlayer?.release()
