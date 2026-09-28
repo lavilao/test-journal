@@ -1,0 +1,37 @@
+<resources>
+    <string name="app_name">Mnemosyne</string>
+    <string name="nav_timeline">Línea de tiempo</string>
+    <string name="nav_knowledge">Conocimiento</string>
+    <string name="nav_graph">Gráfico</string>
+    <string name="nav_search">Buscar</string>
+    <string name="nav_settings">Ajustes</string>
+    <string name="new_entry">Nuevo recuerdo</string>
+    <string name="edit_entry">Editar recuerdo</string>
+    <string name="save">Guardar</string>
+    <string name="delete">Eliminar</string>
+    <string name="title">Título</string>
+    <string name="body_hint">Escribe tus reflexiones o markdown...</string>
+    <string name="tags">Etiquetas</string>
+    <string name="add_tag">Añadir etiqueta</string>
+    <string name="mood">Estado de ánimo</string>
+    <string name="location">Ubicación</string>
+    <string name="dictate">Dictar</string>
+    <string name="note_type_text">Nota de texto</string>
+    <string name="note_type_audio">Nota de voz</string>
+    <string name="note_type_photo">Nota con foto</string>
+    <string name="note_type_template">Plantilla guiada</string>
+    <string name="note_type_quick">Pensamiento rápido</string>
+    <string name="contacts_title">Contactos vinculados</string>
+    <string name="pick_contact">Vincular contacto</string>
+    <string name="contact_call">Llamar</string>
+    <string name="contact_sms">Mensaje</string>
+    <string name="contact_email">Correo</string>
+    <string name="markdown_edit">Editar</string>
+    <string name="markdown_preview">Vista previa WYSIWYG</string>
+    <string name="mlkit_diagnostics">Diagnóstico de IA local ML Kit</string>
+    <string name="mlkit_run_test">Ejecutar diagnóstico</string>
+    <string name="digital_hub">Centro de vida digital</string>
+    <string name="on_this_day">En este día</string>
+    <string name="visual_memories">Recuerdos visuales</string>
+    <string name="concepts">Conceptos y temas</string>
+</resources>

@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
+import com.example.ui.components.MlKitDiagnosticsCard
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
@@ -339,6 +340,11 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // On-Device ML Kit & Model Diagnosis
+        MlKitDiagnosticsCard()
 
         Spacer(modifier = Modifier.height(22.dp))
 

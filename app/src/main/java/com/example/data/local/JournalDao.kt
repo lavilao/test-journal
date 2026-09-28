@@ -139,6 +139,23 @@ interface JournalDao {
     @Query("SELECT * FROM entities WHERE mentionCount >= :minMentions AND lastSeen < :cutoffTimestamp ORDER BY lastSeen ASC")
     fun getForgottenThreads(cutoffTimestamp: Long, minMentions: Int = 2): Flow<List<EntityItem>>
 
+    @Query("""
+        DELETE FROM entities 
+        WHERE id NOT IN (SELECT DISTINCT entityId FROM entry_entities)
+          AND id NOT IN (SELECT DISTINCT entityId FROM entity_mentions)
+          AND id NOT IN (SELECT DISTINCT personEntityId FROM face_person_associations)
+    """)
+    suspend fun pruneOrphanEntities()
+
+    @Query("""
+        DELETE FROM tags 
+        WHERE id NOT IN (SELECT DISTINCT tagId FROM entry_tags)
+    """)
+    suspend fun pruneOrphanTags()
+
+    @Query("DELETE FROM entry_tags WHERE entryId = :entryId AND tagId = :tagId")
+    suspend fun removeTagFromEntry(entryId: Long, tagId: Long)
+
     // === Entity Mentions (Offsets & In-Text Annotations) ===
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntityMention(mention: EntityMention): Long

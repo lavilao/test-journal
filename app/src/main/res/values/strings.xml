@@ -1,3 +1,37 @@
 <resources>
     <string name="app_name">Mnemosyne</string>
+    <string name="nav_timeline">Timeline</string>
+    <string name="nav_knowledge">Knowledge</string>
+    <string name="nav_graph">Graph</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_settings">Settings</string>
+    <string name="new_entry">New Memory</string>
+    <string name="edit_entry">Edit Memory</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="title">Title</string>
+    <string name="body_hint">Write your thoughts or markdown...</string>
+    <string name="tags">Tags</string>
+    <string name="add_tag">Add tag</string>
+    <string name="mood">Mood</string>
+    <string name="location">Location</string>
+    <string name="dictate">Dictate</string>
+    <string name="note_type_text">Text Note</string>
+    <string name="note_type_audio">Voice Note</string>
+    <string name="note_type_photo">Photo Note</string>
+    <string name="note_type_template">Guided Template</string>
+    <string name="note_type_quick">Quick Thought</string>
+    <string name="contacts_title">Linked Contacts</string>
+    <string name="pick_contact">Link Contact</string>
+    <string name="contact_call">Call</string>
+    <string name="contact_sms">Message</string>
+    <string name="contact_email">Email</string>
+    <string name="markdown_edit">Edit</string>
+    <string name="markdown_preview">WYSIWYG Preview</string>
+    <string name="mlkit_diagnostics">ML Kit &amp; On-Device AI Diagnostics</string>
+    <string name="mlkit_run_test">Run Diagnostics</string>
+    <string name="digital_hub">Digital Life Hub</string>
+    <string name="on_this_day">On This Day</string>
+    <string name="visual_memories">Visual Memories</string>
+    <string name="concepts">Concepts &amp; Topics</string>
 </resources>

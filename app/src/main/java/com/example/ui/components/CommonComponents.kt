@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -91,6 +92,7 @@ fun EntityChip(
 fun TagChip(
     tag: String,
     onClick: (() -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
     selected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -105,15 +107,30 @@ fun TagChip(
             .testTag("tag_chip_$tag")
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) {
-        Text(
-            text = "#$tag",
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                fontSize = 11.sp
-            ),
-            color = textColor,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-        )
+        ) {
+            Text(
+                text = "#$tag",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 11.sp
+                ),
+                color = textColor
+            )
+            if (onRemove != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove tag",
+                    tint = textColor.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .size(13.dp)
+                        .clickable { onRemove() }
+                )
+            }
+        }
     }
 }
 

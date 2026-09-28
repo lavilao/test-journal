@@ -37,12 +37,22 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import com.example.ui.components.StorypadNewNoteFab
+import com.example.ui.components.StorypadNoteType
 import com.example.ui.components.VoiceTranscriptionModal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -90,6 +100,25 @@ fun TimelineScreen(
 
     var showEventsView by remember { mutableStateOf(false) }
     var showQuickDictateModal by remember { mutableStateOf(false) }
+    var showQuickThoughtDialog by remember { mutableStateOf(false) }
+    var quickThoughtText by remember { mutableStateOf("") }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val persistentUri = viewModel.repository.persistImageToLocalStorage(uri)
+            viewModel.saveEntry(
+                id = 0L,
+                title = "Photo Capture",
+                body = "Visual memory captured into journal.",
+                attachedImageUri = Uri.parse(persistentUri),
+                onComplete = { newId ->
+                    onNavigateToDetail(newId)
+                }
+            )
+        }
+    }
 
     val dateFormat = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
 
@@ -186,6 +215,87 @@ fun TimelineScreen(
                             label = { Text("Grouped Episodes (${events.size})") },
                             modifier = Modifier.testTag("filter_grouped_episodes")
                         )
+                    }
+                }
+            }
+
+            // Gallery Go style Visual Memory Album (Offline-first, on-device intelligence)
+            val entriesWithPhotos = entries.filter { !it.entry.imageUri.isNullOrBlank() || it.media.isNotEmpty() }
+            if (entriesWithPhotos.isNotEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                        modifier = Modifier.fillMaxWidth().testTag("gallery_go_album_card")
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.PhotoAlbum, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Visual Memories",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Text(
+                                    text = "Gallery Go style • Offline",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ForestPrimary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                entriesWithPhotos.take(8).forEach { item ->
+                                    val photoUri = item.entry.imageUri ?: item.media.firstOrNull()?.uri
+                                    if (photoUri != null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .size(width = 110.dp, height = 90.dp)
+                                                .clickable { onNavigateToDetail(item.entry.id) }
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                AsyncImage(
+                                                    model = photoUri,
+                                                    contentDescription = "Visual memory",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .align(Alignment.BottomCenter)
+                                                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = item.entry.title.ifBlank { "Memory" },
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontSize = 9.sp,
+                                                            color = androidx.compose.ui.graphics.Color.White
+                                                        ),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -426,40 +536,76 @@ fun TimelineScreen(
             }
         }
 
-        // Floating Action Buttons (Quick Dictate & Add Entry)
-        Column(
+        // Storypad-Style Floating Action Button
+        StorypadNewNoteFab(
+            onTriggerType = { type ->
+                when (type) {
+                    StorypadNoteType.TEXT -> onNavigateToNewEntry()
+                    StorypadNoteType.AUDIO -> showQuickDictateModal = true
+                    StorypadNoteType.IMAGE -> {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }
+                    StorypadNoteType.TEMPLATE -> onNavigateToNewEntry()
+                    StorypadNoteType.QUICK -> showQuickThoughtDialog = true
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SmallFloatingActionButton(
-                onClick = { showQuickDictateModal = true },
-                containerColor = TerracottaAccent,
-                contentColor = androidx.compose.ui.graphics.Color.White,
-                modifier = Modifier.testTag("quick_dictate_fab")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Mic,
-                    contentDescription = "Quick Voice Dictation",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+                .padding(24.dp)
+        )
+    }
 
-            FloatingActionButton(
-                onClick = onNavigateToNewEntry,
-                containerColor = ForestPrimary,
-                contentColor = androidx.compose.ui.graphics.Color.White,
-                modifier = Modifier.testTag("create_entry_fab")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "New Journal Entry",
-                    modifier = Modifier.size(26.dp)
-                )
+    if (showQuickThoughtDialog) {
+        AlertDialog(
+            onDismissRequest = { showQuickThoughtDialog = false },
+            title = { Text("Quick Thought / Fleeting Note") },
+            text = {
+                Column {
+                    Text(
+                        text = "Capture a rapid thought. Automatically processed into your knowledge graph.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = quickThoughtText,
+                        onValueChange = { quickThoughtText = it },
+                        label = { Text("What are you thinking?") },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val text = quickThoughtText.trim()
+                        if (text.isNotBlank()) {
+                            viewModel.saveEntry(
+                                id = 0L,
+                                title = "Quick Thought",
+                                body = text,
+                                onComplete = { newId ->
+                                    onNavigateToDetail(newId)
+                                }
+                            )
+                            quickThoughtText = ""
+                            showQuickThoughtDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                ) {
+                    Text("Save Memory")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuickThoughtDialog = false }) {
+                    Text("Cancel")
+                }
             }
-        }
+        )
     }
 
     if (showQuickDictateModal) {

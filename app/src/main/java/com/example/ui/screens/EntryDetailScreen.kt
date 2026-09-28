@@ -886,7 +886,14 @@ fun EntryDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     itemWithRelations?.tags?.forEach { tag ->
-                        TagChip(tag = tag.name)
+                        androidx.compose.runtime.key(tag.id) {
+                            TagChip(
+                                tag = tag.name,
+                                onRemove = {
+                                    viewModel.removeTagFromEntry(entryId, tag.id)
+                                }
+                            )
+                        }
                     }
                 }
             }

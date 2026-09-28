@@ -42,9 +42,17 @@ import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
-import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.runtime.key
+import com.example.ui.components.EmojiMoodPicker
+import com.example.ui.components.MarkdownWysiwygEditor
 import com.example.ui.components.VoiceTranscriptionModal
+import com.example.contacts.ContactsHelper
+import com.example.contacts.DeviceContactInfo
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -134,14 +142,44 @@ fun EntryEditScreen(
     var newPageTitle by remember { mutableStateOf("") }
     var newPageBody by remember { mutableStateOf("") }
 
-    val moods = listOf("Thoughtful", "Inspired", "Peaceful", "Focused", "Joyful", "Adventurous")
+    // Linked Contacts
+    val linkedContacts = remember { mutableStateListOf<DeviceContactInfo>() }
+    var selectedContactAction by remember { mutableStateOf<DeviceContactInfo?>(null) }
 
-    // Image Picker using zero-permission Android Photo Picker
+    val contactPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { contactUri ->
+        if (contactUri != null) {
+            val contactInfo = ContactsHelper.resolveContact(context, contactUri)
+            if (contactInfo != null) {
+                if (linkedContacts.none { it.displayName == contactInfo.displayName }) {
+                    linkedContacts.add(contactInfo)
+                    if (!body.contains(contactInfo.displayName)) {
+                        body = if (body.isBlank()) "@${contactInfo.displayName}" else "$body\n@${contactInfo.displayName}"
+                    }
+                    Toast.makeText(context, "Linked: ${contactInfo.displayName}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val contactPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            contactPickerLauncher.launch(null)
+        } else {
+            Toast.makeText(context, "Contacts permission is needed to select contacts", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Image Picker: persist immediately to app's internal filesDir so it never loses permissions after app restart!
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            attachedImageUri = uri
+            val permanentUriString = viewModel.repository.persistImageToLocalStorage(uri)
+            attachedImageUri = Uri.parse(permanentUriString)
         }
     }
 
@@ -164,19 +202,25 @@ fun EntryEditScreen(
         }
     }
 
+    // Initialize state only once to prevent background room updates from wiping tags and causing screen flicker
+    var hasInitializedData by remember(entryId) { mutableStateOf(false) }
+
     LaunchedEffect(existingEntryDetail) {
-        existingEntryDetail?.let { item ->
-            title = item.entry.title
-            body = item.entry.body
-            location = item.entry.location ?: ""
-            selectedMood = item.entry.mood
-            item.entry.imageUri?.let { attachedImageUri = Uri.parse(it) }
-            tagsList.clear()
-            tagsList.addAll(item.tags.map { it.name })
-            pages.clear()
-            pages.addAll(item.pages)
-            audioRecords.clear()
-            audioRecords.addAll(item.audioRecords)
+        if (!hasInitializedData && existingEntryDetail != null) {
+            existingEntryDetail?.let { item ->
+                title = item.entry.title
+                body = item.entry.body
+                location = item.entry.location ?: ""
+                selectedMood = item.entry.mood
+                item.entry.imageUri?.let { attachedImageUri = Uri.parse(it) }
+                tagsList.clear()
+                tagsList.addAll(item.tags.map { it.name })
+                pages.clear()
+                pages.addAll(item.pages)
+                audioRecords.clear()
+                audioRecords.addAll(item.audioRecords)
+                hasInitializedData = true
+            }
         }
     }
 
@@ -309,32 +353,16 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Mood Selector Chips
-            Text(
-                text = "Mood / Mindset",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            // Storypad-style Emoji Mood Picker
+            EmojiMoodPicker(
+                selectedMood = selectedMood,
+                onMoodSelected = { selectedMood = it },
+                modifier = Modifier.testTag("emoji_mood_picker")
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                moods.forEach { mood ->
-                    FilterChip(
-                        selected = selectedMood == mood,
-                        onClick = { selectedMood = if (selectedMood == mood) null else mood },
-                        label = { Text(mood) },
-                        modifier = Modifier.testTag("mood_chip_$mood")
-                    )
-                }
-            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Location & Image Attach Row
+            // Location, Contacts, & Image Attach Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -351,7 +379,30 @@ fun EntryEditScreen(
                     modifier = Modifier.weight(1f).testTag("entry_location_input")
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Link Device Contact Button
+                IconButton(
+                    onClick = {
+                        val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.READ_CONTACTS
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasPerm) {
+                            contactPickerLauncher.launch(null)
+                        } else {
+                            contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                        }
+                    },
+                    modifier = Modifier.testTag("link_contact_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = "Link Contact",
+                        tint = TerracottaAccent,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
 
                 IconButton(
                     onClick = {
@@ -365,8 +416,54 @@ fun EntryEditScreen(
                         imageVector = Icons.Default.AddPhotoAlternate,
                         contentDescription = "Attach Photo",
                         tint = ForestPrimary,
-                        modifier = Modifier.size(30.dp)
+                        modifier = Modifier.size(28.dp)
                     )
+                }
+            }
+
+            // Linked Contacts Display with Direct Actions
+            if (linkedContacts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Contacts:",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = TerracottaAccent
+                    )
+                    linkedContacts.forEach { contact ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = TerracottaAccent.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, TerracottaAccent.copy(alpha = 0.35f)),
+                            modifier = Modifier.clickable { selectedContactAction = contact }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "👤 ${contact.displayName}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = TerracottaAccent
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove contact",
+                                    tint = TerracottaAccent,
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clickable { linkedContacts.remove(contact) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -657,22 +754,13 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Body Editor
-            OutlinedTextField(
+            // Markdown WYSIWYG Editor & Live Rendered Preview
+            MarkdownWysiwygEditor(
                 value = body,
                 onValueChange = { body = it },
-                label = { Text("Write or dictate your thoughts") },
-                placeholder = { Text("Write freely... People (e.g. Sarah), places (e.g. Starbucks), and concepts will be extracted automatically into your knowledge graph.") },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp),
+                label = "Write reflection in markdown",
                 minLines = 8,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ForestPrimary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("entry_body_input")
+                modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -801,18 +889,20 @@ fun EntryEditScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 tagsList.forEach { tag ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .background(ForestPrimary.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                            .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
-                    ) {
-                        Text("#$tag", style = MaterialTheme.typography.labelMedium, color = ForestPrimary)
-                        IconButton(
-                            onClick = { tagsList.remove(tag) },
-                            modifier = Modifier.size(20.dp)
+                    key(tag) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(ForestPrimary.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Remove tag", modifier = Modifier.size(12.dp))
+                            Text("#$tag", style = MaterialTheme.typography.labelMedium, color = ForestPrimary)
+                            IconButton(
+                                onClick = { tagsList.remove(tag) },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove tag", modifier = Modifier.size(12.dp))
+                            }
                         }
                     }
                 }
@@ -938,6 +1028,72 @@ fun EntryEditScreen(
             onSaveTranscript = { newTranscript ->
                 body = newTranscript
                 Toast.makeText(context, "Spoken text applied to reflection!", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (selectedContactAction != null) {
+        val contact = selectedContactAction!!
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { selectedContactAction = null },
+            title = { Text(contact.displayName) },
+            text = {
+                Column {
+                    if (contact.phoneNumber != null) {
+                        Text("Phone: ${contact.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    if (contact.email != null) {
+                        Text("Email: ${contact.email}", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    Text("Direct device actions:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (contact.phoneNumber != null) {
+                        Button(
+                            onClick = {
+                                ContactsHelper.dialContact(context, contact.phoneNumber)
+                                selectedContactAction = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                        ) {
+                            Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Call")
+                        }
+                        Button(
+                            onClick = {
+                                ContactsHelper.messageContact(context, contact.phoneNumber)
+                                selectedContactAction = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent)
+                        ) {
+                            Icon(Icons.Default.Message, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("SMS")
+                        }
+                    }
+                    if (contact.email != null) {
+                        Button(
+                            onClick = {
+                                ContactsHelper.emailContact(context, contact.email)
+                                selectedContactAction = null
+                            }
+                        ) {
+                            Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Email")
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { selectedContactAction = null }) {
+                    Text("Close")
+                }
             }
         )
     }

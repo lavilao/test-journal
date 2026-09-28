@@ -366,6 +366,8 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun persistImageToLocalStorage(uri: Uri): String = repository.persistImageToLocalStorage(uri)
+
     // Photo Album Actions
     fun addPhoto(entryId: Long, uri: Uri, caption: String = "") {
         viewModelScope.launch {
@@ -404,6 +406,13 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     }
 
 
+
+    fun removeTagFromEntry(entryId: Long, tagId: Long) {
+        viewModelScope.launch {
+            repository.removeTagFromEntry(entryId, tagId)
+            selectEntry(entryId)
+        }
+    }
 
     fun deleteEntry(entryId: Long) {
         viewModelScope.launch {

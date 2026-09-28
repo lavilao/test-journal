@@ -115,6 +115,38 @@ class JournalRepository(
      * Immediate save of journal entry, followed by background asynchronous semantic processing.
      * Auto-save calls this frequently without blocking the UI.
      */
+    fun persistImageToLocalStorage(sourceUri: Uri): String {
+        return try {
+            val scheme = sourceUri.scheme
+            if (scheme == "file" || scheme == null) {
+                return sourceUri.toString()
+            }
+            val imagesDir = File(context.filesDir, "journal_images").apply { mkdirs() }
+            val extension = context.contentResolver.getType(sourceUri)?.let { mime ->
+                when {
+                    mime.contains("png") -> "png"
+                    mime.contains("webp") -> "webp"
+                    else -> "jpg"
+                }
+            } ?: "jpg"
+            val destFile = File(imagesDir, "img_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}.$extension")
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    sourceUri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            Uri.fromFile(destFile).toString()
+        } catch (e: Exception) {
+            sourceUri.toString()
+        }
+    }
+
     suspend fun saveEntry(
         entry: JournalEntry,
         manualTags: List<String> = emptyList(),
@@ -126,11 +158,17 @@ class JournalRepository(
         val pagesText = pages.joinToString("\n") { "${it.title}\n${it.body}" }
         val currentHash = MindForgerSemanticEngine.computeContentHash(entry.title, "${entry.body}\n$pagesText")
 
+        val savedImageUri = if (attachedImageUri != null) {
+            persistImageToLocalStorage(attachedImageUri)
+        } else {
+            entry.imageUri
+        }
+
         val entryToSave = entry.copy(
             wordCount = wordCount,
             contentHash = currentHash,
             updatedAt = System.currentTimeMillis(),
-            imageUri = attachedImageUri?.toString() ?: entry.imageUri
+            imageUri = savedImageUri
         )
 
         val entryId = if (entryToSave.id == 0L) {
@@ -225,15 +263,17 @@ class JournalRepository(
     }
 
     suspend fun addPhotoToEntry(entryId: Long, uri: Uri, caption: String = ""): Long = withContext(Dispatchers.IO) {
+        val persistentUriString = persistImageToLocalStorage(uri)
+        val persistentUri = Uri.parse(persistentUriString)
         val mediaId = dao.insertMediaItem(
             MediaItem(
                 entryId = entryId,
-                uri = uri.toString(),
+                uri = persistentUriString,
                 caption = caption
             )
         )
         semanticScope.launch {
-            val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
+            val analysis = MlKitAnalyzer.analyzeImageFromUri(context, persistentUri)
             val labelsJson = JSONArray(analysis.labels).toString()
             val existing = dao.getMediaById(mediaId)
             if (existing != null) {
@@ -324,6 +364,17 @@ class JournalRepository(
         dao.deletePagesForEntry(entryId)
         dao.deleteAudioRecordsForEntry(entryId)
         dao.deleteEntryById(entryId)
+        // Clean up orphaned entities/concepts and tags so they don't remain when notes are deleted
+        dao.pruneOrphanEntities()
+        dao.pruneOrphanTags()
+    }
+
+    suspend fun removeTagFromEntry(entryId: Long, tagId: Long) = withContext(Dispatchers.IO) {
+        dao.removeTagFromEntry(entryId, tagId)
+        dao.pruneOrphanTags()
+        semanticScope.launch {
+            processSemanticIntelligence(entryId)
+        }
     }
 
     /**
