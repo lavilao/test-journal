@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -636,7 +637,7 @@ fun EntryEditScreen(
                                         modifier = Modifier.testTag("transcribe_audio_edit_btn_$index")
                                     ) {
                                         Icon(
-                                            imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.EditNote,
+                                            imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.Edit,
                                             contentDescription = "Transcribe / Dictate",
                                             tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary
                                         )

@@ -33,10 +33,6 @@ import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -49,7 +45,16 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.example.ui.components.StorypadNewNoteFab
 import com.example.ui.components.StorypadNoteType
@@ -220,7 +225,7 @@ fun TimelineScreen(
             }
 
             // Gallery Go style Visual Memory Album (Offline-first, on-device intelligence)
-            val entriesWithPhotos = entries.filter { !it.entry.imageUri.isNullOrBlank() || it.media.isNotEmpty() }
+            val entriesWithPhotos = entries.filter { !it.entry.imageUri.isNullOrBlank() || it.mediaItems.isNotEmpty() }
             if (entriesWithPhotos.isNotEmpty()) {
                 item {
                     Card(
@@ -258,7 +263,7 @@ fun TimelineScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 entriesWithPhotos.take(8).forEach { item ->
-                                    val photoUri = item.entry.imageUri ?: item.media.firstOrNull()?.uri
+                                    val photoUri = item.entry.imageUri ?: item.mediaItems.firstOrNull()?.uri
                                     if (photoUri != null) {
                                         Surface(
                                             shape = RoundedCornerShape(10.dp),

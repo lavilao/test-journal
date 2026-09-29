@@ -53,7 +53,7 @@ data class TranslationUiState(
 
 class JournalViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = JournalRepository(application)
+    val repository = JournalRepository(application)
 
     val currentTab = MutableStateFlow(MainNavTab.TIMELINE)
 
