@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -66,6 +67,7 @@ import com.example.ui.theme.AmberNode
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,6 +152,29 @@ fun VoiceTranscriptionModal(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = ForestPrimary.copy(alpha = 0.12f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = ForestPrimary,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Bundled English Model: Ready (100% Offline • No Gboard Needed)",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                    color = ForestPrimary
+                                )
+                            }
+                        }
                     }
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.testTag("close_transcription_modal_btn")) {
@@ -161,55 +186,90 @@ fun VoiceTranscriptionModal(
 
             // Audio Player Bar (if audio file exists)
             if (!audioFilePath.isNullOrBlank()) {
+                var isTranscribingAudio by remember { mutableStateOf(false) }
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().testTag("modal_audio_player_card")
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = {
-                                    if (isAudioPlaying) {
-                                        viewModel.stopAudio()
-                                    } else {
-                                        viewModel.playAudio(audioFilePath)
-                                    }
-                                },
-                                modifier = Modifier.testTag("modal_play_pause_audio_btn")
-                            ) {
-                                Icon(
-                                    imageVector = if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (isAudioPlaying) "Pause" else "Play",
-                                    tint = ForestPrimary,
-                                    modifier = Modifier.size(28.dp)
-                                )
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = {
+                                        if (isAudioPlaying) {
+                                            viewModel.stopAudio()
+                                        } else {
+                                            viewModel.playAudio(audioFilePath)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("modal_play_pause_audio_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isAudioPlaying) "Pause" else "Play",
+                                        tint = ForestPrimary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (isAudioPlaying) "Playing Recorded Audio..." else "Recorded Audio File",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    val sec = durationMs / 1000
+                                    Text(
+                                        text = "${sec / 60}m ${sec % 60}s duration",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = if (isAudioPlaying) "Playing Recorded Audio..." else "Recorded Audio File",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                                val sec = durationMs / 1000
-                                Text(
-                                    text = "${sec / 60}m ${sec % 60}s duration",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                            if (isAudioPlaying) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .background(ForestPrimary, CircleShape)
                                 )
                             }
                         }
 
-                        if (isAudioPlaying) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .background(ForestPrimary, CircleShape)
-                            )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = {
+                                isTranscribingAudio = true
+                                scope.launch {
+                                    viewModel.voiceManager.transcribeAudioOffline(audioFilePath) { transcript, _ ->
+                                        isTranscribingAudio = false
+                                        if (transcript.isNotBlank()) {
+                                            transcriptText = if (transcriptText.isBlank()) transcript else "$transcriptText\n\n$transcript"
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("transcribe_audio_file_btn")
+                        ) {
+                            if (isTranscribingAudio) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Transcribing Audio with Bundled Engine...", fontSize = 12.sp)
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Transcribe Audio (Bundled English Engine)", fontSize = 12.sp)
+                            }
                         }
                     }
                 }
