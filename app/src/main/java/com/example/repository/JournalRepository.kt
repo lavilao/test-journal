@@ -21,6 +21,7 @@ import com.example.data.model.HybridSearchResult
 import com.example.data.model.JournalEntry
 import com.example.data.model.JournalPage
 import com.example.data.model.KnowledgeGraphData
+import com.example.data.model.LocalReminder
 import com.example.data.model.MediaItem
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.Relationship
@@ -50,12 +51,28 @@ class JournalRepository(
     private val database: AppDatabase = AppDatabase.getInstance(context)
 ) {
     private val dao = database.journalDao()
+    private val reminderDao = database.localReminderDao()
     private val semanticScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val allEntriesWithRelations: Flow<List<EntryWithRelations>> = dao.getAllEntriesWithRelations()
     val allEntities: Flow<List<EntityItem>> = dao.getAllEntities()
     val allTags: Flow<List<Tag>> = dao.getAllTags()
     val allEvents: Flow<List<EventItem>> = dao.getAllEvents()
+    val allReminders: Flow<List<LocalReminder>> = reminderDao.getAllReminders()
+    val activeReminders: Flow<List<LocalReminder>> = reminderDao.getActiveReminders()
+    val nextActiveReminder: Flow<LocalReminder?> = reminderDao.getNextActiveReminder()
+
+    suspend fun saveReminder(reminder: LocalReminder): Long = withContext(Dispatchers.IO) {
+        reminderDao.insertReminder(reminder)
+    }
+
+    suspend fun setReminderCompleted(id: Long, isCompleted: Boolean) = withContext(Dispatchers.IO) {
+        reminderDao.setCompleted(id, isCompleted)
+    }
+
+    suspend fun deleteReminder(id: Long) = withContext(Dispatchers.IO) {
+        reminderDao.deleteReminderById(id)
+    }
 
     fun getEntryWithRelations(id: Long): Flow<EntryWithRelations?> = dao.getEntryWithRelationsFlow(id)
 

@@ -40,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.FolderOpen
 import com.example.ui.screens.EntityExplorerScreen
 import com.example.ui.screens.EntryDetailScreen
 import com.example.ui.screens.EntryEditScreen
@@ -47,6 +49,7 @@ import com.example.ui.screens.HybridSearchScreen
 import com.example.ui.screens.KnowledgeGraphScreen
 import com.example.ui.screens.SettingsAndModelsScreen
 import com.example.ui.screens.TimelineScreen
+import com.example.ui.screens.VaultExplorerScreen
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.JournalViewModel
@@ -107,13 +110,24 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     NavigationBarItem(
                         selected = currentTab == MainNavTab.TIMELINE,
                         onClick = { viewModel.selectTab(MainNavTab.TIMELINE) },
-                        icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Timeline", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Journal") },
+                        icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Life Hub", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Life Hub") },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             indicatorColor = ForestPrimary
                         ),
                         modifier = Modifier.testTag("nav_timeline")
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == MainNavTab.VAULT,
+                        onClick = { viewModel.selectTab(MainNavTab.VAULT) },
+                        icon = { Icon(Icons.Default.FolderOpen, contentDescription = "Smart Vault", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Vault") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                            indicatorColor = ForestPrimary
+                        ),
+                        modifier = Modifier.testTag("nav_vault")
                     )
                     NavigationBarItem(
                         selected = currentTab == MainNavTab.GRAPH,
@@ -138,17 +152,6 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         modifier = Modifier.testTag("nav_entities")
                     )
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.SEARCH,
-                        onClick = { viewModel.selectTab(MainNavTab.SEARCH) },
-                        icon = { Icon(Icons.Default.Search, contentDescription = "Search", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Search") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
-                        ),
-                        modifier = Modifier.testTag("nav_search")
-                    )
-                    NavigationBarItem(
                         selected = currentTab == MainNavTab.SETTINGS,
                         onClick = { viewModel.selectTab(MainNavTab.SETTINGS) },
                         icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp)) },
@@ -167,7 +170,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             AnimatedContent(
                 targetState = screenState,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                transitionSpec = { fadeIn(animationSpec = tween(180)) togetherWith fadeOut(animationSpec = tween(140)) },
                 label = "ScreenTransition"
             ) { targetScreen ->
                 when (targetScreen) {
@@ -181,6 +184,10 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                     viewModel.selectEntity(entityId)
                                     viewModel.selectTab(MainNavTab.ENTITIES)
                                 }
+                            )
+                            MainNavTab.VAULT -> VaultExplorerScreen(
+                                viewModel = viewModel,
+                                onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
                             )
                             MainNavTab.GRAPH -> KnowledgeGraphScreen(
                                 viewModel = viewModel,

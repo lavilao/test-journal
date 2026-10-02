@@ -34,4 +34,13 @@
     <string name="on_this_day">On This Day</string>
     <string name="visual_memories">Visual Memories</string>
     <string name="concepts">Concepts &amp; Topics</string>
+    <string name="nav_vault">Vault</string>
+    <string name="nav_life_hub">Life Hub</string>
+    <string name="at_a_glance_steps">Steps today</string>
+    <string name="at_a_glance_screen_time">Screen on</string>
+    <string name="at_a_glance_reminder">Reminder</string>
+    <string name="category_personal">Personal</string>
+    <string name="category_health">Health</string>
+    <string name="category_finance">Finance &amp; Legal</string>
+    <string name="category_projects">Home &amp; Projects</string>
 </resources>

@@ -56,6 +56,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.example.ui.components.PixelAtAGlanceCard
+import com.example.ui.components.LifeHubCategoryGrid
 import com.example.ui.components.StorypadNewNoteFab
 import com.example.ui.components.StorypadNoteType
 import com.example.ui.components.VoiceTranscriptionModal
@@ -102,6 +104,8 @@ fun TimelineScreen(
     val onThisDay by viewModel.onThisDayMemories.collectAsState()
     val filterTag by viewModel.timelineFilterTag.collectAsState()
     val filterEntity by viewModel.timelineFilterEntity.collectAsState()
+    val telemetry by viewModel.telemetry.collectAsState()
+    val nextReminder by viewModel.nextActiveReminder.collectAsState()
 
     var showEventsView by remember { mutableStateOf(false) }
     var showQuickDictateModal by remember { mutableStateOf(false) }
@@ -137,71 +141,64 @@ fun TimelineScreen(
         ) {
             // Header
             item {
-                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(
-                        text = "Mnemosyne",
-                        style = MaterialTheme.typography.displayLarge,
-                        color = MaterialTheme.colorScheme.onBackground
+                val personalCount = remember(entries) {
+                    entries.count { item ->
+                        item.tags.none { t ->
+                            val name = t.name.lowercase()
+                            name.contains("health") || name.contains("fitness") || name.contains("finance") || name.contains("tax") || name.contains("project") || name.contains("work")
+                        }
+                    }
+                }
+                val healthCount = remember(entries) {
+                    entries.count { item ->
+                        item.tags.any { t ->
+                            val name = t.name.lowercase()
+                            name.contains("health") || name.contains("fitness") || name.contains("walk") || name.contains("exercise")
+                        }
+                    }
+                }
+                val financeCount = remember(entries) {
+                    entries.count { item ->
+                        item.tags.any { t ->
+                            val name = t.name.lowercase()
+                            name.contains("finance") || name.contains("tax") || name.contains("legal") || name.contains("budget") || name.contains("doc")
+                        }
+                    }
+                }
+                val projectsCount = remember(entries) {
+                    entries.count { item ->
+                        item.tags.any { t ->
+                            val name = t.name.lowercase()
+                            name.contains("project") || name.contains("work") || name.contains("home") || name.contains("dev")
+                        }
+                    }
+                }
+
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    // Google Pixel "At a Glance" Live Telemetry & Reminders Card
+                    PixelAtAGlanceCard(
+                        telemetry = telemetry,
+                        nextReminder = nextReminder,
+                        onToggleReminder = { id, done -> viewModel.toggleReminder(id, done) },
+                        onAddReminder = { title, cat -> viewModel.addReminder(title, cat) },
+                        onRequestUsageAccess = { viewModel.lifeHubManager.openUsageAccessSettings() }
                     )
-                    Text(
-                        text = "Offline Semantic Journal & Memory Graph",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Quicken LifeHub Smart Life Category Folders
+                    LifeHubCategoryGrid(
+                        personalCount = personalCount,
+                        healthCount = healthCount,
+                        financeCount = financeCount,
+                        projectsCount = projectsCount,
+                        onSelectCategory = { cat ->
+                            viewModel.vaultCategoryFilter.value = cat
+                            viewModel.selectTab(com.example.viewmodel.MainNavTab.VAULT)
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
-
-                    // Stats Summary Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "${entries.size}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = ForestPrimary
-                            )
-                            Text(
-                                text = "Memories",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "${allEntities.size}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = TerracottaAccent
-                            )
-                            Text(
-                                text = "Entities",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "${events.size}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = AmberNode
-                            )
-                            Text(
-                                text = "Episodes",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
 
                     // View Mode Switcher
                     Row(

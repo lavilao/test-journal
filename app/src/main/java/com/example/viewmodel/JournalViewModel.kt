@@ -16,7 +16,10 @@ import com.example.data.model.JournalEntry
 import com.example.data.model.JournalPage
 import com.example.data.model.JournalTemplate
 import com.example.data.model.KnowledgeGraphData
+import com.example.data.model.LocalReminder
 import com.example.data.model.MediaItem
+import com.example.telemetry.DeviceLifeHubManager
+import com.example.telemetry.LifeHubTelemetry
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.StorageBreakdown
 import com.example.data.model.SuggestedTag
@@ -36,11 +39,35 @@ import kotlinx.coroutines.launch
 
 enum class MainNavTab {
     TIMELINE,
+    VAULT,
     GRAPH,
     ENTITIES,
     SEARCH,
     SETTINGS
 }
+
+enum class VaultFileType {
+    ALL,
+    NOTES,
+    AUDIO,
+    PHOTOS
+}
+
+data class VaultFileItem(
+    val id: Long,
+    val title: String,
+    val fileName: String,
+    val fileExtension: String,
+    val sizeBytes: Long,
+    val formattedSize: String,
+    val lastModified: Long,
+    val tags: List<Tag>,
+    val mood: String?,
+    val imageUri: String?,
+    val audioDurationMs: Long?,
+    val previewText: String,
+    val category: String
+)
 
 data class TranslationUiState(
     val isTranslating: Boolean = false,
@@ -74,6 +101,93 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     private val _onThisDayMemories = MutableStateFlow<List<JournalEntry>>(emptyList())
     val onThisDayMemories: StateFlow<List<JournalEntry>> = _onThisDayMemories.asStateFlow()
+
+    // Device Health & Life Hub Telemetry
+    val lifeHubManager = DeviceLifeHubManager(application, viewModelScope)
+    val telemetry: StateFlow<LifeHubTelemetry> = lifeHubManager.telemetry
+
+    // Local Reminders
+    val allReminders: StateFlow<List<LocalReminder>> = repository.allReminders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val activeReminders: StateFlow<List<LocalReminder>> = repository.activeReminders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val nextActiveReminder: StateFlow<LocalReminder?> = repository.nextActiveReminder
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // TagSpaces Smart Vault States
+    val vaultTypeFilter = MutableStateFlow(VaultFileType.ALL)
+    val vaultTagFilter = MutableStateFlow<String?>(null)
+    val vaultCategoryFilter = MutableStateFlow<String?>(null)
+    val vaultSearchQuery = MutableStateFlow("")
+
+    val vaultItems: StateFlow<List<VaultFileItem>> = combine(
+        entries,
+        vaultTypeFilter,
+        vaultTagFilter,
+        vaultCategoryFilter,
+        vaultSearchQuery
+    ) { all, typeFilter, tagFilter, categoryFilter, search ->
+        val mapped = all.map { entryWithRel ->
+            val entry = entryWithRel.entry
+            val itemTags = entryWithRel.tags
+            val hasAudio = entryWithRel.audioRecords.isNotEmpty()
+            val hasPhoto = entry.imageUri != null || entryWithRel.mediaItems.isNotEmpty()
+
+            val ext = when {
+                hasAudio -> "m4a"
+                hasPhoto -> "jpg"
+                else -> "md"
+            }
+            val cleanTitle = entry.title.ifBlank { "Untitled" }.replace(Regex("[^a-zA-Z0-9_]"), "_").take(22)
+            val fileName = "${cleanTitle}.$ext"
+            val estimatedSize = when (ext) {
+                "m4a" -> 1024L * 180 + (entry.body.length * 2L)
+                "jpg" -> 1024L * 850
+                else -> (entry.title.length + entry.body.length) * 2L + 256L
+            }
+            val formattedSize = when {
+                estimatedSize >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB", estimatedSize / (1024f * 1024f))
+                else -> "${estimatedSize / 1024} KB"
+            }
+
+            val cat = when {
+                itemTags.any { it.name.contains("health", ignoreCase = true) || it.name.contains("fitness", ignoreCase = true) || it.name.contains("walk", ignoreCase = true) } -> "Health"
+                itemTags.any { it.name.contains("finance", ignoreCase = true) || it.name.contains("tax", ignoreCase = true) || it.name.contains("legal", ignoreCase = true) || it.name.contains("budget", ignoreCase = true) } -> "Finance"
+                itemTags.any { it.name.contains("project", ignoreCase = true) || it.name.contains("work", ignoreCase = true) || it.name.contains("home", ignoreCase = true) || it.name.contains("dev", ignoreCase = true) } -> "Projects"
+                else -> "Personal"
+            }
+
+            VaultFileItem(
+                id = entry.id,
+                title = entry.title.ifBlank { "Untitled" },
+                fileName = fileName,
+                fileExtension = ext,
+                sizeBytes = estimatedSize,
+                formattedSize = formattedSize,
+                lastModified = entry.updatedAt,
+                tags = itemTags,
+                mood = entry.mood,
+                imageUri = entry.imageUri ?: entryWithRel.mediaItems.firstOrNull()?.uri,
+                audioDurationMs = entryWithRel.audioRecords.firstOrNull()?.durationMs,
+                previewText = entry.body.take(120),
+                category = cat
+            )
+        }
+
+        mapped.filter { item ->
+            val matchesType = when (typeFilter) {
+                VaultFileType.ALL -> true
+                VaultFileType.NOTES -> item.fileExtension == "md"
+                VaultFileType.AUDIO -> item.fileExtension == "m4a"
+                VaultFileType.PHOTOS -> item.fileExtension == "jpg"
+            }
+            val matchesTag = tagFilter == null || item.tags.any { it.name.equals(tagFilter, ignoreCase = true) }
+            val matchesCategory = categoryFilter == null || item.category.equals(categoryFilter, ignoreCase = true)
+            val matchesSearch = search.isBlank() || item.title.contains(search, ignoreCase = true) || item.previewText.contains(search, ignoreCase = true)
+
+            matchesType && matchesTag && matchesCategory && matchesSearch
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Selected Entry for Detail / Edit
     private val _selectedEntryId = MutableStateFlow<Long?>(null)
@@ -536,4 +650,34 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     suspend fun getExportJson(): String = repository.exportToJson()
 
     suspend fun getExportMarkdown(): String = repository.exportToMarkdownBundle()
+
+    fun addReminder(title: String, category: String = "Personal") {
+        viewModelScope.launch {
+            repository.saveReminder(LocalReminder(title = title, category = category))
+            lifeHubManager.refreshTelemetry()
+        }
+    }
+
+    fun toggleReminder(id: Long, isCompleted: Boolean) {
+        viewModelScope.launch {
+            repository.setReminderCompleted(id, isCompleted)
+            lifeHubManager.refreshTelemetry()
+        }
+    }
+
+    fun deleteReminder(id: Long) {
+        viewModelScope.launch {
+            repository.deleteReminder(id)
+            lifeHubManager.refreshTelemetry()
+        }
+    }
+
+    fun refreshTelemetry() {
+        lifeHubManager.refreshTelemetry()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        lifeHubManager.unregisterStepSensor()
+    }
 }

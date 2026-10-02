@@ -35,15 +35,17 @@ import com.example.data.model.Tag
         EventItem::class,
         FacePersonAssociation::class,
         Relationship::class,
-        MediaItem::class
+        MediaItem::class,
+        com.example.data.model.LocalReminder::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun journalDao(): JournalDao
+    abstract fun localReminderDao(): LocalReminderDao
 
     companion object {
         @Volatile
@@ -152,6 +154,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `local_reminders` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `dueTimestamp` INTEGER NOT NULL,
+                        `isCompleted` INTEGER NOT NULL,
+                        `priority` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_local_reminders_dueTimestamp` ON `local_reminders` (`dueTimestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_local_reminders_isCompleted` ON `local_reminders` (`isCompleted`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -159,7 +179,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

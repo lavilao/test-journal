@@ -34,4 +34,13 @@
     <string name="on_this_day">En este día</string>
     <string name="visual_memories">Recuerdos visuales</string>
     <string name="concepts">Conceptos y temas</string>
+    <string name="nav_vault">Bóveda</string>
+    <string name="nav_life_hub">Centro Vital</string>
+    <string name="at_a_glance_steps">Pasos hoy</string>
+    <string name="at_a_glance_screen_time">Pantalla activa</string>
+    <string name="at_a_glance_reminder">Recordatorio</string>
+    <string name="category_personal">Personal</string>
+    <string name="category_health">Salud</string>
+    <string name="category_finance">Finanzas y Legal</string>
+    <string name="category_projects">Hogar y Proyectos</string>
 </resources>

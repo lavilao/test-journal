@@ -1,187 +1,112 @@
-# Mnemosyne: Offline-First Semantic Journal & Personal Knowledge Graph
+# Implementation Plan: Quicken LifeHub & Pixel Smart Dashboard
 
-An offline-first, privacy-centric personal knowledge manager (PKM) and journal for Android that automatically discovers conceptual links, extracts entities, and generates an explainable local knowledge graph without remote servers or cloud LLMs.
+## 1. User Intent & Clarifications
 
----
-
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following directions were confirmed during interactive clarification and anchor this implementation:
-
-- **Application Name**: **Mnemosyne Semantic Journal** (launcher label: *Mnemosyne*).
-- **Core Workflow Balance**: **Balanced hybrid** combining a chronological narrative stream (today's thoughts, calendar timeline) with an ambient semantic intelligence pane (auto-linking, shared entity clusters, concept graph).
-- **Visual Aesthetic**: **Warm editorial notebook** featuring soft cream/parchment surfaces, deep espresso and sepia ink typography, subtle terra-cotta/sage semantic badges, and crisp card borders reminiscent of archival stationery.
-- **Privacy & Execution Invariant**: Zero telemetry, zero cloud synchronisation, zero generative LLM calls. All information retrieval, TF-IDF scoring, entity normalization, face/image labeling, and translation run 100% on-device.
+### Goal
+Evolve Mnemosyne into an intelligent, frictionless **Life Hub** that merges:
+1. **Quicken LifeHub Architecture:** Purpose-driven Smart Life Folders (Personal, Health, Financial/Legal, Home & Work) that transform notes and documents into organized life areas.
+2. **Google Pixel Minimalist "At a Glance" Widget:** Sleek, low-text live smart chip displaying current context (next calendar event, step goal progress, weather/greeting, active reminder).
+3. **Microsoft Launcher-Style Device Telemetry (Pixel Aesthetic):** Minimalist metrics for daily step count, screen time, and recently accessed files without text overload.
+4. **Calendar & Local Reminders:** Seamless sync with Android `CalendarContract` plus an offline-first local reminders fallback.
+5. **TagSpaces Smart Vault:** Dedicated file explorer tab with tag pills, format badges, and instant file export.
+6. **Subtle Fade Transitions & Storypad Capture:** Effortless navigation and instant multi-type capture (voice, photo, text).
 
 ---
 
-## 1. Overview & Core Concept
+## 2. Architecture & Design Decisions
 
-Mnemosyne transforms daily freeform journaling into an interconnected personal knowledge graph. As you write, a background pipeline silently extracts people, places, topics, and timestamps, calculating semantic similarity against prior memories using proven Information Retrieval (IR) algorithms (BM25, TF-IDF, token co-occurrence, and ML Kit on-device models).
+### A. Main Dashboard Layout (Quicken LifeHub + Pixel "At a Glance")
+The landing screen features a clean, high-trust hierarchy:
+- **Pixel "At a Glance" Smart Header:**
+  - Date & contextual greeting with live dynamic status.
+  - Next upcoming event or reminder pill (tap to view/complete).
+  - Minimalist progress chip: Steps ring & screen time metric in a single clean row.
+- **Quicken LifeHub Category Grid:**
+  - 4 purposeful smart life tiles:
+    1. *Personal & Wellbeing* (Thoughts, mood, reflections)
+    2. *Health & Activity* (Steps, exercise, doctor notes, vitals)
+    3. *Finance & Documents* (Contracts, bills, receipts, IDs)
+    4. *Projects & Home* (Tasks, property, gear, family)
+  - Each tile displays item count and latest activity badge.
+- **Recent Files & Media Carousel (Gallery Go style):**
+  - Instant access to recent photos, audio memos, and documents.
+- **Storypad Quick Capture FAB:**
+  - 1-tap capture for default note type; long-press for multi-format selector.
 
-- **What It Does**: Provides an instantaneous, distraction-free markdown journal editor coupled with a background semantic linking engine that surfaces *why* past notes relate to present reflections (e.g., *"Related because both notes mention Sarah and Project Apollo"*).
-- **Target Audience**: Privacy-conscious thinkers, researchers, writers, and daily journalers who want Obsidian/Roam-like semantic connections without cloud leaks, subscription paywalls, or battery-draining local LLM inference.
-- **Key Value**: Low-battery, high-performance semantic retrieval that works identically in airplane mode, on older Android 10 devices, or when disconnected from Google Play Services.
+### B. Device Telemetry & Health Integration (Real Android APIs)
+- **Step Counting:** Android `SensorManager` with `Sensor.TYPE_STEP_COUNTER` and `ACTIVITY_RECOGNITION` support.
+- **Screen Time & Usage:** `UsageStatsManager` query for today's foreground screen time and top 3 apps, with an in-app button to grant usage access if needed.
+- **Calendar & Reminders:** Query `CalendarContract.Instances` for upcoming schedule. If permissions are not granted or for offline-first privacy, automatically fallback to internal Room `LocalReminder` records.
 
----
-
-## 2. User Experience & Visual Design
-
-### Key User Flows
-
-1. **Daily Reflection & Instant Capture**:
-   - Tap the Floating Action Button or the "Today" header on the Home dashboard.
-   - Compose formatted thoughts with optional photo attachments, location tags, and explicit `#tags`.
-   - Saving is synchronous and instantaneous (<10ms). The note is persisted directly to SQLite, immediately visible in the timeline.
-
-2. **Ambient Semantic Discovery**:
-   - In the background, an asynchronous processing pipeline analyzes the entry's content hash.
-   - On opening the entry, the "Connections & Context" sheet reveals:
-     - **Extracted Entities**: Categorized chips for People (e.g., *Sarah*), Places (*Starbucks*), Organizations, and Dates.
-     - **Automatic Semantic Tags**: Inferred with confidence percentages and explainability reasons (e.g., `#hiking` via keyword and image scene analysis).
-     - **Related Memories**: Ranked cards displaying shared entities and conceptual overlap with explicit explanations.
-
-3. **Knowledge Graph & Entity Exploration**:
-   - Tap any person, place, or concept chip (or switch to the "Knowledge" tab) to view an interactive visual graph.
-   - Nodes represent entities and notes; edges represent weighted semantic co-occurrences.
-   - Filter the graph by type (People, Places, Concepts) or temporal slice.
-
-4. **Deep Hybrid Search**:
-   - Type queries like `"hiking with Mike"` or `"AI projects"`.
-   - Results combine exact FTS5 text matches with entity-expanded semantic links, highlighted with matching excerpts.
-
-5. **On-Device Translation & Language Toolkit**:
-   - Select or inspect foreign language entries; translate on-demand using local ML Kit models downloaded only with explicit user permission.
-
-### Visual Identity & Theme (Warm Editorial Notebook)
-
-- **Color Tokens**:
-  - `Background / Surface`: Warm cream parchment (`#FBF9F5` light, `#1C1917` deep warm obsidian dark).
-  - `Surface Container`: Soft buff / card stock (`#F3EFEA` light, `#292524` dark).
-  - `Primary / Ink`: Deep espresso ink (`#2E231D` light, `#F5F0EB` dark).
-  - `Semantic Accents`:
-    - *People / Social*: Terra-cotta russet (`#B45309`).
-    - *Places / Locations*: Muted forest sage (`#2D6A4F`).
-    - *Concepts / Topics*: Dusty lapis blue (`#3B6082`).
-    - *Automated Insights*: Warm amber ochre (`#C27803`).
-- **Typography & Rhythm**:
-  - Editorial serif display headers for journal dates and entry titles, paired with high-legibility clean modern body text.
-  - Generous 16dp/20dp screen margins, 8dp baseline grid, subtle card borders (`1.dp` solid `#E7DFD5`), and delicate divider lines.
-- **Interactive Feedback & States**:
-  - Gentle spring animations (`spring(stiffness = Spring.StiffnessMediumLow)`) on card expansion and node selection.
-  - Thoughtfully designed empty states with archival sketches, helpful prompts, and non-blocking background task indicators.
+### C. Visual Aesthetics & Motion
+- **Style:** Clean Google Pixel minimalism meets Quicken LifeHub structure.
+- **Typography & Layout:** Minimal text, high-legibility bold titles, concise pills and badges, avoiding dense walls of text.
+- **Motion:** Calm, low-latency cross-fade animations (`fadeIn(tween(180))` + `fadeOut(tween(140))`).
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 3. File-by-File Implementation Plan
 
-### Decision 1: MindForger-Inspired Deterministic IR vs. Heavy On-Device LLM
-- **Chosen Approach**: Combine SQLite FTS5 full-text indexing with custom BM25/TF-IDF tokenizers, keyword extraction, and weighted entity overlap scoring.
-- **Why**: Zero warm-up latency, negligible RAM (<15MB), zero thermal throttling, and complete explainability.
-- **Alternatives Considered**: 3B-parameter quantized LLMs (e.g., Gemma 2B via MediaPipe) were rejected as they require 1.5GB+ RAM, drain 10-15% battery per session, and fail on older 2GB/3GB RAM Android 10 devices.
+### 1. `app/src/main/AndroidManifest.xml`
+- Add permissions:
+  - `<uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />`
+  - `<uses-permission android:name="android.permission.READ_CALENDAR" />`
+  - `<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />`
 
-### Decision 2: Multi-Tier Entity Extraction Architecture
-- **Chosen Approach**: Pluggable `EntityExtractor` interface with a primary ML Kit implementation (Entity Extraction & Language Detection) backed by an instant regex/rule-based fallback.
-- **Why**: Ensures the app works completely on non-Google Play Services ROMs (e.g., GrapheneOS, microG, AOSP) while leveraging hardware acceleration where available.
+### 2. `app/src/main/java/com/example/data/model/LocalReminder.kt` & `LocalReminderDao.kt`
+- Room entity for local offline tasks and reminders (title, dueTimestamp, isCompleted, priority, category).
+- Room DAO for querying active reminders, marking done, and inserting new reminders.
 
-### Decision 3: Battery Conservation via Content Hashing & WorkManager
-- **Chosen Approach**: Store `contentHash` alongside `processedContentHash`. Background semantic processing only triggers when the hash changes. Lightweight indexing runs immediately in coroutines, while media/graph recalculations are batched in WorkManager with idle/battery-not-low constraints.
-- **Why**: Prevents redundant re-indexing during typing and prevents background battery drain.
+### 3. `app/src/main/java/com/example/telemetry/DeviceLifeHubManager.kt` (New Manager)
+- Helper class providing reactive StateFlows:
+  - `todaySteps: StateFlow<Int>` via sensor listener.
+  - `todayScreenTimeMinutes: StateFlow<Int>` via `UsageStatsManager`.
+  - `upcomingEvents: StateFlow<List<CalendarEventItem>>` querying Android `CalendarContract`.
+  - Graceful fallbacks when permissions are denied or sensors are absent in emulators.
 
----
+### 4. `app/src/main/java/com/example/ui/components/PixelAtAGlanceCard.kt` (New Component)
+- Pixel-inspired compact card:
+  - Left: Date, temperature/greeting, and next calendar event or reminder pill.
+  - Right: Minimalist steps chip and screen time indicator.
+  - Tap event to open details or toggle completion.
 
-## 4. Technical Architecture & Data Strategy
+### 5. `app/src/main/java/com/example/ui/components/LifeHubCategoryGrid.kt` (New Component)
+- 4 Quicken LifeHub smart category cards:
+  - Color-coded icons, title, total item count, and quick tag filter link.
+  - Tapping a category filters notes/vault into that life domain.
 
-### System Architecture Diagram
+### 6. `app/src/main/java/com/example/ui/screens/VaultExplorerScreen.kt` (New Screen)
+- TagSpaces-style smart file explorer:
+  - Format chips: `All`, `Notes (.md)`, `Audio (.m4a)`, `Photos (.jpg)`.
+  - Tag filter pills carousel.
+  - Responsive 2-column card grid with format badges, file size indicator, and 1-tap share/export.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Jetpack Compose UI                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐  │
-│  │  Home / Feed │  │ Journal View │  │ Knowledge    │  │ Hybrid     │  │
-│  │  & Timeline  │  │   & Editor   │  │ Graph Canvas │  │ Search     │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘  │
-└─────────┼─────────────────┼─────────────────┼────────────────┼─────────┘
-          │                 │                 │                │
-┌─────────▼─────────────────▼─────────────────▼────────────────▼─────────┐
-│                           ViewModel Layer                              │
-│         JournalViewModel, GraphViewModel, SearchViewModel              │
-└─────────────────────────────────┬──────────────────────────────────────┘
-                                  │
-┌─────────────────────────────────▼──────────────────────────────────────┐
-│                           Repository Layer                             │
-│   JournalRepository, EntityRepository, RelationshipRepository          │
-└──────────────┬──────────────────────────────────────────┬──────────────┘
-               │                                          │
-┌──────────────▼─────────────┐              ┌─────────────▼──────────────┐
-│     Room SQLite Database   │              │   Semantic / ML Pipeline   │
-│  - journal_entries         │◄─────────────┤  - Content Hash Detector   │
-│  - tags & entry_tags       │              │  - ML Kit / Regex Extractor│
-│  - entities & entry_entity │              │  - TF-IDF / BM25 Indexer   │
-│  - relationships           │              │  - Explainable Linker      │
-│  - media & image_entities  │              │  - Vision / Face Detector  │
-│  - entries_fts (FTS5)      │              │  - Offline Translator      │
-└────────────────────────────┘              └────────────────────────────┘
-```
+### 7. `app/src/main/java/com/example/ui/screens/TimelineScreen.kt`
+- Integrate `PixelAtAGlanceCard` at the top of the Life Hub.
+- Integrate `LifeHubCategoryGrid`.
+- Retain the recent visual memory album and chronological notes stream.
+- Polish layout to remove wordy descriptions and replace with clean, scannable cards.
 
-### Relational Schema Design
+### 8. `app/src/main/java/com/example/viewmodel/JournalViewModel.kt`
+- Integrate `DeviceLifeHubManager` telemetry flows.
+- Add local reminders CRUD operations.
+- Add category filtering and Vault file mapping.
 
-1. **`journal_entries`**:
-   - `id`: Long primary key.
-   - `title`: String.
-   - `body`: String (Markdown supported).
-   - `createdAt`, `updatedAt`, `journalDate`: Long timestamps.
-   - `locationName`, `latitude`, `longitude`: Optional coordinates.
-   - `language`: Detected ISO code (e.g., `"en"`).
-   - `wordCount`: Int.
-   - `contentHash`: String (SHA-256) to track edits.
-   - `processedHash`: String (SHA-256) to skip redundant semantic runs.
-   - `isEncrypted`: Boolean flag for Keystore-backed PIN protection.
+### 9. `app/src/main/java/com/example/MainActivity.kt`
+- Add `MainNavTab.VAULT` with `Icons.Default.FolderOpen`.
+- Configure `VaultExplorerScreen` in the navigation stack with smooth fade transitions.
 
-2. **`tags` & `entry_tags`**:
-   - Normalised lowercase tag names with `source` (`USER` vs `AUTOMATIC`) and confidence scores.
-
-3. **`entities` & `entry_entities`**:
-   - `canonicalName`, `displayName`, and `type` (`PERSON`, `PLACE`, `ORGANIZATION`, `EVENT`, `CONCEPT`, `DATE`).
-   - Many-to-many junction recording mention count, exact offsets, and extraction confidence.
-
-4. **`relationships`**:
-   - `sourceEntryId`, `targetEntryId`, `relationshipType` (`SIMILAR_TOPIC`, `SHARED_ENTITIES`, `TEMPORAL_PROXIMITY`), `score` (0.0 to 1.0), and `explanation` (e.g., *"Shares entities: Sarah, Starbucks; Topics: AI"*).
-
-5. **`media` & `image_entities`**:
-   - Local file URI, dimensions, MIME type, plus extracted labels, scene tags, and face cluster bounds.
-
-6. **`entries_fts`**:
-   - SQLite virtual table supporting BM25 token ranking for millisecond-fast searches.
+### 10. `app/src/main/res/values/strings.xml` & `values-es/strings.xml`
+- Add localized strings for LifeHub categories, Pixel widget states, reminders, and vault filters.
 
 ---
 
-## 5. Development Strategy & Milestones
+## 4. Verification & Testing Checklist
 
-1. **Foundation & Configuration**:
-   - Update `app/build.gradle.kts` with Room KSP, ML Kit libraries (Entity Extraction, Language Identification, Translation, Face Detection, Image Labeling), and Coil for media.
-   - Update `strings.xml`, `metadata.json`, and application ID.
-   - Create custom adaptive app icon and warm editorial theme tokens.
-
-2. **Room Database & Clean Repository**:
-   - Implement DAOs, Entities, FTS5 virtual tables, and TypeConverters with migration safety.
-   - Construct repositories with reactive Kotlin `Flow` streams.
-
-3. **MindForger-Inspired Semantic Engine**:
-   - Build tokenizer, TF-IDF calculation, stopword filtering, and cosine similarity scoring.
-   - Implement explainable relationship generator that pairs shared entity mentions with topic proximity.
-
-4. **On-Device Vision & ML Kit Layer**:
-   - Abstract `EntityExtractor`, `LanguageDetector`, `TranslationManager`, and `ImageIntelligence` behind clean interfaces with offline fallback handlers.
-
-5. **Jetpack Compose UI & Polish**:
-   - **Home / Feed**: Today's prompt, recent reflections, connection insights, and timeline filter.
-   - **Editor / Viewer**: Fluid markdown support, image attachment, tags, and inline entity badges.
-   - **Knowledge Graph**: 2D force-directed / canvas-rendered concept explorer.
-   - **Semantic Search**: Fast search with highlighted snippets and entity filters.
-   - **Model & Privacy Settings**: Local data export/import (Markdown + JSON) and model management.
-
-6. **Verification & Testing**:
-   - Verify unit tests for TF-IDF calculations, entity normalization, and relationship scoring.
-   - Run full app compilation to ensure zero build errors.
+- [ ] **Build Verification:** `compile_applet` succeeds without errors.
+- [ ] **Unit Tests:** `gradle :app:testDebugUnitTest` passes.
+- [ ] **At a Glance Display:** Next event / reminder renders cleanly; step count and screen time render without overflow.
+- [ ] **Category Filtering:** Tapping LifeHub categories filters notes and files accurately.
+- [ ] **Vault Explorer:** TagSpaces tag filters and format pills dynamically filter the vault grid.
+- [ ] **Offline Resilience:** Calendar gracefully falls back to local reminders if calendar permissions are not granted.
+- [ ] **Visual Polish:** Pixel minimalist aesthetic, scannable chips, zero walls of text, and subtle fade transitions.

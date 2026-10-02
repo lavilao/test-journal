@@ -15,8 +15,10 @@ val InkMuted = Color(0xFF8E847C)
 val ForestPrimary = Color(0xFF2B473A)
 val ForestOnPrimary = Color(0xFFFFFFFF)
 val TerracottaAccent = Color(0xFFB95D31)
+val WarmAccent = TerracottaAccent
 val AmberNode = Color(0xFFD97706)
 val SoftSage = Color(0xFF8BA897)
+val SageAccent = SoftSage
 
 // Dark Leather / Obsidian Notebook Palette (Dark)
 val DarkLeatherBackground = Color(0xFF151413)
