@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.BubbleChart
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -110,8 +112,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     NavigationBarItem(
                         selected = currentTab == MainNavTab.TIMELINE,
                         onClick = { viewModel.selectTab(MainNavTab.TIMELINE) },
-                        icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Life Hub", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Life Hub") },
+                        icon = { Icon(Icons.Default.Home, contentDescription = "Inicio", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Inicio") },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             indicatorColor = ForestPrimary
@@ -121,8 +123,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     NavigationBarItem(
                         selected = currentTab == MainNavTab.VAULT,
                         onClick = { viewModel.selectTab(MainNavTab.VAULT) },
-                        icon = { Icon(Icons.Default.FolderOpen, contentDescription = "Smart Vault", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Vault") },
+                        icon = { Icon(Icons.Default.Search, contentDescription = "Buscar", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Buscar") },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             indicatorColor = ForestPrimary
@@ -132,8 +134,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     NavigationBarItem(
                         selected = currentTab == MainNavTab.GRAPH,
                         onClick = { viewModel.selectTab(MainNavTab.GRAPH) },
-                        icon = { Icon(Icons.Default.Hub, contentDescription = "Knowledge Graph", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Graph") },
+                        icon = { Icon(Icons.Default.History, contentDescription = "Actividad", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Actividad") },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             indicatorColor = ForestPrimary
@@ -141,21 +143,10 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         modifier = Modifier.testTag("nav_graph")
                     )
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.ENTITIES,
-                        onClick = { viewModel.selectTab(MainNavTab.ENTITIES) },
-                        icon = { Icon(Icons.Default.BubbleChart, contentDescription = "Entities", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Concepts") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
-                        ),
-                        modifier = Modifier.testTag("nav_entities")
-                    )
-                    NavigationBarItem(
                         selected = currentTab == MainNavTab.SETTINGS,
                         onClick = { viewModel.selectTab(MainNavTab.SETTINGS) },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Settings") },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "Ajustes", modifier = Modifier.size(22.dp)) },
+                        label = { Text("Ajustes") },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             indicatorColor = ForestPrimary

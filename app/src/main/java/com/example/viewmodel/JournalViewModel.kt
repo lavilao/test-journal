@@ -18,6 +18,9 @@ import com.example.data.model.JournalTemplate
 import com.example.data.model.KnowledgeGraphData
 import com.example.data.model.LocalReminder
 import com.example.data.model.MediaItem
+import com.example.rss.RssArticle
+import com.example.rss.RssFeedManager
+import com.example.rss.RssFeedSource
 import com.example.telemetry.DeviceLifeHubManager
 import com.example.telemetry.LifeHubTelemetry
 import com.example.data.model.RelatedEntryDetail
@@ -113,6 +116,30 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val nextActiveReminder: StateFlow<LocalReminder?> = repository.nextActiveReminder
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // RSS Discover Feed
+    val rssFeedManager = RssFeedManager(application)
+    val rssArticles: StateFlow<List<RssArticle>> = rssFeedManager.articles
+    val isRssLoading: StateFlow<Boolean> = rssFeedManager.isLoading
+    val rssSources: StateFlow<List<RssFeedSource>> = rssFeedManager.sources
+
+    init {
+        viewModelScope.launch {
+            rssFeedManager.refreshFeeds()
+        }
+    }
+
+    fun refreshRssFeeds() {
+        viewModelScope.launch {
+            rssFeedManager.refreshFeeds()
+        }
+    }
+
+    fun addCustomRssFeed(url: String, name: String, category: String = "Custom") {
+        viewModelScope.launch {
+            rssFeedManager.addCustomFeed(url, name, category)
+        }
+    }
 
     // TagSpaces Smart Vault States
     val vaultTypeFilter = MutableStateFlow(VaultFileType.ALL)
