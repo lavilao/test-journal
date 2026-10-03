@@ -125,7 +125,14 @@ fun GoogleSearchHubHeader(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        // Google "At a Glance" (De un vistazo) Widget Bar
+        AtAGlanceBar(
+            telemetry = telemetry,
+            nextReminder = nextReminder,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Google / Mnemosyne Logo (multi-colored letters)
         Row(

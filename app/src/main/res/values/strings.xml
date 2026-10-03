@@ -43,4 +43,5 @@
     <string name="category_health">Health</string>
     <string name="category_finance">Finance &amp; Legal</string>
     <string name="category_projects">Home &amp; Projects</string>
+    <string name="widget_at_a_glance_desc">Google At a Glance widget: Shows date, weather, daily steps, and upcoming local reminders.</string>
 </resources>
