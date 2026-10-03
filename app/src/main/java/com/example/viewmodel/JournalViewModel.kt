@@ -29,6 +29,8 @@ import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
 import com.example.media.PlaybackState
 import com.example.media.RecordingState
+import com.example.media.SpeechModelManager
+import com.example.media.SpeechModelStatus
 import com.example.media.VoiceJournalManager
 import com.example.repository.JournalRepository
 import com.example.semantic.MlKitAnalyzer
@@ -41,6 +43,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class MainNavTab {
+    INICIO,
+    BUSCAR,
+    NOTIFICACIONES,
+    ACTIVIDAD,
     TIMELINE,
     VAULT,
     GRAPH,
@@ -85,7 +91,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     val repository = JournalRepository(application)
 
-    val currentTab = MutableStateFlow(MainNavTab.TIMELINE)
+    val currentTab = MutableStateFlow(MainNavTab.INICIO)
 
     val entries: StateFlow<List<EntryWithRelations>> = repository.allEntriesWithRelations
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -138,6 +144,17 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     fun addCustomRssFeed(url: String, name: String, category: String = "Custom") {
         viewModelScope.launch {
             rssFeedManager.addCustomFeed(url, name, category)
+        }
+    }
+
+    // On-Device Speech Model Manager (Downloadable like Translation)
+    val speechModelManager = SpeechModelManager(application)
+    val speechModelStatus: StateFlow<SpeechModelStatus> = speechModelManager.modelStatus
+
+    fun downloadSpeechModel(onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = speechModelManager.downloadModel()
+            onComplete(success)
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +65,11 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.media.PlaybackState
 import com.example.ui.theme.AmberNode
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.LinearProgressIndicator
+import com.example.media.SpeechModelStatus
+import com.example.ui.components.GoogleBlue
+import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
@@ -85,6 +91,7 @@ fun VoiceTranscriptionModal(
     val isDictating by viewModel.isDictating.collectAsState()
     val playbackState by viewModel.voiceManager.playbackState.collectAsState()
     val currentPlayingPath by viewModel.voiceManager.currentPlayingPath.collectAsState()
+    val speechModelStatus by viewModel.speechModelStatus.collectAsState()
 
     val isAudioPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == audioFilePath
 
@@ -153,26 +160,61 @@ fun VoiceTranscriptionModal(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = ForestPrimary.copy(alpha = 0.12f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = ForestPrimary,
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "Bundled English Model: Ready (100% Offline • No Gboard Needed)",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-                                    color = ForestPrimary
-                                )
+                        when (val status = speechModelStatus) {
+                            is SpeechModelStatus.Ready -> {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = GoogleGreen.copy(alpha = 0.12f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = GoogleGreen,
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "Modelo offline descargado (42 MB • Sin nube)",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                            color = GoogleGreen
+                                        )
+                                    }
+                                }
+                            }
+                            is SpeechModelStatus.Downloading -> {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = GoogleBlue.copy(alpha = 0.12f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = GoogleBlue)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Descargando modelo (${(status.progress * 100).toInt()}%)...",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                            color = GoogleBlue
+                                        )
+                                    }
+                                }
+                            }
+                            is SpeechModelStatus.NotDownloaded -> {
+                                OutlinedButton(
+                                    onClick = { viewModel.downloadSpeechModel() },
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Descargar modelo offline (42 MB)", fontSize = 10.sp)
+                                }
                             }
                         }
                     }

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -44,9 +45,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.FolderOpen
+import com.example.ui.components.GoogleBlue
 import com.example.ui.screens.EntityExplorerScreen
 import com.example.ui.screens.EntryDetailScreen
 import com.example.ui.screens.EntryEditScreen
+import com.example.ui.screens.GoogleActivityScreen
+import com.example.ui.screens.GoogleNotificationsScreen
+import com.example.ui.screens.GoogleUniversalSearchScreen
 import com.example.ui.screens.HybridSearchScreen
 import com.example.ui.screens.KnowledgeGraphScreen
 import com.example.ui.screens.SettingsAndModelsScreen
@@ -110,48 +115,48 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         .testTag("main_navigation_bar")
                 ) {
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.TIMELINE,
-                        onClick = { viewModel.selectTab(MainNavTab.TIMELINE) },
-                        icon = { Icon(Icons.Default.Home, contentDescription = "Inicio", modifier = Modifier.size(22.dp)) },
+                        selected = currentTab == MainNavTab.INICIO || currentTab == MainNavTab.TIMELINE,
+                        onClick = { viewModel.selectTab(MainNavTab.INICIO) },
+                        icon = { Icon(Icons.Default.Home, contentDescription = "Inicio", modifier = Modifier.size(24.dp)) },
                         label = { Text("Inicio") },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
+                            selectedIconColor = GoogleBlue,
+                            indicatorColor = GoogleBlue.copy(alpha = 0.15f)
                         ),
-                        modifier = Modifier.testTag("nav_timeline")
+                        modifier = Modifier.testTag("nav_inicio")
                     )
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.VAULT,
-                        onClick = { viewModel.selectTab(MainNavTab.VAULT) },
-                        icon = { Icon(Icons.Default.Search, contentDescription = "Buscar", modifier = Modifier.size(22.dp)) },
+                        selected = currentTab == MainNavTab.BUSCAR || currentTab == MainNavTab.VAULT || currentTab == MainNavTab.SEARCH,
+                        onClick = { viewModel.selectTab(MainNavTab.BUSCAR) },
+                        icon = { Icon(Icons.Default.Search, contentDescription = "Buscar", modifier = Modifier.size(24.dp)) },
                         label = { Text("Buscar") },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
+                            selectedIconColor = GoogleBlue,
+                            indicatorColor = GoogleBlue.copy(alpha = 0.15f)
                         ),
-                        modifier = Modifier.testTag("nav_vault")
+                        modifier = Modifier.testTag("nav_buscar")
                     )
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.GRAPH,
-                        onClick = { viewModel.selectTab(MainNavTab.GRAPH) },
-                        icon = { Icon(Icons.Default.History, contentDescription = "Actividad", modifier = Modifier.size(22.dp)) },
+                        selected = currentTab == MainNavTab.NOTIFICACIONES,
+                        onClick = { viewModel.selectTab(MainNavTab.NOTIFICACIONES) },
+                        icon = { Icon(Icons.Default.Notifications, contentDescription = "Notificaciones", modifier = Modifier.size(24.dp)) },
+                        label = { Text("Notificaciones") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = GoogleBlue,
+                            indicatorColor = GoogleBlue.copy(alpha = 0.15f)
+                        ),
+                        modifier = Modifier.testTag("nav_notificaciones")
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == MainNavTab.ACTIVIDAD || currentTab == MainNavTab.GRAPH || currentTab == MainNavTab.SETTINGS,
+                        onClick = { viewModel.selectTab(MainNavTab.ACTIVIDAD) },
+                        icon = { Icon(Icons.Default.History, contentDescription = "Actividad", modifier = Modifier.size(24.dp)) },
                         label = { Text("Actividad") },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
+                            selectedIconColor = GoogleBlue,
+                            indicatorColor = GoogleBlue.copy(alpha = 0.15f)
                         ),
-                        modifier = Modifier.testTag("nav_graph")
-                    )
-                    NavigationBarItem(
-                        selected = currentTab == MainNavTab.SETTINGS,
-                        onClick = { viewModel.selectTab(MainNavTab.SETTINGS) },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "Ajustes", modifier = Modifier.size(22.dp)) },
-                        label = { Text("Ajustes") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = ForestPrimary
-                        ),
-                        modifier = Modifier.testTag("nav_settings")
+                        modifier = Modifier.testTag("nav_actividad")
                     )
                 }
             }
@@ -167,18 +172,25 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                 when (targetScreen) {
                     is AppScreen.Main -> {
                         when (currentTab) {
-                            MainNavTab.TIMELINE -> TimelineScreen(
+                            MainNavTab.INICIO, MainNavTab.TIMELINE -> TimelineScreen(
                                 viewModel = viewModel,
                                 onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
                                 onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
                                 onNavigateToEntity = { entityId ->
                                     viewModel.selectEntity(entityId)
-                                    viewModel.selectTab(MainNavTab.ENTITIES)
+                                    viewModel.selectTab(MainNavTab.GRAPH)
                                 }
                             )
-                            MainNavTab.VAULT -> VaultExplorerScreen(
+                            MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> GoogleUniversalSearchScreen(
                                 viewModel = viewModel,
                                 onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
+                            )
+                            MainNavTab.NOTIFICACIONES -> GoogleNotificationsScreen(
+                                viewModel = viewModel
+                            )
+                            MainNavTab.ACTIVIDAD -> GoogleActivityScreen(
+                                viewModel = viewModel,
+                                onNavigateToGraph = { viewModel.selectTab(MainNavTab.GRAPH) }
                             )
                             MainNavTab.GRAPH -> KnowledgeGraphScreen(
                                 viewModel = viewModel,
@@ -189,10 +201,6 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 }
                             )
                             MainNavTab.ENTITIES -> EntityExplorerScreen(
-                                viewModel = viewModel,
-                                onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) }
-                            )
-                            MainNavTab.SEARCH -> HybridSearchScreen(
                                 viewModel = viewModel,
                                 onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) }
                             )
