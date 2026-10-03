@@ -38,14 +38,16 @@ class RssFeedManager(private val context: Context) {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    private val _sources = MutableStateFlow(
-        listOf(
-            RssFeedSource("The Verge", "https://www.theverge.com/rss/index.xml", "Tech"),
-            RssFeedSource("Wired", "https://www.wired.com/feed/rss", "Science"),
-            RssFeedSource("TechCrunch", "https://techcrunch.com/feed/", "Startups"),
-            RssFeedSource("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "Gadgets")
-        )
+    private val prefs = context.getSharedPreferences("rss_feeds_prefs", Context.MODE_PRIVATE)
+
+    private val defaultSources = listOf(
+        RssFeedSource("The Verge", "https://www.theverge.com/rss/index.xml", "Tech"),
+        RssFeedSource("Wired", "https://www.wired.com/feed/rss", "Science"),
+        RssFeedSource("TechCrunch", "https://techcrunch.com/feed/", "Startups"),
+        RssFeedSource("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "Gadgets")
     )
+
+    private val _sources = MutableStateFlow(loadSavedSources())
     val sources: StateFlow<List<RssFeedSource>> = _sources.asStateFlow()
 
     private val _articles = MutableStateFlow<List<RssArticle>>(getInitialCuratedArticles())
@@ -92,6 +94,7 @@ class RssFeedManager(private val context: Context) {
         val safeName = name.ifBlank { "Custom RSS" }
 
         val newSource = RssFeedSource(safeName, trimmedUrl, category)
+        persistCustomSource(newSource)
         val updated = _sources.value.toMutableList().apply { add(0, newSource) }
         _sources.value = updated
 
@@ -111,6 +114,23 @@ class RssFeedManager(private val context: Context) {
         } catch (_: Exception) {}
 
         true
+    }
+
+    private fun loadSavedSources(): List<RssFeedSource> {
+        val savedSet = prefs.getStringSet("custom_rss_sources", null) ?: return defaultSources
+        val customList = savedSet.mapNotNull { entry ->
+            val parts = entry.split("|||")
+            if (parts.size >= 2) {
+                RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Custom" })
+            } else null
+        }
+        return (customList + defaultSources).distinctBy { it.url }
+    }
+
+    private fun persistCustomSource(source: RssFeedSource) {
+        val currentSet = prefs.getStringSet("custom_rss_sources", emptySet())?.toMutableSet() ?: mutableSetOf()
+        currentSet.add("${source.name}|||${source.url}|||${source.category}")
+        prefs.edit().putStringSet("custom_rss_sources", currentSet).apply()
     }
 
     private fun parseRssXml(xmlContent: String, sourceName: String, category: String): List<RssArticle> {
