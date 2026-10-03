@@ -229,31 +229,11 @@ class BundledEnglishTranscriber(private val context: Context) {
         segmentIndex: Int,
         totalSegments: Int
     ): String {
-        val syllables = segment.syllableEstimate
-        val zcr = segment.zeroCrossingRate
-        val energy = segment.peakEnergy
-
-        // Phonetic English vocabulary matching based on cadence and spectral profile
-        return when {
-            segmentIndex == 0 && syllables in 1..2 -> "Note for today:"
-            segmentIndex == 0 && syllables in 3..5 -> "Reflecting on this morning,"
-            segmentIndex == 0 -> "Met to discuss upcoming plans,"
-            syllables in 1..2 -> when {
-                zcr > 0.15f -> "quick thoughts"
-                energy > 0.4f -> "action item"
-                else -> "and reviewed details"
-            }
-            syllables in 3..4 -> when {
-                zcr > 0.12f -> "completed project milestones"
-                energy > 0.35f -> "working through next steps"
-                else -> "discussed schedule and priorities"
-            }
-            syllables in 5..7 -> when {
-                zcr > 0.10f -> "focusing on healthy habits and daily steps"
-                energy > 0.40f -> "reviewed budget and personal documents"
-                else -> "spent time organizing notes and memories"
-            }
-            else -> "great progress made on our key goals"
+        val sec = segment.durationMs / 1000f
+        return if (segment.peakEnergy > 0.15f) {
+            "[Segmento de voz: ${String.format(Locale.US, "%.1f", sec)}s]"
+        } else {
+            ""
         }
     }
 

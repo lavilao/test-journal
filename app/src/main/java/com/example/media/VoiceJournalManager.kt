@@ -240,15 +240,15 @@ class VoiceJournalManager(private val context: Context) {
 
     /**
      * Real-time Speech-to-Text dictation directly into journal text.
-     * Uses system recognizer if available, with intelligent fallback to bundled English model
-     * on devices like Redmi 9A / MIUI 12.5 where Gboard's offline model is missing.
+     * Guaranteed real user speech input only - never inserts simulated placeholder text.
      */
     fun startLiveDictation(
         onResult: (text: String) -> Unit,
         onError: () -> Unit = {}
     ) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onResult("Voice capture active. Bundled English model ready.")
+            _isDictating.value = false
+            onError()
             return
         }
         stopLiveDictation()
@@ -256,6 +256,7 @@ class VoiceJournalManager(private val context: Context) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
@@ -274,22 +275,19 @@ class VoiceJournalManager(private val context: Context) {
                     }
                     override fun onError(error: Int) {
                         _isDictating.value = false
-                        // Gracefully fallback on Redmi 9A / MIUI 12.5 when Gboard offline pack is absent
-                        onResult("Spoken thought recorded using bundled English speech engine.")
+                        onError()
                     }
                     override fun onResults(results: Bundle?) {
                         _isDictating.value = false
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull() ?: ""
+                        val text = matches?.firstOrNull()?.trim() ?: ""
                         if (text.isNotBlank()) {
                             onResult(text)
-                        } else {
-                            onResult("Captured thought using bundled English model.")
                         }
                     }
                     override fun onPartialResults(partialResults: Bundle?) {
                         val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull() ?: ""
+                        val text = matches?.firstOrNull()?.trim() ?: ""
                         if (text.isNotBlank()) {
                             onResult(text)
                         }
@@ -300,7 +298,7 @@ class VoiceJournalManager(private val context: Context) {
             }
         } catch (_: Exception) {
             _isDictating.value = false
-            onResult("Captured thought using bundled English model.")
+            onError()
         }
     }
 

@@ -1,15 +1,14 @@
 package com.example.ui.screens
 
+import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,14 +23,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material3.AlertDialog
@@ -45,7 +43,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,8 +61,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.rss.RssArticle
+import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleDiscoverCard
+import com.example.ui.components.GoogleMemoryCard
 import com.example.ui.components.GoogleSearchHubHeader
+import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.components.StorypadNewNoteFab
 import com.example.ui.components.StorypadNoteType
 import com.example.ui.components.VoiceTranscriptionModal
@@ -73,6 +73,13 @@ import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.WarmAccent
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
+import java.io.File
+import java.io.FileOutputStream
+
+enum class HomeFeedView {
+    NOTICIAS,
+    MEMORIAS
+}
 
 @Composable
 fun TimelineScreen(
@@ -87,13 +94,16 @@ fun TimelineScreen(
     val nextReminder by viewModel.nextActiveReminder.collectAsState()
     val rssArticles by viewModel.rssArticles.collectAsState()
     val isRssLoading by viewModel.isRssLoading.collectAsState()
+    val entries by viewModel.entries.collectAsState()
     val vaultItems by viewModel.vaultItems.collectAsState()
 
     var homeSearchQuery by remember { mutableStateOf("") }
     var showQuickDictateModal by remember { mutableStateOf(false) }
-    var showAddRssDialog by remember { mutableStateOf(false) }
-    var selectedFeedCategory by remember { mutableStateOf("All") }
+    var selectedFeedView by remember { mutableStateOf(HomeFeedView.NOTICIAS) }
+    var selectedRssArticleForReading by remember { mutableStateOf<RssArticle?>(null) }
+    var showPhotoChoiceDialog by remember { mutableStateOf(false) }
 
+    // Gallery Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -101,18 +111,42 @@ fun TimelineScreen(
             val persistentUri = viewModel.repository.persistImageToLocalStorage(uri)
             viewModel.saveEntry(
                 id = 0L,
-                title = "Photo Capture",
-                body = "Visual memory captured into vault.",
+                title = "Foto de Galería",
+                body = "Recuerdo visual guardado en el dispositivo.",
                 attachedImageUri = Uri.parse(persistentUri),
-                onComplete = { newId ->
-                    onNavigateToDetail(newId)
-                }
+                onComplete = { newId -> onNavigateToDetail(newId) }
             )
         }
     }
 
-    // Filtered search results for files and notes
-    val searchResults = remember(homeSearchQuery, vaultItems) {
+    // Camera Capture Launcher (Takes real photos)
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            try {
+                val photoDir = File(context.filesDir, "photos").apply { if (!exists()) mkdirs() }
+                val photoFile = File(photoDir, "IMG_${System.currentTimeMillis()}.jpg")
+                FileOutputStream(photoFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                val localUri = Uri.fromFile(photoFile)
+                viewModel.saveEntry(
+                    id = 0L,
+                    title = "Foto de Cámara",
+                    body = "Foto capturada con la cámara y guardada en el dispositivo.",
+                    attachedImageUri = localUri,
+                    onComplete = { newId -> onNavigateToDetail(newId) }
+                )
+                Toast.makeText(context, "Foto guardada en tus recuerdos", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error al guardar foto: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Real-time Search Results for Files and Notes
+    val searchResults = remember(homeSearchQuery, vaultItems, entries) {
         if (homeSearchQuery.isBlank()) {
             emptyList()
         } else {
@@ -126,27 +160,18 @@ fun TimelineScreen(
         }
     }
 
-    val filteredArticles = remember(rssArticles, selectedFeedCategory) {
-        if (selectedFeedCategory == "All") {
-            rssArticles
-        } else {
-            rssArticles.filter { it.category.equals(selectedFeedCategory, ignoreCase = true) }
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .testTag("timeline_screen_root")
     ) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("google_app_feed_list"),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Top Section: Google Brand, Capsule Search Bar & Glance Carousel
+            // Google App Inspired Clean Search Header
             item {
                 GoogleSearchHubHeader(
                     searchQuery = homeSearchQuery,
@@ -154,14 +179,10 @@ fun TimelineScreen(
                     telemetry = telemetry,
                     nextReminder = nextReminder,
                     onVoiceClick = { showQuickDictateModal = true },
-                    onCameraClick = {
-                        photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    onAiModeClick = {
-                        viewModel.selectTab(MainNavTab.SEARCH)
-                    },
+                    onCameraClick = { showPhotoChoiceDialog = true },
+                    onAiModeClick = { viewModel.selectTab(MainNavTab.BUSCAR) },
                     onAudioModeClick = { showQuickDictateModal = true },
-                    onAddRssClick = { showAddRssDialog = true }
+                    onSettingsClick = { viewModel.selectTab(MainNavTab.SETTINGS) }
                 )
             }
 
@@ -176,7 +197,7 @@ fun TimelineScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Archivos y notas (${searchResults.size})",
+                            text = "Resultados en este dispositivo (${searchResults.size})",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -264,7 +285,7 @@ fun TimelineScreen(
                     }
                 }
             } else {
-                // Mode 2: Google Discover RSS Feed Section
+                // Section Toggle: Noticias (Discover) vs Mis Memorias
                 item {
                     Row(
                         modifier = Modifier
@@ -273,67 +294,128 @@ fun TimelineScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.RssFeed,
-                                contentDescription = "Discover RSS",
-                                tint = WarmAccent,
-                                modifier = Modifier.size(18.dp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = selectedFeedView == HomeFeedView.NOTICIAS,
+                                onClick = { selectedFeedView = HomeFeedView.NOTICIAS },
+                                leadingIcon = {
+                                    Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Noticias (Discover)") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoogleBlue.copy(alpha = 0.15f),
+                                    selectedLabelColor = GoogleBlue
+                                )
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Descubrir (Feed RSS)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
+
+                            FilterChip(
+                                selected = selectedFeedView == HomeFeedView.MEMORIAS,
+                                onClick = { selectedFeedView = HomeFeedView.MEMORIAS },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Memorias (${entries.size})") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = ForestPrimary.copy(alpha = 0.15f),
+                                    selectedLabelColor = ForestPrimary
+                                )
                             )
                         }
 
-                        IconButton(
-                            onClick = { viewModel.refreshRssFeeds() },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            if (isRssLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh Feeds",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                        if (selectedFeedView == HomeFeedView.NOTICIAS) {
+                            IconButton(
+                                onClick = { viewModel.refreshRssFeeds() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                if (isRssLoading) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Actualizar",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // Discover Feed Cards
-                items(filteredArticles, key = { it.id }) { article ->
-                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        GoogleDiscoverCard(
-                            article = article,
-                            onSaveToJournal = { savedArticle ->
-                                viewModel.saveEntry(
-                                    id = 0L,
-                                    title = savedArticle.title,
-                                    body = "${savedArticle.description}\n\nFuente: ${savedArticle.sourceTitle}\nEnlace: ${savedArticle.link}",
-                                    onComplete = { newId ->
-                                        Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
+                if (selectedFeedView == HomeFeedView.NOTICIAS) {
+                    // Discover RSS Feed Cards (Tap opens offline reader modal)
+                    items(rssArticles, key = { it.id }) { article ->
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp)
+                                .clickable { selectedRssArticleForReading = article }
+                        ) {
+                            GoogleDiscoverCard(
+                                article = article,
+                                onSaveToJournal = { savedArticle ->
+                                    viewModel.saveEntry(
+                                        id = 0L,
+                                        title = savedArticle.title,
+                                        body = "${savedArticle.description}\n\nFuente: ${savedArticle.sourceTitle}\nEnlace: ${savedArticle.link}",
+                                        onComplete = {
+                                            Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    // Google HIG Compliant Memory Cards (Polished, no text clutter)
+                    if (entries.isEmpty()) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "Aún no tienes notas o recuerdos guardados.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Button(
+                                        onClick = onNavigateToNewEntry,
+                                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                                    ) {
+                                        Text("Crear primera nota")
                                     }
+                                }
+                            }
+                        }
+                    } else {
+                        items(entries, key = { it.entry.id }) { entryWithRel ->
+                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                GoogleMemoryCard(
+                                    entryWithRelations = entryWithRel,
+                                    onClick = { onNavigateToDetail(entryWithRel.entry.id) }
                                 )
                             }
-                        )
+                        }
                     }
                 }
             }
         }
 
-        // Quick Capture Storypad FAB (bottom right)
+        // Quick Capture Storypad FAB (clean, no text hint above)
         StorypadNewNoteFab(
             onTriggerType = { type ->
                 when (type) {
                     StorypadNoteType.TEXT -> onNavigateToNewEntry()
                     StorypadNoteType.AUDIO -> showQuickDictateModal = true
-                    StorypadNoteType.IMAGE -> photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    StorypadNoteType.IMAGE -> showPhotoChoiceDialog = true
                     StorypadNoteType.TEMPLATE -> onNavigateToNewEntry()
                     StorypadNoteType.QUICK -> onNavigateToNewEntry()
                 }
@@ -344,87 +426,77 @@ fun TimelineScreen(
         )
     }
 
+    // Photo Action Choice Dialog: Take Photo with Camera vs Gallery
+    if (showPhotoChoiceDialog) {
+        AlertDialog(
+            onDismissRequest = { showPhotoChoiceDialog = false },
+            title = { Text("Añadir Foto", fontWeight = FontWeight.Bold) },
+            text = { Text("Elige si deseas tomar una foto con la cámara o seleccionarla desde tus archivos.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPhotoChoiceDialog = false
+                        takePictureLauncher.launch(null)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Tomar Foto")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showPhotoChoiceDialog = false
+                        photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Galería")
+                }
+            }
+        )
+    }
+
+    // Offline RSS Article Reader Modal
+    selectedRssArticleForReading?.let { article ->
+        RssOfflineReaderModal(
+            article = article,
+            onDismiss = { selectedRssArticleForReading = null },
+            onSaveToNotes = { savedArticle ->
+                viewModel.saveEntry(
+                    id = 0L,
+                    title = savedArticle.title,
+                    body = "${savedArticle.description}\n\nFuente: ${savedArticle.sourceTitle}\nEnlace: ${savedArticle.link}",
+                    onComplete = {
+                        Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        )
+    }
+
     // Voice Dictation Modal
     if (showQuickDictateModal) {
         VoiceTranscriptionModal(
             title = "Dictado por Voz",
             viewModel = viewModel,
             onDismiss = { showQuickDictateModal = false },
-            onSaveTranscript = { text ->
-                if (text.isNotBlank()) {
+            onSaveTranscript = { transcript ->
+                if (transcript.isNotBlank()) {
                     viewModel.saveEntry(
                         id = 0L,
-                        title = "Dictado de voz",
-                        body = text,
+                        title = "Nota de Voz",
+                        body = transcript,
                         onComplete = { newId ->
+                            showQuickDictateModal = false
                             onNavigateToDetail(newId)
                         }
                     )
-                }
-            }
-        )
-    }
-
-    // Add Custom RSS Feed Dialog
-    if (showAddRssDialog) {
-        var rssUrlInput by remember { mutableStateOf("") }
-        var rssNameInput by remember { mutableStateOf("") }
-
-        AlertDialog(
-            onDismissRequest = { showAddRssDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.RssFeed, contentDescription = null, tint = WarmAccent)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Añadir Feed RSS", style = MaterialTheme.typography.titleMedium)
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Introduce la URL de cualquier feed RSS (blogs, noticias, Substack, Medium) para verlo en Descubrir:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = rssNameInput,
-                        onValueChange = { rssNameInput = it },
-                        label = { Text("Nombre del feed (ej. Mi Blog)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = rssUrlInput,
-                        onValueChange = { rssUrlInput = it },
-                        label = { Text("URL del RSS (https://...)") },
-                        singleLine = true,
-                        placeholder = { Text("https://...") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (rssUrlInput.isNotBlank()) {
-                            viewModel.addCustomRssFeed(
-                                url = rssUrlInput.trim(),
-                                name = rssNameInput.trim().ifBlank { "Personal RSS" }
-                            )
-                            showAddRssDialog = false
-                            Toast.makeText(context, "Feed RSS añadido con éxito", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
-                ) {
-                    Text("Añadir")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddRssDialog = false }) {
-                    Text("Cancelar")
+                } else {
+                    showQuickDictateModal = false
                 }
             }
         )

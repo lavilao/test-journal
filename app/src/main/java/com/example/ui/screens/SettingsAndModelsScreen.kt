@@ -27,7 +27,9 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Translate
@@ -41,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +90,8 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
     var isEntityModelDownloaded by remember { mutableStateOf(false) }
     var isDownloadingEntityModel by remember { mutableStateOf(false) }
     val storageBreakdown by viewModel.storageBreakdown.collectAsState()
+    val rssSources by viewModel.rssFeedManager.sources.collectAsState()
+    var showAddRssDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.refreshStorageBreakdown()
@@ -544,6 +549,73 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
 
         Spacer(modifier = Modifier.height(22.dp))
 
+        // RSS Feeds Management (Discover)
+        Text(
+            text = "Fuentes de Noticias RSS (Discover)",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Gestiona y añade canales RSS para leer noticias sin conexión y sin rastreadores.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        EditorialCard {
+            Column(modifier = Modifier.padding(16.dp)) {
+                rssSources.forEach { source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.RssFeed, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(source.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                                Text(source.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Button(
+                        onClick = { showAddRssDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Añadir Feed RSS")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.refreshRssFeeds()
+                            Toast.makeText(context, "Feeds actualizados", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Actualizar")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
         // Open Data Export & Backup (Zero Lock-In)
         Text(
             text = "Data Sovereignty & Export",
@@ -631,6 +703,62 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
             dismissButton = {
                 TextButton(onClick = { exportDialogContent = null }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    // Add Custom RSS Feed Dialog
+    if (showAddRssDialog) {
+        var rssUrlInput by remember { mutableStateOf("") }
+        var rssNameInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddRssDialog = false },
+            title = { Text("Añadir Canal RSS") },
+            text = {
+                Column {
+                    Text(
+                        text = "Introduce la dirección web del feed RSS para leer artículos sin conexión.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = rssNameInput,
+                        onValueChange = { rssNameInput = it },
+                        label = { Text("Nombre de la fuente") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = rssUrlInput,
+                        onValueChange = { rssUrlInput = it },
+                        label = { Text("URL del Feed RSS") },
+                        placeholder = { Text("https://ejemplo.com/rss") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (rssUrlInput.isNotBlank()) {
+                            viewModel.addCustomRssFeed(rssUrlInput, rssNameInput)
+                            Toast.makeText(context, "Feed RSS añadido", Toast.LENGTH_SHORT).show()
+                            showAddRssDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                ) {
+                    Text("Añadir")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddRssDialog = false }) {
+                    Text("Cancelar")
                 }
             }
         )

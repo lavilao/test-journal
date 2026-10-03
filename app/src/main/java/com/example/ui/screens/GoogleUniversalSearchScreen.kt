@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,9 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -31,7 +30,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -55,17 +54,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.EntryWithRelations
+import com.example.rss.RssArticle
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleRed
+import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.WarmAccent
 import com.example.viewmodel.JournalViewModel
-import com.example.viewmodel.VaultFileItem
 
 enum class SearchTabFilter {
     TODO,
@@ -74,57 +76,106 @@ enum class SearchTabFilter {
     NOTICIAS
 }
 
+data class DeviceSearchResult(
+    val id: Long,
+    val title: String,
+    val subtitle: String,
+    val extension: String,
+    val formattedSize: String,
+    val isImage: Boolean,
+    val isAudio: Boolean
+)
+
 @Composable
 fun GoogleUniversalSearchScreen(
     viewModel: JournalViewModel,
     onNavigateToDetail: (Long) -> Unit,
     onOpenVoiceModal: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SearchTabFilter.TODO) }
-    val vaultItems by viewModel.vaultItems.collectAsState()
+
+    val entries by viewModel.entries.collectAsState()
     val rssArticles by viewModel.rssArticles.collectAsState()
+    var selectedArticleForReading by remember { mutableStateOf<RssArticle?>(null) }
 
     val recentSearches = remember {
         mutableStateListOf("reunión", "presupuesto", "ideas proyecto", "salud")
     }
 
-    val filteredFiles = remember(searchQuery, selectedFilter, vaultItems) {
-        if (searchQuery.isBlank() && selectedFilter != SearchTabFilter.EN_DISPOSITIVO) {
-            emptyList()
+    // Comprehensive On-Device File Search across all local notes and media
+    val filteredFiles: List<DeviceSearchResult> = remember(searchQuery, selectedFilter, entries) {
+        val q = searchQuery.trim().lowercase()
+
+        val allResults = entries.map { entryWithRel ->
+            val entry = entryWithRel.entry
+            val hasAudio = entryWithRel.audioRecords.isNotEmpty()
+            val hasPhoto = entry.imageUri != null || entryWithRel.mediaItems.isNotEmpty()
+
+            val ext = when {
+                hasAudio -> "M4A"
+                hasPhoto -> "JPG"
+                else -> "MD"
+            }
+
+            val estimatedSize = when (ext) {
+                "M4A" -> "${180 + entry.body.length / 50} KB"
+                "JPG" -> "850 KB"
+                else -> "${maxOf(1, (entry.title.length + entry.body.length) / 500)} KB"
+            }
+
+            DeviceSearchResult(
+                id = entry.id,
+                title = entry.title.ifBlank { "Nota sin título" },
+                subtitle = entry.body.take(120).replace("\n", " ").ifBlank { "Archivo guardado en el dispositivo" },
+                extension = ext,
+                formattedSize = estimatedSize,
+                isImage = hasPhoto,
+                isAudio = hasAudio
+            )
+        }
+
+        if (q.isBlank()) {
+            if (selectedFilter == SearchTabFilter.EN_DISPOSITIVO) {
+                allResults
+            } else if (selectedFilter == SearchTabFilter.IMAGENES) {
+                allResults.filter { it.isImage }
+            } else {
+                emptyList()
+            }
         } else {
-            val q = searchQuery.trim().lowercase()
-            vaultItems.filter { item ->
-                val matchesText = q.isBlank() ||
-                        item.title.lowercase().contains(q) ||
-                        item.fileName.lowercase().contains(q) ||
-                        item.previewText.lowercase().contains(q) ||
-                        item.tags.any { it.name.lowercase().contains(q) }
+            allResults.filter { item ->
+                val matchesText = item.title.lowercase().contains(q) ||
+                        item.subtitle.lowercase().contains(q) ||
+                        item.extension.lowercase().contains(q)
 
                 val matchesType = when (selectedFilter) {
                     SearchTabFilter.TODO -> true
                     SearchTabFilter.EN_DISPOSITIVO -> true
-                    SearchTabFilter.IMAGENES -> item.fileExtension.lowercase() in listOf("jpg", "jpeg", "png", "webp")
+                    SearchTabFilter.IMAGENES -> item.isImage
                     SearchTabFilter.NOTICIAS -> false
                 }
+
                 matchesText && matchesType
             }
         }
     }
 
-    val filteredNews = remember(searchQuery, selectedFilter, rssArticles) {
-        if (searchQuery.isBlank() && selectedFilter != SearchTabFilter.NOTICIAS) {
-            emptyList()
+    // Filtered RSS News Articles
+    val filteredNews: List<RssArticle> = remember(searchQuery, selectedFilter, rssArticles) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isBlank()) {
+            if (selectedFilter == SearchTabFilter.NOTICIAS) rssArticles else emptyList()
         } else {
-            val q = searchQuery.trim().lowercase()
-            rssArticles.filter { article ->
-                val matchesText = q.isBlank() ||
-                        article.title.lowercase().contains(q) ||
-                        article.description.lowercase().contains(q) ||
-                        article.sourceTitle.lowercase().contains(q)
-
-                val matchesType = selectedFilter == SearchTabFilter.TODO || selectedFilter == SearchTabFilter.NOTICIAS
-                matchesText && matchesType
+            if (selectedFilter == SearchTabFilter.EN_DISPOSITIVO || selectedFilter == SearchTabFilter.IMAGENES) {
+                emptyList()
+            } else {
+                rssArticles.filter { article ->
+                    article.title.lowercase().contains(q) ||
+                    article.description.lowercase().contains(q) ||
+                    article.sourceTitle.lowercase().contains(q)
+                }
             }
         }
     }
@@ -218,7 +269,7 @@ fun GoogleUniversalSearchScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Google Search Filter Tabs: Todo, En este dispositivo, Imágenes, Noticias
+                // Search Filter Tabs: Todo, En este dispositivo, Imágenes, Noticias
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -317,7 +368,6 @@ fun GoogleUniversalSearchScreen(
                 }
 
                 item {
-                    // Cloud on Device Info Header
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
@@ -348,12 +398,12 @@ fun GoogleUniversalSearchScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Archivos locales como tu nube personal",
+                                    text = "Tus archivos locales son tu nube personal",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${vaultItems.size} archivos indexados en este dispositivo. 0 bytes enviados a internet.",
+                                    text = "${entries.size} notas y archivos disponibles. Búsqueda instantánea en tu teléfono.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -393,22 +443,22 @@ fun GoogleUniversalSearchScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = when (fileItem.fileExtension.lowercase()) {
-                                    "m4a", "aac" -> GoogleRed.copy(alpha = 0.12f)
-                                    "jpg", "png" -> GoogleBlue.copy(alpha = 0.12f)
+                                color = when (fileItem.extension) {
+                                    "M4A" -> GoogleRed.copy(alpha = 0.12f)
+                                    "JPG" -> GoogleBlue.copy(alpha = 0.12f)
                                     else -> ForestPrimary.copy(alpha = 0.12f)
                                 },
                                 modifier = Modifier.size(42.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    val icon = when (fileItem.fileExtension.lowercase()) {
-                                        "m4a", "aac" -> Icons.Default.AudioFile
-                                        "jpg", "png" -> Icons.Default.Image
+                                    val icon = when (fileItem.extension) {
+                                        "M4A" -> Icons.Default.AudioFile
+                                        "JPG" -> Icons.Default.Image
                                         else -> Icons.Default.Description
                                     }
-                                    val iconTint = when (fileItem.fileExtension.lowercase()) {
-                                        "m4a", "aac" -> GoogleRed
-                                        "jpg", "png" -> GoogleBlue
+                                    val iconTint = when (fileItem.extension) {
+                                        "M4A" -> GoogleRed
+                                        "JPG" -> GoogleBlue
                                         else -> ForestPrimary
                                     }
                                     Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
@@ -427,7 +477,7 @@ fun GoogleUniversalSearchScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = fileItem.previewText.ifBlank { fileItem.fileName },
+                                    text = fileItem.subtitle,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -440,7 +490,7 @@ fun GoogleUniversalSearchScreen(
                                         color = MaterialTheme.colorScheme.surfaceVariant
                                     ) {
                                         Text(
-                                            text = fileItem.fileExtension.uppercase(),
+                                            text = fileItem.extension,
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                         )
@@ -462,7 +512,7 @@ fun GoogleUniversalSearchScreen(
             if (filteredNews.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Resultados en noticias e internet (${filteredNews.size})",
+                        text = "Resultados en noticias (RSS) (${filteredNews.size})",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
@@ -477,6 +527,7 @@ fun GoogleUniversalSearchScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
+                            .clickable { selectedArticleForReading = article }
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(
@@ -505,15 +556,8 @@ fun GoogleUniversalSearchScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                TextButton(onClick = {
-                                    viewModel.saveEntry(
-                                        id = 0L,
-                                        title = article.title,
-                                        body = "${article.description}\n\nFuente: ${article.sourceTitle}\nEnlace: ${article.link}",
-                                        onComplete = { onNavigateToDetail(it) }
-                                    )
-                                }) {
-                                    Text("Guardar en archivos", fontSize = 11.sp)
+                                TextButton(onClick = { selectedArticleForReading = article }) {
+                                    Text("Leer sin conexión", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -546,5 +590,20 @@ fun GoogleUniversalSearchScreen(
                 }
             }
         }
+    }
+
+    selectedArticleForReading?.let { article ->
+        RssOfflineReaderModal(
+            article = article,
+            onDismiss = { selectedArticleForReading = null },
+            onSaveToNotes = { savedArticle ->
+                viewModel.saveEntry(
+                    id = 0L,
+                    title = savedArticle.title,
+                    body = "${savedArticle.description}\n\nFuente: ${savedArticle.sourceTitle}\nEnlace: ${savedArticle.link}",
+                    onComplete = { onNavigateToDetail(it) }
+                )
+            }
+        )
     }
 }

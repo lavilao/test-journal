@@ -93,20 +93,6 @@ fun StorypadNewNoteFab(
         modifier = modifier,
         horizontalAlignment = Alignment.End
     ) {
-        // Subtle hint pill
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.padding(bottom = 6.dp, end = 2.dp)
-        ) {
-            Text(
-                text = "${currentType.title} (hold to switch)",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
-
         // Storypad FAB: short tap creates currentType; on hold shows menu
         Surface(
             shape = CircleShape,

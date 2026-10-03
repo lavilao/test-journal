@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -78,7 +79,7 @@ fun GoogleSearchHubHeader(
     onCameraClick: () -> Unit,
     onAiModeClick: () -> Unit,
     onAudioModeClick: () -> Unit,
-    onAddRssClick: () -> Unit,
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -86,7 +87,7 @@ fun GoogleSearchHubHeader(
             .fillMaxWidth()
             .testTag("google_search_hub_header")
     ) {
-        // Top Icon Bar: Science beaker / Lab on left, Avatar on right
+        // Top Icon Bar: Labs icon on left, Settings and Avatar on right
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -109,82 +110,50 @@ fun GoogleSearchHubHeader(
                 }
             }
 
-            // User Profile Avatar
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "M",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onSettingsClick,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("top_settings_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Ajustes",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
                     )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // User Profile Avatar
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable(onClick = onSettingsClick)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "M",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
             }
         }
 
-        // Google "At a Glance" (De un vistazo) Widget Bar
+        // "At a Glance" (De un vistazo) Widget Bar
         AtAGlanceBar(
             telemetry = telemetry,
             nextReminder = nextReminder,
-            modifier = Modifier.padding(bottom = 6.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
-
-        // Google / Mnemosyne Logo (multi-colored letters)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "G",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleBlue,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "o",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleRed,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "o",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleYellow,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "g",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleBlue,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "l",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleGreen,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "e",
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                color = GoogleRed,
-                letterSpacing = (-1).sp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
 
         // Signature Google Pill Search Bar
         Surface(
@@ -490,36 +459,6 @@ fun GoogleSearchHubHeader(
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            // Card 4: Add RSS Feed Button Card
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .width(120.dp)
-                    .clickable(onClick = onAddRssClick)
-                    .testTag("glance_card_add_rss")
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.RssFeed,
-                        contentDescription = "Add RSS",
-                        tint = GoogleRed,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "+ Feed RSS",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }

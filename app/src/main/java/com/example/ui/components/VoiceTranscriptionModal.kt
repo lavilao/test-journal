@@ -87,6 +87,7 @@ fun VoiceTranscriptionModal(
     onSaveTranscript: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var transcriptText by remember { mutableStateOf(initialTranscript) }
     val isDictating by viewModel.isDictating.collectAsState()
     val playbackState by viewModel.voiceManager.playbackState.collectAsState()
@@ -205,15 +206,28 @@ fun VoiceTranscriptionModal(
                                 }
                             }
                             is SpeechModelStatus.NotDownloaded -> {
-                                OutlinedButton(
-                                    onClick = { viewModel.downloadSpeechModel() },
-                                    shape = RoundedCornerShape(6.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
+                                Button(
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.downloadSpeechModel { ok ->
+                                                Toast.makeText(
+                                                    context,
+                                                    if (ok) "¡Modelo de voz descargado e instalado!" else "Error de descarga",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("download_speech_model_btn")
                                 ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Descargar modelo offline (42 MB)", fontSize = 10.sp)
+                                    Text("Descargar modelo offline (42 MB)", fontSize = 11.sp)
                                 }
                             }
                         }
