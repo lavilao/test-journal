@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.rss.RssArticle
+import com.example.ui.components.DailyBriefingCard
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleDiscoverCard
 import com.example.ui.components.GoogleMemoryCard
@@ -184,6 +185,27 @@ fun TimelineScreen(
                     onAudioModeClick = { showQuickDictateModal = true },
                     onSettingsClick = { viewModel.selectTab(MainNavTab.SETTINGS) }
                 )
+            }
+
+            // Daily Briefing Summary (NowBrief inspired: adaptive by time of day)
+            if (homeSearchQuery.isBlank()) {
+                item {
+                    DailyBriefingCard(
+                        telemetry = telemetry,
+                        nextReminder = nextReminder,
+                        topArticle = rssArticles.firstOrNull(),
+                        onWriteReflection = { title, prompt ->
+                            viewModel.saveEntry(
+                                id = 0L,
+                                title = title,
+                                body = prompt,
+                                onComplete = { newId ->
+                                    onNavigateToDetail(newId)
+                                }
+                            )
+                        }
+                    )
+                }
             }
 
             // Mode 1: Search Query active -> Show Search Results for Files and Notes
