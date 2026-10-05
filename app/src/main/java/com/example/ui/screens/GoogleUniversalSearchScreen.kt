@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,15 +25,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContactPhone
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -42,17 +50,16 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -60,31 +67,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.EntryWithRelations
+import com.example.contacts.ContactsHelper
+import com.example.data.DeviceFileInfo
 import com.example.rss.RssArticle
 import com.example.ui.components.GoogleBlue
+import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
 import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.theme.ForestPrimary
-import com.example.ui.theme.WarmAccent
 import com.example.viewmodel.JournalViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-enum class SearchTabFilter {
+enum class UniversalSearchTab {
     TODO,
-    EN_DISPOSITIVO,
-    IMAGENES,
+    CONTACTOS,
+    ARCHIVOS,
+    NOTAS,
     NOTICIAS
 }
-
-data class DeviceSearchResult(
-    val id: Long,
-    val title: String,
-    val subtitle: String,
-    val extension: String,
-    val formattedSize: String,
-    val isImage: Boolean,
-    val isAudio: Boolean
-)
 
 @Composable
 fun GoogleUniversalSearchScreen(
@@ -94,89 +96,48 @@ fun GoogleUniversalSearchScreen(
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf(SearchTabFilter.TODO) }
+    var selectedTab by remember { mutableStateOf(UniversalSearchTab.TODO) }
 
     val entries by viewModel.entries.collectAsState()
     val rssArticles by viewModel.rssArticles.collectAsState()
-    var selectedArticleForReading by remember { mutableStateOf<RssArticle?>(null) }
+    val contactResults by viewModel.deviceContactsResults.collectAsState()
+    val fileResults by viewModel.deviceFilesResults.collectAsState()
 
-    val recentSearches = remember {
-        mutableStateListOf("reunión", "presupuesto", "ideas proyecto", "salud")
+    var activeReadingArticle by remember { mutableStateOf<RssArticle?>(null) }
+
+    val hasContactsPermission = remember { viewModel.deviceSearchManager.hasContactsPermission() }
+    var contactsPermissionGranted by remember { mutableStateOf(hasContactsPermission) }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        contactsPermissionGranted = granted
+        if (granted) {
+            viewModel.searchDevice(searchQuery)
+        }
     }
 
-    // Comprehensive On-Device File Search across all local notes and media
-    val filteredFiles: List<DeviceSearchResult> = remember(searchQuery, selectedFilter, entries) {
-        val q = searchQuery.trim().lowercase()
+    LaunchedEffect(searchQuery) {
+        viewModel.searchDevice(searchQuery)
+    }
 
-        val allResults = entries.map { entryWithRel ->
-            val entry = entryWithRel.entry
-            val hasAudio = entryWithRel.audioRecords.isNotEmpty()
-            val hasPhoto = entry.imageUri != null || entryWithRel.mediaItems.isNotEmpty()
-
-            val ext = when {
-                hasAudio -> "M4A"
-                hasPhoto -> "JPG"
-                else -> "MD"
-            }
-
-            val estimatedSize = when (ext) {
-                "M4A" -> "${180 + entry.body.length / 50} KB"
-                "JPG" -> "850 KB"
-                else -> "${maxOf(1, (entry.title.length + entry.body.length) / 500)} KB"
-            }
-
-            DeviceSearchResult(
-                id = entry.id,
-                title = entry.title.ifBlank { "Nota sin título" },
-                subtitle = entry.body.take(120).replace("\n", " ").ifBlank { "Archivo guardado en el dispositivo" },
-                extension = ext,
-                formattedSize = estimatedSize,
-                isImage = hasPhoto,
-                isAudio = hasAudio
-            )
-        }
-
-        if (q.isBlank()) {
-            if (selectedFilter == SearchTabFilter.EN_DISPOSITIVO) {
-                allResults
-            } else if (selectedFilter == SearchTabFilter.IMAGENES) {
-                allResults.filter { it.isImage }
-            } else {
-                emptyList()
-            }
-        } else {
-            allResults.filter { item ->
-                val matchesText = item.title.lowercase().contains(q) ||
-                        item.subtitle.lowercase().contains(q) ||
-                        item.extension.lowercase().contains(q)
-
-                val matchesType = when (selectedFilter) {
-                    SearchTabFilter.TODO -> true
-                    SearchTabFilter.EN_DISPOSITIVO -> true
-                    SearchTabFilter.IMAGENES -> item.isImage
-                    SearchTabFilter.NOTICIAS -> false
-                }
-
-                matchesText && matchesType
+    val matchedNotes = remember(searchQuery, entries) {
+        if (searchQuery.isBlank()) emptyList()
+        else {
+            val q = searchQuery.trim().lowercase()
+            entries.filter { item ->
+                item.entry.title.lowercase().contains(q) ||
+                item.entry.body.lowercase().contains(q) ||
+                item.tags.any { it.name.lowercase().contains(q) }
             }
         }
     }
 
-    // Filtered RSS News Articles
-    val filteredNews: List<RssArticle> = remember(searchQuery, selectedFilter, rssArticles) {
-        val q = searchQuery.trim().lowercase()
-        if (q.isBlank()) {
-            if (selectedFilter == SearchTabFilter.NOTICIAS) rssArticles else emptyList()
-        } else {
-            if (selectedFilter == SearchTabFilter.EN_DISPOSITIVO || selectedFilter == SearchTabFilter.IMAGENES) {
-                emptyList()
-            } else {
-                rssArticles.filter { article ->
-                    article.title.lowercase().contains(q) ||
-                    article.description.lowercase().contains(q) ||
-                    article.sourceTitle.lowercase().contains(q)
-                }
-            }
+    val matchedNews = remember(searchQuery, rssArticles) {
+        if (searchQuery.isBlank()) emptyList()
+        else {
+            val q = searchQuery.trim().lowercase()
+            rssArticles.filter { it.title.lowercase().contains(q) || it.description.lowercase().contains(q) }
         }
     }
 
@@ -184,425 +145,283 @@ fun GoogleUniversalSearchScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .testTag("google_universal_search_screen")
+            .testTag("universal_search_screen")
     ) {
-        // Top Search Bar (Google Pill Style)
+        // Search Header Bar
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 2.dp,
+            shadowElevation = 1.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) {
-                Row(
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(26.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(26.dp))
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(32.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Buscar",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = {
-                                    Text(
-                                        text = "Buscar en este dispositivo e internet...",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color.Transparent,
-                                    unfocusedBorderColor = Color.Transparent
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("universal_search_input")
-                            )
-
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Limpiar",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Buscar",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar contactos, archivos, notas...", fontSize = 15.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-
-                            IconButton(
-                                onClick = onOpenVoiceModal,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Voz",
-                                    tint = GoogleBlue,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                        }
+                        IconButton(onClick = onOpenVoiceModal) {
+                            Icon(Icons.Default.Mic, contentDescription = "Voz", tint = GoogleBlue)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Search Filter Tabs: Todo, En este dispositivo, Imágenes, Noticias
+                // Horizontal Filter Tabs
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    FilterChip(
-                        selected = selectedFilter == SearchTabFilter.TODO,
-                        onClick = { selectedFilter = SearchTabFilter.TODO },
-                        label = { Text("Todo") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = GoogleBlue.copy(alpha = 0.15f),
-                            selectedLabelColor = GoogleBlue
+                    UniversalSearchTab.values().forEach { tab ->
+                        val label = when (tab) {
+                            UniversalSearchTab.TODO -> "Todo"
+                            UniversalSearchTab.CONTACTOS -> "Contactos (${contactResults.size})"
+                            UniversalSearchTab.ARCHIVOS -> "Archivos (${fileResults.size})"
+                            UniversalSearchTab.NOTAS -> "Notas (${matchedNotes.size})"
+                            UniversalSearchTab.NOTICIAS -> "Noticias (${matchedNews.size})"
+                        }
+                        FilterChip(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            label = { Text(label, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = GoogleBlue.copy(alpha = 0.15f),
+                                selectedLabelColor = GoogleBlue
+                            )
                         )
-                    )
-                    FilterChip(
-                        selected = selectedFilter == SearchTabFilter.EN_DISPOSITIVO,
-                        onClick = { selectedFilter = SearchTabFilter.EN_DISPOSITIVO },
-                        leadingIcon = {
-                            Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("En este dispositivo") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = ForestPrimary.copy(alpha = 0.15f),
-                            selectedLabelColor = ForestPrimary
-                        )
-                    )
-                    FilterChip(
-                        selected = selectedFilter == SearchTabFilter.IMAGENES,
-                        onClick = { selectedFilter = SearchTabFilter.IMAGENES },
-                        leadingIcon = {
-                            Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("Imágenes") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = GoogleRed.copy(alpha = 0.15f),
-                            selectedLabelColor = GoogleRed
-                        )
-                    )
-                    FilterChip(
-                        selected = selectedFilter == SearchTabFilter.NOTICIAS,
-                        onClick = { selectedFilter = SearchTabFilter.NOTICIAS },
-                        leadingIcon = {
-                            Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("Noticias (RSS)") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = WarmAccent.copy(alpha = 0.15f),
-                            selectedLabelColor = WarmAccent
-                        )
-                    )
+                    }
                 }
             }
         }
 
-        // Content Body
+        // Search Content List
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // If search query is empty and filter is default: Show Recent Searches & Cloud File Summary
-            if (searchQuery.isBlank() && selectedFilter == SearchTabFilter.TODO) {
+            if (searchQuery.isBlank()) {
                 item {
-                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
-                        Text(
-                            text = "Búsquedas recientes",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        recentSearches.forEach { term ->
-                            Row(
+                    Text(
+                        text = "Escribe para buscar contactos en tu agenda, archivos guardados en el teléfono o tus notas personales.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            } else {
+                // SECTION: Contactos
+                if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.CONTACTOS) {
+                    if (!contactsPermissionGranted) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Buscar en tus contactos", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                        Text("Permite a la app encontrar personas en tu agenda telefónica.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                                    ) {
+                                        Text("Permitir", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    } else if (contactResults.isNotEmpty()) {
+                        item {
+                            Text("Contactos encontrados", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                        }
+                        items(contactResults, key = { "contact_${it.id}" }) { contact ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = GoogleGreen.copy(alpha = 0.15f),
+                                        modifier = Modifier.size(38.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Person, contentDescription = null, tint = GoogleGreen, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(contact.displayName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                                        Text(contact.phoneNumber ?: "Sin teléfono", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (!contact.phoneNumber.isNullOrBlank()) {
+                                        IconButton(onClick = { ContactsHelper.dialContact(context, contact.phoneNumber) }) {
+                                            Icon(Icons.Default.Call, contentDescription = "Llamar", tint = GoogleGreen, modifier = Modifier.size(20.dp))
+                                        }
+                                        IconButton(onClick = { ContactsHelper.messageContact(context, contact.phoneNumber) }) {
+                                            Icon(Icons.Default.Message, contentDescription = "Mensaje", tint = GoogleBlue, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // SECTION: Archivos del Teléfono (MediaStore)
+                if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.ARCHIVOS) {
+                    if (fileResults.isNotEmpty()) {
+                        item {
+                            Text("Archivos en el dispositivo", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                        }
+                        items(fileResults, key = { "file_${it.id}" }) { file ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { searchQuery = term }
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .clickable { viewModel.openDeviceFile(file) }
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.History,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    text = term,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = ForestPrimary.copy(alpha = 0.15f),
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Storage,
-                                        contentDescription = null,
-                                        tint = ForestPrimary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Tus archivos locales son tu nube personal",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "${entries.size} notas y archivos disponibles. Búsqueda instantánea en tu teléfono.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Results Section: Files on this device (like Drive in Google Search)
-            if (filteredFiles.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Archivos en este dispositivo (${filteredFiles.size})",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-                    )
-                }
-
-                items(filteredFiles, key = { "file_${it.id}" }) { fileItem ->
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .clickable { onNavigateToDetail(fileItem.id) }
-                            .testTag("search_file_card_${fileItem.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = when (fileItem.extension) {
-                                    "M4A" -> GoogleRed.copy(alpha = 0.12f)
-                                    "JPG" -> GoogleBlue.copy(alpha = 0.12f)
-                                    else -> ForestPrimary.copy(alpha = 0.12f)
-                                },
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    val icon = when (fileItem.extension) {
-                                        "M4A" -> Icons.Default.AudioFile
-                                        "JPG" -> Icons.Default.Image
-                                        else -> Icons.Default.Description
-                                    }
-                                    val iconTint = when (fileItem.extension) {
-                                        "M4A" -> GoogleRed
-                                        "JPG" -> GoogleBlue
-                                        else -> ForestPrimary
-                                    }
-                                    Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = fileItem.title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = fileItem.subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.size(36.dp)
                                     ) {
-                                        Text(
-                                            text = fileItem.extension,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = fileItem.formattedSize,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(file.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        val kb = file.sizeBytes / 1024
+                                        val sizeStr = if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"
+                                        Text("$sizeStr • ${file.mimeType}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = { viewModel.openDeviceFile(file) }) {
+                                        Icon(Icons.Default.OpenInNew, contentDescription = "Abrir", tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Results Section: News & RSS Articles
-            if (filteredNews.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Resultados en noticias (RSS) (${filteredNews.size})",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
-                    )
-                }
-
-                items(filteredNews, key = { "news_${it.id}" }) { article ->
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .clickable { selectedArticleForReading = article }
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = article.title,
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = article.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                // SECTION: Notas
+                if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.NOTAS) {
+                    if (matchedNotes.isNotEmpty()) {
+                        item {
+                            Text("Notas y memorias", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                        }
+                        items(matchedNotes, key = { "note_${it.entry.id}" }) { item ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onNavigateToDetail(item.entry.id) }
                             ) {
-                                Text(
-                                    text = "${article.sourceTitle} • ${article.pubDate}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                TextButton(onClick = { selectedArticleForReading = article }) {
-                                    Text("Leer sin conexión", fontSize = 11.sp)
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(item.entry.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(item.entry.body, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Empty state if searching with no results
-            if (searchQuery.isNotBlank() && filteredFiles.isEmpty() && filteredNews.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "No se encontraron resultados para \"$searchQuery\"",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                // SECTION: Noticias
+                if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.NOTICIAS) {
+                    if (matchedNews.isNotEmpty()) {
+                        item {
+                            Text("Noticias", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                        }
+                        items(matchedNews, key = { "news_${it.id}" }) { article ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { activeReadingArticle = article }
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(article.sourceTitle, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = GoogleRed)
+                                    Text(article.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    selectedArticleForReading?.let { article ->
+    activeReadingArticle?.let { article ->
         RssOfflineReaderModal(
             article = article,
-            onDismiss = { selectedArticleForReading = null },
+            onDismiss = { activeReadingArticle = null },
             onSaveToNotes = { savedArticle ->
                 viewModel.saveEntry(
                     id = 0L,
                     title = savedArticle.title,
-                    body = "${savedArticle.description}\n\nFuente: ${savedArticle.sourceTitle}\nEnlace: ${savedArticle.link}",
-                    onComplete = { onNavigateToDetail(it) }
+                    body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
+                    onComplete = { newId ->
+                        onNavigateToDetail(newId)
+                    }
                 )
+            },
+            onFetchFullText = { art ->
+                viewModel.rssFeedManager.fetchFullArticleText(art)
             }
         )
     }

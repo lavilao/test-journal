@@ -17,12 +17,22 @@ import com.example.data.model.JournalPage
 import com.example.data.model.JournalTemplate
 import com.example.data.model.KnowledgeGraphData
 import com.example.data.model.LocalReminder
+import com.example.contacts.DeviceContactInfo
+import com.example.data.AppInterfaceMode
+import com.example.data.AppModePreferences
+import com.example.data.CalendarSyncManager
+import com.example.data.DeviceCalendarEvent
+import com.example.data.DeviceFileInfo
+import com.example.data.DeviceSearchManager
+import com.example.data.RecentAppUsageInfo
 import com.example.data.model.MediaItem
 import com.example.rss.RssArticle
 import com.example.rss.RssFeedManager
 import com.example.rss.RssFeedSource
 import com.example.telemetry.DeviceLifeHubManager
 import com.example.telemetry.LifeHubTelemetry
+import com.example.telemetry.RealWeatherData
+import com.example.telemetry.WeatherService
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.StorageBreakdown
 import com.example.data.model.SuggestedTag
@@ -145,6 +155,80 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             rssFeedManager.addCustomFeed(url, name, category)
         }
+    }
+
+    // Weather Service (Real Live Weather from Open-Meteo & GPS)
+    val weatherService = WeatherService(application)
+    val realWeather: StateFlow<RealWeatherData> = weatherService.weatherState
+
+    // Calendar Sync Manager (Real Android Device Calendar)
+    val calendarSyncManager = CalendarSyncManager(application)
+    private val _upcomingCalendarEvents = MutableStateFlow<List<DeviceCalendarEvent>>(emptyList())
+    val upcomingCalendarEvents: StateFlow<List<DeviceCalendarEvent>> = _upcomingCalendarEvents.asStateFlow()
+
+    // Device Search & Recent Usage (Contacts, MediaStore Files, UsageStats)
+    val deviceSearchManager = DeviceSearchManager(application)
+    private val _deviceContactsResults = MutableStateFlow<List<DeviceContactInfo>>(emptyList())
+    val deviceContactsResults: StateFlow<List<DeviceContactInfo>> = _deviceContactsResults.asStateFlow()
+
+    private val _deviceFilesResults = MutableStateFlow<List<DeviceFileInfo>>(emptyList())
+    val deviceFilesResults: StateFlow<List<DeviceFileInfo>> = _deviceFilesResults.asStateFlow()
+
+    private val _recentDeviceFiles = MutableStateFlow<List<DeviceFileInfo>>(emptyList())
+    val recentDeviceFiles: StateFlow<List<DeviceFileInfo>> = _recentDeviceFiles.asStateFlow()
+
+    private val _recentDeviceApps = MutableStateFlow<List<RecentAppUsageInfo>>(emptyList())
+    val recentDeviceApps: StateFlow<List<RecentAppUsageInfo>> = _recentDeviceApps.asStateFlow()
+
+    // App Interface Mode (Google vs Samsung NowBrief)
+    val appModePreferences = AppModePreferences(application)
+    val interfaceMode: StateFlow<AppInterfaceMode> = appModePreferences.interfaceMode
+
+    fun setInterfaceMode(mode: AppInterfaceMode) {
+        appModePreferences.setMode(mode)
+    }
+
+    fun refreshWeather() {
+        viewModelScope.launch {
+            weatherService.refreshWeather()
+        }
+    }
+
+    fun openSystemWeatherApp() {
+        weatherService.openSystemWeatherApp()
+    }
+
+    fun refreshCalendarEvents() {
+        viewModelScope.launch {
+            _upcomingCalendarEvents.value = calendarSyncManager.getUpcomingEvents(5)
+        }
+    }
+
+    fun refreshRecentActivity() {
+        viewModelScope.launch {
+            _recentDeviceFiles.value = deviceSearchManager.getRecentDeviceFiles(15)
+            _recentDeviceApps.value = deviceSearchManager.getRecentlyUsedApps(10)
+        }
+    }
+
+    fun searchDevice(query: String) {
+        viewModelScope.launch {
+            if (query.isBlank()) {
+                _deviceContactsResults.value = emptyList()
+                _deviceFilesResults.value = emptyList()
+            } else {
+                _deviceContactsResults.value = deviceSearchManager.searchContacts(query)
+                _deviceFilesResults.value = deviceSearchManager.searchFiles(query)
+            }
+        }
+    }
+
+    fun openDeviceFile(file: DeviceFileInfo) {
+        deviceSearchManager.openFile(file.uri, file.mimeType)
+    }
+
+    fun launchDeviceApp(packageName: String) {
+        deviceSearchManager.launchApp(packageName)
     }
 
     // On-Device Speech Model Manager (Downloadable like Translation)
@@ -306,6 +390,9 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             repository.seedInitialDataIfEmpty()
             refreshGraph()
             refreshOnThisDay()
+            refreshWeather()
+            refreshCalendarEvents()
+            refreshRecentActivity()
         }
     }
 
@@ -695,9 +782,9 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     suspend fun getExportMarkdown(): String = repository.exportToMarkdownBundle()
 
-    fun addReminder(title: String, category: String = "Personal") {
+    fun addReminder(title: String, category: String = "Personal", dueTimestamp: Long = System.currentTimeMillis() + 3600_000) {
         viewModelScope.launch {
-            repository.saveReminder(LocalReminder(title = title, category = category))
+            repository.saveReminder(LocalReminder(title = title, category = category, dueTimestamp = dueTimestamp))
             lifeHubManager.refreshTelemetry()
         }
     }

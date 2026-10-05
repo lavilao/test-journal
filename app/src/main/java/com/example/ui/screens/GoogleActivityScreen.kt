@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
-import android.content.Intent
-import android.provider.MediaStore
-import android.widget.Toast
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,61 +20,48 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.media.SpeechModelStatus
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
-import com.example.ui.components.GoogleRed
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-data class DeviceAppShortcut(
-    val name: String,
-    val category: String,
-    val icon: ImageVector,
-    val intentAction: String?
-)
 
 @Composable
 fun GoogleActivityScreen(
@@ -85,19 +70,20 @@ fun GoogleActivityScreen(
     onNavigateToDetail: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
-    val speechModelStatus by viewModel.speechModelStatus.collectAsState()
     val entries by viewModel.entries.collectAsState()
+    val recentFiles by viewModel.recentDeviceFiles.collectAsState()
+    val recentApps by viewModel.recentDeviceApps.collectAsState()
 
-    val recentEntries = entries.take(6)
+    var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
 
-    val deviceApps = listOf(
-        DeviceAppShortcut("Cámara", "Fotos & Lens", Icons.Default.CameraAlt, MediaStore.ACTION_IMAGE_CAPTURE),
-        DeviceAppShortcut("Galería", "Imágenes locales", Icons.Default.PhotoLibrary, Intent.ACTION_VIEW),
-        DeviceAppShortcut("Grabadora", "Notas de voz", Icons.Default.Mic, MediaStore.Audio.Media.RECORD_SOUND_ACTION),
-        DeviceAppShortcut("Reloj y Alarmas", "Recordatorios", Icons.Default.Alarm, android.provider.AlarmClock.ACTION_SHOW_ALARMS)
-    )
+    LaunchedEffect(Unit) {
+        viewModel.refreshRecentActivity()
+        hasUsageAccess = viewModel.deviceSearchManager.hasUsageStatsPermission()
+    }
+
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val dateFormat = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
 
     Column(
         modifier = Modifier
@@ -114,366 +100,246 @@ fun GoogleActivityScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.History,
-                    contentDescription = null,
-                    tint = GoogleBlue,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Actividad en el Dispositivo",
+                    text = "Actividad del Dispositivo",
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                IconButton(onClick = {
+                    viewModel.refreshRecentActivity()
+                    hasUsageAccess = viewModel.deviceSearchManager.hasUsageStatsPermission()
+                }) {
+                    Icon(Icons.Default.History, contentDescription = "Refrescar", tint = GoogleBlue)
+                }
             }
         }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Section 1: Recent Files Opened and Edited
+            // SECTION: Aplicaciones Usadas Recientemente (UsageStatsManager)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Últimos archivos abiertos y editados",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "${entries.size} archivos",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Apps, contentDescription = null, tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Apps usadas recientemente",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    if (hasUsageAccess) {
+                        TextButton(onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() }) {
+                            Text("Ajustes de uso", fontSize = 11.sp, color = GoogleBlue)
+                        }
+                    }
                 }
             }
 
-            if (recentEntries.isEmpty()) {
+            if (!hasUsageAccess) {
                 item {
-                    Text(
-                        text = "No hay archivos recientes. Crea tu primera nota desde la pantalla de Inicio.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                items(recentEntries, key = { it.entry.id }) { itemWithRel ->
-                    val entry = itemWithRel.entry
-                    val hasAudio = itemWithRel.audioRecords.isNotEmpty()
-                    val hasPhoto = entry.imageUri != null || itemWithRel.mediaItems.isNotEmpty()
-
-                    val ext = when {
-                        hasAudio -> "M4A"
-                        hasPhoto -> "JPG"
-                        else -> "MD"
-                    }
-
-                    val dateStr = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(entry.updatedAt))
-
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Para mostrar las aplicaciones que has abierto recientemente en tu teléfono, Android requiere permiso de acceso al uso.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() },
+                                colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Activar Acceso de Uso", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            } else if (recentApps.isEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Sin registro de apps recientes en las últimas horas.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                }
+            } else {
+                items(recentApps, key = { it.packageName }) { app ->
+                    val mins = (app.totalTimeInForegroundMs / (1000 * 60)).coerceAtLeast(1)
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onNavigateToDetail(entry.id) }
-                            .testTag("recent_activity_file_${entry.id}")
+                            .clickable { viewModel.launchDeviceApp(app.packageName) }
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
+                            modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = when (ext) {
-                                    "M4A" -> GoogleRed.copy(alpha = 0.12f)
-                                    "JPG" -> GoogleBlue.copy(alpha = 0.12f)
-                                    else -> ForestPrimary.copy(alpha = 0.12f)
-                                },
-                                modifier = Modifier.size(40.dp)
+                                shape = CircleShape,
+                                color = GoogleBlue.copy(alpha = 0.12f),
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    val icon = when (ext) {
-                                        "M4A" -> Icons.Default.AudioFile
-                                        "JPG" -> Icons.Default.Image
-                                        else -> Icons.Default.Description
-                                    }
-                                    val iconTint = when (ext) {
-                                        "M4A" -> GoogleRed
-                                        "JPG" -> GoogleBlue
-                                        else -> ForestPrimary
-                                    }
-                                    Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = GoogleBlue, modifier = Modifier.size(18.dp))
                                 }
                             }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
+                            Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
+                                Text(app.appName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
                                 Text(
-                                    text = entry.title.ifBlank { "Archivo sin título" },
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Editado: $dateStr • ${ext.lowercase()} local",
+                                    text = "Abierta hoy a las ${timeFormat.format(Date(app.lastTimeUsedMs))} • ~$mins min de uso",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            IconButton(onClick = { viewModel.launchDeviceApp(app.packageName) }) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = "Abrir app", tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
             }
 
-            // Section 2: Device Applications
-            item {
-                Text(
-                    text = "Aplicaciones del dispositivo",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-
+            // SECTION: Archivos Recientes del Dispositivo (MediaStore)
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    deviceApps.forEach { app ->
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    if (app.intentAction != null) {
-                                        try {
-                                            context.startActivity(Intent(app.intentAction))
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "${app.name} accesible en tu sistema", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(app.icon, contentDescription = app.name, modifier = Modifier.size(18.dp))
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = app.name,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Archivos recientes del teléfono",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
 
-            // Section 3: Speech Model Offline Manager
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+            if (recentFiles.isEmpty()) {
+                item {
+                    Text(
+                        text = "No se encontraron archivos recientes en el almacenamiento.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+            } else {
+                items(recentFiles, key = { "rec_file_${it.id}" }) { file ->
+                    val kb = file.sizeBytes / 1024
+                    val sizeStr = if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.openDeviceFile(file) }
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.RecordVoiceOver,
-                                    contentDescription = null,
-                                    tint = GoogleBlue,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(file.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    text = "Modelo de voz offline (42 MB)",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = "$sizeStr • ${dateFormat.format(Date(file.dateModifiedMs))}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-
-                            when (speechModelStatus) {
-                                is SpeechModelStatus.Ready -> {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = GoogleGreen.copy(alpha = 0.15f)
-                                    ) {
-                                        Text(
-                                            text = "Instalado",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = GoogleGreen
-                                            ),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-                                is SpeechModelStatus.Downloading -> {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                }
-                                is SpeechModelStatus.NotDownloaded -> {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant
-                                    ) {
-                                        Text(
-                                            text = "No instalado",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "Descarga el modelo acústico en inglés (42 MB) para transcribir y dictar sin usar la nube de Google ni servicios remotos.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        when (val status = speechModelStatus) {
-                            is SpeechModelStatus.Ready -> {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = GoogleGreen, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Listo para transcripción offline", style = MaterialTheme.typography.labelSmall, color = GoogleGreen)
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            viewModel.speechModelManager.deleteModel()
-                                            Toast.makeText(context, "Modelo eliminado", Toast.LENGTH_SHORT).show()
-                                        }
-                                    ) {
-                                        Text("Eliminar", fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                            is SpeechModelStatus.Downloading -> {
-                                Column {
-                                    LinearProgressIndicator(
-                                        progress = { status.progress },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = GoogleBlue
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Descargando modelo... ${(status.progress * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = GoogleBlue
-                                    )
-                                }
-                            }
-                            is SpeechModelStatus.NotDownloaded -> {
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            viewModel.downloadSpeechModel { success ->
-                                                Toast.makeText(
-                                                    context,
-                                                    if (success) "¡Modelo de voz descargado con éxito!" else "Error al descargar",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Descargar modelo de voz (42 MB)")
-                                }
+                            IconButton(onClick = { viewModel.openDeviceFile(file) }) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = "Abrir archivo", tint = GoogleBlue, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
                 }
             }
 
-            // Section 4: Privacy & Zero Cloud Badge
+            // SECTION: Notas y Memorias Locales
             item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = GoogleGreen.copy(alpha = 0.08f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = GoogleGreen.copy(alpha = 0.2f),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = GoogleGreen,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "100% en tu Dispositivo",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Búsquedas, dictado y archivos se procesan en tu teléfono. Cero datos en la nube.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Description, contentDescription = null, tint = GoogleGreen, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Notas y escritos recientes",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    TextButton(onClick = onNavigateToGraph) {
+                        Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(14.dp), tint = ForestPrimary)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Ver Grafo", fontSize = 11.sp, color = ForestPrimary)
+                    }
+                }
+            }
+
+            items(entries.take(5), key = { "entry_${it.entry.id}" }) { item ->
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToDetail(item.entry.id) }
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(item.entry.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(item.entry.body, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

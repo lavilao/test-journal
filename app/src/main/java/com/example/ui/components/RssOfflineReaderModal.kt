@@ -21,9 +21,9 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +34,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,10 +57,29 @@ import com.example.ui.theme.ForestPrimary
 fun RssOfflineReaderModal(
     article: RssArticle,
     onDismiss: () -> Unit,
-    onSaveToNotes: (RssArticle) -> Unit
+    onSaveToNotes: (RssArticle) -> Unit,
+    onFetchFullText: (suspend (RssArticle) -> String)? = null
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var fullBodyText by remember {
+        mutableStateOf(if (article.fullContent.length > article.description.length) article.fullContent else article.description)
+    }
+    var isLoadingFullText by remember { mutableStateOf(false) }
+
+    LaunchedEffect(article.id) {
+        if (onFetchFullText != null && fullBodyText.length < 250) {
+            isLoadingFullText = true
+            try {
+                val fetched = onFetchFullText(article)
+                if (fetched.isNotBlank()) {
+                    fullBodyText = fetched
+                }
+            } catch (_: Exception) {}
+            isLoadingFullText = false
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -80,23 +104,12 @@ fun RssOfflineReaderModal(
                     shape = RoundedCornerShape(12.dp),
                     color = ForestPrimary.copy(alpha = 0.12f)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WifiOff,
-                            contentDescription = null,
-                            tint = ForestPrimary,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Lector Offline",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = ForestPrimary
-                        )
-                    }
+                    Text(
+                        text = "Artículo Completo",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = ForestPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
                 }
 
                 IconButton(onClick = onDismiss) {
@@ -160,12 +173,23 @@ fun RssOfflineReaderModal(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Full Article Body
+            if (isLoadingFullText) {
+                Row(
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = ForestPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Cargando texto completo del artículo...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
             Text(
-                text = article.description,
+                text = fullBodyText,
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = 24.sp
+                    lineHeight = 26.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -177,7 +201,7 @@ fun RssOfflineReaderModal(
             ) {
                 Button(
                     onClick = {
-                        onSaveToNotes(article)
+                        onSaveToNotes(article.copy(fullContent = fullBodyText))
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
@@ -186,7 +210,7 @@ fun RssOfflineReaderModal(
                 ) {
                     Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Guardar en Notas", fontSize = 13.sp)
+                    Text("Guardar Artículo en Notas", fontSize = 13.sp)
                 }
 
                 OutlinedButton(
@@ -199,7 +223,7 @@ fun RssOfflineReaderModal(
                         context.startActivity(Intent.createChooser(sendIntent, "Compartir artículo"))
                     },
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(0.7f)
+                    modifier = Modifier.weight(0.6f)
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))

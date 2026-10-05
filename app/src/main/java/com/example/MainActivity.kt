@@ -99,7 +99,11 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
             }
         }
         is AppScreen.Main -> {
-            // Default system back behavior
+            if (currentTab == MainNavTab.SETTINGS) {
+                BackHandler {
+                    viewModel.selectTab(MainNavTab.INICIO)
+                }
+            }
         }
     }
 
@@ -148,7 +152,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         modifier = Modifier.testTag("nav_notificaciones")
                     )
                     NavigationBarItem(
-                        selected = currentTab == MainNavTab.ACTIVIDAD || currentTab == MainNavTab.GRAPH || currentTab == MainNavTab.SETTINGS,
+                        selected = currentTab == MainNavTab.ACTIVIDAD || currentTab == MainNavTab.GRAPH,
                         onClick = { viewModel.selectTab(MainNavTab.ACTIVIDAD) },
                         icon = { Icon(Icons.Default.History, contentDescription = "Actividad", modifier = Modifier.size(24.dp)) },
                         label = { Text("Actividad") },
@@ -205,7 +209,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) }
                             )
                             MainNavTab.SETTINGS -> SettingsAndModelsScreen(
-                                viewModel = viewModel
+                                viewModel = viewModel,
+                                onBack = { viewModel.selectTab(MainNavTab.INICIO) }
                             )
                         }
                     }

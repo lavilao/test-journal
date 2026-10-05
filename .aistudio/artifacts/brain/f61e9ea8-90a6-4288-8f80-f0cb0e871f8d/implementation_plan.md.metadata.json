@@ -1,6 +1,6 @@
 {
-  "summary":  "Revised implementation plan merging Quicken LifeHub smart life categories, Google Pixel minimalist At a Glance widget, device health and telemetry (steps, screen time, recent files), device calendar sync with offline reminders, and the TagSpaces smart vault.",
-  "updatedAt":  "2026-10-02T16:09:20.530855099Z",
+  "summary":  "Plan integral para resolver todos los problemas reportados:\n- Clima real con GPS y Open-Meteo API en vivo con apertura de la app del sistema\n- Modo Google (Pixel At a Glance transparente y sin bordes) vs Modo Samsung (NowBrief) seleccionable en Ajustes\n- Integración real con el Calendario de Android (READ_CALENDAR, WRITE_CALENDAR) y selector de fecha y hora para recordatorios\n- Búsqueda real de contactos del dispositivo (ContactsContract) y archivos reales (MediaStore) con permisos\n- Vista de Actividades con apps reales usadas (UsageStatsManager) y archivos recientes del teléfono\n- Corrección de la sombra de la barra de búsqueda y eliminación de botones duplicados/experimento\n- Corrección del bug de ML Kit Entity Extraction y motor de dictado por voz\n- Eliminación de tareas locales y eliminación de redundancias de texto '100% offline'\n- Pull to refresh y guardado de artículos RSS completos en lugar de resúmenes",
+  "updatedAt":  "2026-10-04T03:40:01.924787239Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -22,13 +22,14 @@ data class RssArticle(
     val pubDate: String,
     val sourceTitle: String,
     val imageUrl: String? = null,
-    val category: String = "Technology"
+    val category: String = "Noticias",
+    val fullContent: String = ""
 )
 
 data class RssFeedSource(
     val name: String,
     val url: String,
-    val category: String = "Technology"
+    val category: String = "Noticias"
 )
 
 class RssFeedManager(private val context: Context) {
@@ -41,13 +42,14 @@ class RssFeedManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("rss_feeds_prefs", Context.MODE_PRIVATE)
 
     private val defaultSources = listOf(
-        RssFeedSource("The Verge", "https://www.theverge.com/rss/index.xml", "Tech"),
-        RssFeedSource("Wired", "https://www.wired.com/feed/rss", "Science"),
-        RssFeedSource("TechCrunch", "https://techcrunch.com/feed/", "Startups"),
-        RssFeedSource("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "Gadgets")
+        RssFeedSource("BBC News", "https://feeds.bbci.co.uk/news/rss.xml", "General"),
+        RssFeedSource("Wired", "https://www.wired.com/feed/rss", "Tecnología"),
+        RssFeedSource("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "Tecnología"),
+        RssFeedSource("El País", "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada", "Noticias"),
+        RssFeedSource("TechCrunch", "https://techcrunch.com/feed/", "Startups")
     )
 
-    private val _sources = MutableStateFlow(loadSavedSources())
+    private val _sources = MutableStateFlow<List<RssFeedSource>>(loadSavedSources())
     val sources: StateFlow<List<RssFeedSource>> = _sources.asStateFlow()
 
     private val _articles = MutableStateFlow<List<RssArticle>>(getInitialCuratedArticles())
@@ -55,8 +57,6 @@ class RssFeedManager(private val context: Context) {
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
-    private val imgPattern = Pattern.compile("<img[^>]+src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
 
     suspend fun refreshFeeds() = withContext(Dispatchers.IO) {
         _isLoading.value = true
@@ -89,9 +89,37 @@ class RssFeedManager(private val context: Context) {
         _isLoading.value = false
     }
 
-    suspend fun addCustomFeed(url: String, name: String, category: String = "Custom"): Boolean = withContext(Dispatchers.IO) {
+    suspend fun fetchFullArticleText(article: RssArticle): String = withContext(Dispatchers.IO) {
+        if (article.fullContent.length > 300) {
+            return@withContext article.fullContent
+        }
+        try {
+            val request = Request.Builder()
+                .url(article.link)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13)")
+                .build()
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                val paragraphs = Regex("<p[^>]*>(.*?)</p>", RegexOption.DOT_MATCHES_ALL)
+                    .findAll(html)
+                    .map { it.groupValues[1].replace(Regex("<[^>]*>"), "").trim() }
+                    .filter { it.length > 40 && !it.contains("cookie", ignoreCase = true) }
+                    .take(15)
+                    .joinToString("\n\n")
+
+                if (paragraphs.isNotBlank()) {
+                    return@withContext paragraphs
+                }
+            }
+        } catch (_: Exception) {}
+
+        article.description.ifBlank { article.title }
+    }
+
+    suspend fun addCustomFeed(url: String, name: String, category: String = "Personal"): Boolean = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
-        val safeName = name.ifBlank { "Custom RSS" }
+        val safeName = name.ifBlank { "Canal RSS" }
 
         val newSource = RssFeedSource(safeName, trimmedUrl, category)
         persistCustomSource(newSource)
@@ -121,7 +149,7 @@ class RssFeedManager(private val context: Context) {
         val customList = savedSet.mapNotNull { entry ->
             val parts = entry.split("|||")
             if (parts.size >= 2) {
-                RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Custom" })
+                RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" })
             } else null
         }
         return (customList + defaultSources).distinctBy { it.url }
@@ -135,8 +163,11 @@ class RssFeedManager(private val context: Context) {
 
     private fun parseRssXml(xmlContent: String, sourceName: String, category: String): List<RssArticle> {
         val list = mutableListOf<RssArticle>()
+        val imgPattern = Pattern.compile("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>", Pattern.CASE_INSENSITIVE)
+
         try {
             val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
             parser.setInput(StringReader(xmlContent))
 
             var eventType = parser.eventType
@@ -145,6 +176,7 @@ class RssFeedManager(private val context: Context) {
             var currentTitle = ""
             var currentLink = ""
             var currentDescription = ""
+            var currentContent = ""
             var currentPubDate = ""
             var currentImage: String? = null
 
@@ -157,6 +189,7 @@ class RssFeedManager(private val context: Context) {
                             currentTitle = ""
                             currentLink = ""
                             currentDescription = ""
+                            currentContent = ""
                             currentPubDate = ""
                             currentImage = null
                         } else if (inItem) {
@@ -175,6 +208,10 @@ class RssFeedManager(private val context: Context) {
                                             currentImage = matcher.group(1)
                                         }
                                     }
+                                }
+                                "content:encoded", "content" -> {
+                                    val text = parser.nextText()
+                                    currentContent = text.replace(Regex("<[^>]*>"), "").trim()
                                 }
                                 "pubdate", "published", "updated" -> currentPubDate = parser.nextText()
                                 "enclosure" -> {
@@ -196,16 +233,18 @@ class RssFeedManager(private val context: Context) {
                     XmlPullParser.END_TAG -> {
                         if (tag == "item" || tag == "entry") {
                             if (currentTitle.isNotBlank()) {
+                                val fullArticle = if (currentContent.isNotBlank()) currentContent else currentDescription
                                 list.add(
                                     RssArticle(
                                         id = "${sourceName}_${list.size}_${System.currentTimeMillis()}",
                                         title = currentTitle.trim(),
                                         link = currentLink.trim(),
-                                        description = currentDescription.take(200),
-                                        pubDate = currentPubDate.take(24).ifBlank { "Just now" },
+                                        description = currentDescription,
+                                        pubDate = currentPubDate.take(24).ifBlank { "Reciente" },
                                         sourceTitle = sourceName,
                                         imageUrl = currentImage,
-                                        category = category
+                                        category = category,
+                                        fullContent = fullArticle
                                     )
                                 )
                             }
@@ -217,50 +256,43 @@ class RssFeedManager(private val context: Context) {
             }
         } catch (_: Exception) {}
 
-        return list.take(12)
+        return list.take(15)
     }
 
     private fun getInitialCuratedArticles(): List<RssArticle> {
         return listOf(
             RssArticle(
                 id = "init_1",
-                title = "The Next Generation of On-Device Personal Knowledge Systems",
+                title = "La revolución del procesamiento en dispositivo: Privacidad y eficiencia",
                 link = "https://www.theverge.com",
-                description = "How modern offline databases, vector graphs, and local telemetry are replacing clunky cloud silos.",
-                pubDate = "2h ago",
-                sourceTitle = "The Verge",
+                description = "Cómo las bases de datos locales, el procesamiento offline y el cifrado en el dispositivo están transformando las aplicaciones móviles modernas.",
+                pubDate = "Hace 2h",
+                sourceTitle = "Tecnología",
                 imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80",
-                category = "Technology"
+                category = "Tecnología",
+                fullContent = "Cómo las bases de datos locales, el procesamiento offline y el cifrado en el dispositivo están transformando las aplicaciones móviles modernas.\n\nLos usuarios hoy en día demandan interfaces instantáneas y soberanía de datos sin depender de servidores remotos para cada interacción básica."
             ),
             RssArticle(
                 id = "init_2",
-                title = "Curated Minimalist Spaces: Balancing Design & Daily Focus",
+                title = "Diseño minimalista y enfoque diario en el espacio de trabajo",
                 link = "https://www.wired.com",
-                description = "Exploring Scandinavian ergonomics, tactile wooden accessories, and functional home sanctuaries.",
-                pubDate = "4h ago",
+                description = "La ergonomía, los materiales cálidos y la reducción del ruido visual mejoran la concentración en las tareas cotidianas.",
+                pubDate = "Hace 4h",
                 sourceTitle = "Wired",
                 imageUrl = "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=800&q=80",
-                category = "Design"
+                category = "Diseño",
+                fullContent = "La ergonomía, los materiales cálidos y la reducción del ruido visual mejoran la concentración en las tareas cotidianas.\n\nDiseñar entornos sin distracciones permite mantener la calma mental y una mayor atención a los proyectos importantes."
             ),
             RssArticle(
                 id = "init_3",
-                title = "Morning Habits for Longevity and Mental Clarity",
+                title = "Hábitos matutinos para potenciar la claridad mental y el bienestar",
                 link = "https://www.bbc.com/news",
-                description = "Health researchers break down why steady walking, natural light, and digital detox before noon double productivity.",
-                pubDate = "5h ago",
-                sourceTitle = "BBC News",
+                description = "Investigadores analizan el impacto de caminar a paso constante, la luz natural y planificar los objetivos antes de iniciar la jornada.",
+                pubDate = "Hace 5h",
+                sourceTitle = "Salud",
                 imageUrl = "https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=800&q=80",
-                category = "Health"
-            ),
-            RssArticle(
-                id = "init_4",
-                title = "Open Source Local AI Models Reach Parity with Web Assistants",
-                link = "https://arstechnica.com",
-                description = "Breakthroughs in quantized neural models allow smartphones to perform semantic recall and transcription with zero cloud roundtrips.",
-                pubDate = "7h ago",
-                sourceTitle = "Ars Technica",
-                imageUrl = "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80",
-                category = "Startups"
+                category = "Salud",
+                fullContent = "Investigadores analizan el impacto de caminar a paso constante, la luz natural y planificar los objetivos antes de iniciar la jornada.\n\nUn paseo matutino y unos minutos de escritura reflexiva bastan para estructurar el día con serenidad."
             )
         )
     }

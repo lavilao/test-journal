@@ -4,7 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,10 +21,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
+import com.example.data.AppInterfaceMode
+import com.example.ui.components.GoogleBlue
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Lock
@@ -73,7 +78,10 @@ import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
+fun SettingsAndModelsScreen(
+    viewModel: JournalViewModel,
+    onBack: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -81,6 +89,7 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
     val entities by viewModel.entities.collectAsState()
     val events by viewModel.events.collectAsState()
     val isRebuilding by viewModel.isRebuildingMetadata.collectAsState()
+    val interfaceMode by viewModel.interfaceMode.collectAsState()
 
     var exportDialogContent by remember { mutableStateOf<String?>(null) }
     var exportDialogTitle by remember { mutableStateOf("") }
@@ -105,55 +114,102 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp)
             .testTag("settings_screen")
     ) {
-        Text(
-            text = "Settings & Local ML",
-            style = MaterialTheme.typography.displayLarge.copy(fontSize = 26.sp),
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = "Privacy controls, on-device ML Kit models, and open data export",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // Top Back Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.material3.IconButton(
+                onClick = onBack,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Regresar",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Ajustes del Sistema",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Privacy First Badge Card
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            modifier = Modifier.fillMaxWidth().testTag("privacy_card")
+        // SECTION: Interface Mode Selector (Modo Google vs Modo Samsung)
+        Text(
+            text = "Modo de Pantalla de Inicio",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Elige tu estilo visual preferido para el hub principal.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            val isGoogle = interfaceMode == AppInterfaceMode.GOOGLE
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isGoogle) GoogleBlue.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                border = if (isGoogle) BorderStroke(2.dp, GoogleBlue) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { viewModel.setInterfaceMode(AppInterfaceMode.GOOGLE) }
             ) {
-                Icon(
-                    imageVector = Icons.Default.Security,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "100% Offline & Private",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        text = "Modo Google",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = if (isGoogle) GoogleBlue else MaterialTheme.colorScheme.onSurface
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Zero tracking. Zero remote LLM calls. All entities, offsets, TF-IDF scores, and journals stay strictly on this device.",
+                        text = "Pixel At a Glance transparente y sin bordes, buscador Google y feed limpio.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            val isSamsung = interfaceMode == AppInterfaceMode.SAMSUNG
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isSamsung) GoogleBlue.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                border = if (isSamsung) BorderStroke(2.dp, GoogleBlue) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { viewModel.setInterfaceMode(AppInterfaceMode.SAMSUNG) }
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Modo Samsung",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = if (isSamsung) GoogleBlue else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Tarjeta dinámica NowBrief con briefing matutino, vespertino y nocturno.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(22.dp))
 
         // Local Storage & Knowledge Stats
         Text(
@@ -239,16 +295,16 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
-                // ML Kit Entity Extraction
+                // Entity Extraction Engine
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("ML Kit Entity Extraction", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                        Text("Reconocimiento de Entidades", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                         Text(
-                            "Extracts Dates, Money, URLs, Addresses on-device",
+                            if (isEntityModelDownloaded) "Motor neuronal ML Kit activo en dispositivo" else "Motor en dispositivo activo (ML Kit opcional)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -257,7 +313,7 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ForestPrimary)
                     } else if (isEntityModelDownloaded) {
                         Surface(color = ForestPrimary.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
-                            Text("Ready", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            Text("ML Kit Activo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                         }
                     } else {
                         OutlinedButton(
@@ -267,14 +323,14 @@ fun SettingsAndModelsScreen(viewModel: JournalViewModel) {
                                     val success = MlKitAnalyzer.downloadEntityModel()
                                     isDownloadingEntityModel = false
                                     isEntityModelDownloaded = success
-                                    Toast.makeText(context, if (success) "Entity model downloaded!" else "Download failed", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (success) "Modelo ML Kit listo" else "Motor local sigue activo", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.testTag("download_entity_model_button")
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Download", style = MaterialTheme.typography.labelSmall)
+                            Text("Descargar ML Kit", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }

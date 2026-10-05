@@ -45,6 +45,7 @@ import com.example.rss.RssArticle
 fun GoogleDiscoverCard(
     article: RssArticle,
     onSaveToJournal: (RssArticle) -> Unit,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -58,7 +59,9 @@ fun GoogleDiscoverCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable {
-                if (article.link.isNotBlank()) {
+                if (onClick != null) {
+                    onClick()
+                } else if (article.link.isNotBlank()) {
                     try {
                         val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(article.link)).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
