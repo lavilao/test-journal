@@ -529,7 +529,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun stopDictation() {
-        voiceManager.stopLiveDictation()
+        voiceManager.stopDictation()
     }
 
     // Voice Journal Actions

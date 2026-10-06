@@ -224,7 +224,7 @@ internal class MarkdownParser(private val palette: MdPalette) {
 
         fun collect(regex: Regex, spansBuilder: (String) -> List<SpanStyle>) {
             regex.findAll(line).forEach { match ->
-                val contentGroup = match.groups.getOrNull(1)
+                val contentGroup = match.groups[1]
                 val contentStart = contentGroup?.range?.first ?: match.range.first
                 val contentEnd = (contentGroup?.range?.last ?: match.range.last) + 1
                 candidates.add(

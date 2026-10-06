@@ -352,8 +352,7 @@ class VoiceJournalManager(private val context: Context) {
                     // "speech timeout" should not kill a long voice note.
                     val transient = error == SpeechRecognizer.ERROR_NO_MATCH ||
                             error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                            error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
-                            error == SpeechRecognizer.ERROR_BUSY
+                            error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
                     if (transient && restartDictationWhenDone) {
                         restartAfterDelay()
                     } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
