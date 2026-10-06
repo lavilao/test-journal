@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,9 +66,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.AppInterfaceMode
 import com.example.rss.RssArticle
-import com.example.ui.components.DailyBriefingCard
+import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleDiscoverCard
@@ -107,9 +107,10 @@ fun TimelineScreen(
     val nextReminder by viewModel.nextActiveReminder.collectAsState()
     val rssArticles by viewModel.rssArticles.collectAsState()
     val isRssLoading by viewModel.isRssLoading.collectAsState()
-    val interfaceMode by viewModel.interfaceMode.collectAsState()
     val realWeather by viewModel.realWeather.collectAsState()
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
+    val deviceFiles by viewModel.deviceFilesResults.collectAsState()
+    val deviceContacts by viewModel.deviceContactsResults.collectAsState()
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -118,6 +119,23 @@ fun TimelineScreen(
     var selectedFeedView by remember { mutableStateOf(HomeFeedView.NOTICIAS) }
     var selectedRssArticleForReading by remember { mutableStateOf<RssArticle?>(null) }
     var showPhotoChoiceDialog by remember { mutableStateOf(false) }
+    var showCityPicker by remember { mutableStateOf(false) }
+
+    // Calendar permission launcher — the calendar never asked before, which
+    // is why the integration looked broken.
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.refreshCalendarEvents()
+        }
+        viewModel.refreshTelemetry()
+    }
+
+    // Device-wide search (files + contacts) while typing
+    LaunchedEffect(homeSearchQuery) {
+        viewModel.searchDevice(homeSearchQuery)
+    }
 
     // Gallery Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -201,7 +219,6 @@ fun TimelineScreen(
                 contentPadding = PaddingValues(bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Header (Google Pixel Style with borderless transparent At a Glance)
                 item {
                     GoogleSearchHubHeader(
                         searchQuery = homeSearchQuery,
@@ -213,34 +230,22 @@ fun TimelineScreen(
                         onVoiceClick = { showQuickDictateModal = true },
                         onCameraClick = { showPhotoChoiceDialog = true },
                         onWeatherClick = { viewModel.openSystemWeatherApp() },
+                        onChooseCityClick = { showCityPicker = true },
                         onReminderClick = { viewModel.selectTab(MainNavTab.NOTIFICACIONES) },
-                        onCalendarClick = { viewModel.calendarSyncManager.openCalendarApp() },
+                        onCalendarClick = {
+                            if (telemetry.hasCalendarPermission) {
+                                viewModel.calendarSyncManager.openCalendarApp()
+                            } else {
+                                calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                            }
+                        },
                         onSettingsClick = { viewModel.selectTab(MainNavTab.SETTINGS) }
                     )
                 }
 
-                // Samsung Mode (NowBrief Widget)
-                if (interfaceMode == AppInterfaceMode.SAMSUNG && homeSearchQuery.isBlank()) {
-                    item {
-                        DailyBriefingCard(
-                            telemetry = telemetry,
-                            nextReminder = nextReminder,
-                            topArticle = rssArticles.firstOrNull(),
-                            onWriteReflection = { title, prompt ->
-                                viewModel.saveEntry(
-                                    id = 0L,
-                                    title = title,
-                                    body = prompt,
-                                    onComplete = { newId ->
-                                        onNavigateToDetail(newId)
-                                    }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                // Mode 1: Search Query active -> Show Search Results for Files and Notes
+                // Mode 1: Search Query active -> Phone-wide search results
+                // (notes + real files via MediaStore + contacts) — the
+                // "your phone as your private internet" experience.
                 if (homeSearchQuery.isNotBlank()) {
                     item {
                         Row(
@@ -251,7 +256,7 @@ fun TimelineScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Resultados en este dispositivo (${searchResults.size})",
+                                text = "En este dispositivo",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -261,7 +266,7 @@ fun TimelineScreen(
                         }
                     }
 
-                    if (searchResults.isEmpty()) {
+                    if (searchResults.isEmpty() && deviceFiles.isEmpty() && deviceContacts.isEmpty()) {
                         item {
                             Card(
                                 shape = RoundedCornerShape(16.dp),
@@ -300,8 +305,13 @@ fun TimelineScreen(
                                 }
                             }
                         }
-                    } else {
-                        items(searchResults, key = { it.id }) { fileItem ->
+                    }
+
+                    if (searchResults.isNotEmpty()) {
+                        item {
+                            SectionHeader(title = "Tus notas y memorias (${searchResults.size})")
+                        }
+                        items(searchResults, key = { "note_${it.id}" }) { fileItem ->
                             Card(
                                 shape = RoundedCornerShape(14.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -344,10 +354,129 @@ fun TimelineScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${fileItem.fileName} • ${fileItem.formattedSize}",
+                                            text = fileItem.previewText.take(60),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (deviceFiles.isNotEmpty()) {
+                        item {
+                            SectionHeader(title = "Archivos del teléfono (${deviceFiles.size})")
+                        }
+                        items(deviceFiles.take(12), key = { "file_${it.id}_${it.dateModifiedMs}" }) { deviceFile ->
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp)
+                                    .clickable { viewModel.openDeviceFile(deviceFile) }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isImage = deviceFile.mimeType.startsWith("image/")
+                                    val isAudio = deviceFile.mimeType.startsWith("audio/")
+                                    val icon = when {
+                                        isImage -> Icons.Default.Image
+                                        isAudio -> Icons.Default.AudioFile
+                                        else -> Icons.Default.Description
+                                    }
+                                    val tint = when {
+                                        isImage -> GoogleBlue
+                                        isAudio -> GoogleGreen
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = tint.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = deviceFile.displayName,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        val sizeKb = deviceFile.sizeBytes / 1024
+                                        Text(
+                                            text = "${deviceFile.mimeType.substringAfter('/')} · ${sizeKb} KB",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (deviceContacts.isNotEmpty()) {
+                        item {
+                            SectionHeader(title = "Contactos (${deviceContacts.size})")
+                        }
+                        items(deviceContacts.take(8), key = { "contact_${it.id}_${it.displayName}" }) { contact ->
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp)
+                                    .clickable {
+                                        contact.phoneNumber?.let { phone ->
+                                            com.example.contacts.ContactsHelper.dialContact(context, phone)
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = ForestPrimary.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = contact.displayName.take(1).uppercase(),
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = ForestPrimary
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = contact.displayName,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        contact.phoneNumber?.let {
+                                            Text(
+                                                text = it,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -569,4 +698,22 @@ fun TimelineScreen(
             }
         )
     }
+
+    // City picker for the weather card
+    if (showCityPicker) {
+        CityPickerModal(
+            viewModel = viewModel,
+            onDismiss = { showCityPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)
+    )
 }

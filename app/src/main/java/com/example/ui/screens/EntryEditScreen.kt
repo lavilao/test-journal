@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,56 +30,50 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.runtime.key
-import com.example.ui.components.EmojiMoodPicker
-import com.example.ui.components.MarkdownWysiwygEditor
-import com.example.ui.components.VoiceTranscriptionModal
-import com.example.contacts.ContactsHelper
-import com.example.contacts.DeviceContactInfo
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,24 +85,36 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.example.contacts.ContactsHelper
+import com.example.contacts.DeviceContactInfo
 import com.example.data.model.AudioRecordItem
 import com.example.data.model.JournalPage
 import com.example.data.model.JournalTemplate
 import com.example.media.PlaybackState
 import com.example.media.RecordingState
-import com.example.media.VoiceJournalManager
-import com.example.semantic.MindForgerSemanticEngine
-import com.example.ui.components.EditorialCard
-import com.example.ui.components.EntityChip
-import com.example.ui.theme.AmberNode
+import com.example.ui.components.EmojiMoodPicker
+import com.example.ui.components.LiveMarkdownEditor
+import com.example.ui.components.GoogleBlue
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/**
+ * Minimal journal editor, Day One / Obsidian style: a clean writing surface
+ * with the live markdown renderer as the ONLY editing mode, a compact mood
+ * row, one row of attachment actions, and everything else tucked behind a
+ * "details" expander. Contextual metadata (weather) is captured
+ * automatically on save instead of being a form field.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EntryEditScreen(
@@ -123,19 +130,23 @@ fun EntryEditScreen(
     val isRecording = recordingState == RecordingState.RECORDING || recordingState == RecordingState.PAUSED
     val isPaused = recordingState == RecordingState.PAUSED
     val isDictating by viewModel.isDictating.collectAsState()
+    val liveTranscript by viewModel.liveRecordingTranscript.collectAsState()
+    val partialTranscript by viewModel.partialTranscript.collectAsState()
     val playbackState by viewModel.voiceManager.playbackState.collectAsState()
     val currentPlayingPath by viewModel.voiceManager.currentPlayingPath.collectAsState()
+    val realWeather by viewModel.realWeather.collectAsState()
+
     val audioRecords = remember { mutableStateListOf<AudioRecordItem>() }
     var editingAudioIndex by remember { mutableStateOf<Int?>(null) }
-    var showBodyDictationModal by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var selectedMood by remember { mutableStateOf<String?>("Thoughtful") }
+    var selectedMood by remember { mutableStateOf<String?>(null) }
     var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
     val tagsList = remember { mutableStateListOf<String>() }
     var newTagInput by remember { mutableStateOf("") }
+    var showDetails by remember { mutableStateOf(false) }
+    var showTemplateMenu by remember { mutableStateOf(false) }
 
     // Multi-page sections
     val pages = remember { mutableStateListOf<JournalPage>() }
@@ -143,9 +154,11 @@ fun EntryEditScreen(
     var newPageTitle by remember { mutableStateOf("") }
     var newPageBody by remember { mutableStateOf("") }
 
-    // Linked Contacts
+    // Linked contacts
     val linkedContacts = remember { mutableStateListOf<DeviceContactInfo>() }
     var selectedContactAction by remember { mutableStateOf<DeviceContactInfo?>(null) }
+
+    val dateFormat = remember { SimpleDateFormat("EEEE d 'de' MMMM · H:mm", Locale.getDefault()) }
 
     val contactPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickContact()
@@ -155,10 +168,6 @@ fun EntryEditScreen(
             if (contactInfo != null) {
                 if (linkedContacts.none { it.displayName == contactInfo.displayName }) {
                     linkedContacts.add(contactInfo)
-                    if (!body.contains(contactInfo.displayName)) {
-                        body = if (body.isBlank()) "@${contactInfo.displayName}" else "$body\n@${contactInfo.displayName}"
-                    }
-                    Toast.makeText(context, "Linked: ${contactInfo.displayName}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -170,11 +179,10 @@ fun EntryEditScreen(
         if (granted) {
             contactPickerLauncher.launch(null)
         } else {
-            Toast.makeText(context, "Contacts permission is needed to select contacts", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Se necesita el permiso de contactos para enlazarlos", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Image Picker: persist immediately to app's internal filesDir so it never loses permissions after app restart!
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -184,14 +192,13 @@ fun EntryEditScreen(
         }
     }
 
-    // Audio recording permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            viewModel.startVoiceRecording()
+            viewModel.startVoiceRecordingWithDictation()
         } else {
-            Toast.makeText(context, "Microphone permission is required for voice journal notes", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "El micrófono es necesario para las notas de voz", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -203,7 +210,6 @@ fun EntryEditScreen(
         }
     }
 
-    // Initialize state only once to prevent background room updates from wiping tags and causing screen flicker
     var hasInitializedData by remember(entryId) { mutableStateOf(false) }
 
     LaunchedEffect(existingEntryDetail) {
@@ -211,7 +217,6 @@ fun EntryEditScreen(
             existingEntryDetail?.let { item ->
                 title = item.entry.title
                 body = item.entry.body
-                location = item.entry.location ?: ""
                 selectedMood = item.entry.mood
                 item.entry.imageUri?.let { attachedImageUri = Uri.parse(it) }
                 tagsList.clear()
@@ -225,21 +230,29 @@ fun EntryEditScreen(
         }
     }
 
-    // Live Semantic Preview (Entities & Keywords discovered in real-time)
-    val liveEntities by remember(title, body) {
-        derivedStateOf {
-            if (title.isNotBlank() || body.isNotBlank()) {
-                MindForgerSemanticEngine.extractEntities(title, body)
-            } else emptyList()
-        }
-    }
+    // Saving: the current entry, enriched with automatic contextual metadata
+    // (weather) when the user did not type a location themselves — Day One style.
+    fun persistEntry(onComplete: (Long) -> Unit) {
+        val autoContext = buildString {
+            val weather = realWeather
+            if (weather.temperature != null) {
+                append(weather.locationName ?: "")
+                append(" · ${weather.temperature}°C ${weather.conditionText ?: ""}")
+            }
+        }.trim().trimStart('·').trim()
 
-    val liveKeywords by remember(title, body) {
-        derivedStateOf {
-            if (title.isNotBlank() || body.isNotBlank()) {
-                MindForgerSemanticEngine.tokenize("$title $body").distinct().take(5)
-            } else emptyList()
-        }
+        viewModel.saveEntry(
+            id = entryId ?: 0L,
+            title = title,
+            body = body,
+            mood = selectedMood,
+            location = autoContext.ifBlank { null },
+            manualTags = tagsList.toList(),
+            attachedImageUri = attachedImageUri,
+            pages = pages.toList(),
+            audioRecords = audioRecords.toList(),
+            onComplete = onComplete
+        )
     }
 
     Scaffold(
@@ -247,40 +260,59 @@ fun EntryEditScreen(
             TopAppBar(
                 title = {
                     Text(
-                        if (entryId == null || entryId == 0L) "New Memory" else "Edit Memory",
+                        if (entryId == null || entryId == 0L) "Nueva memoria" else "Editar memoria",
                         style = MaterialTheme.typography.titleMedium
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.testTag("edit_back_button")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = {
+                        // Back = save (Day One behavior) when there is content.
+                        if (title.isNotBlank() || body.isNotBlank()) {
+                            persistEntry { onBack() }
+                        } else {
+                            onBack()
+                        }
+                    }, modifier = Modifier.testTag("edit_back_button")) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                     }
                 },
                 actions = {
+                    if (entryId == null || entryId == 0L) {
+                        IconButton(onClick = { showTemplateMenu = true }) {
+                            Icon(Icons.Default.Bookmark, contentDescription = "Plantillas")
+                        }
+                        DropdownMenu(
+                            expanded = showTemplateMenu,
+                            onDismissRequest = { showTemplateMenu = false }
+                        ) {
+                            JournalTemplate.ALL_TEMPLATES.take(8).forEach { tmpl ->
+                                DropdownMenuItem(
+                                    text = { Text(tmpl.name) },
+                                    onClick = {
+                                        showTemplateMenu = false
+                                        if (title.isBlank()) title = tmpl.defaultTitle.ifBlank { tmpl.name }
+                                        if (body.isBlank()) body = tmpl.defaultBody
+                                        tmpl.defaultMood?.let { selectedMood = it }
+                                    }
+                                )
+                            }
+                        }
+                    }
                     Button(
                         onClick = {
                             if (title.isNotBlank() || body.isNotBlank()) {
-                                viewModel.saveEntry(
-                                    id = entryId ?: 0L,
-                                    title = title,
-                                    body = body,
-                                    mood = selectedMood,
-                                    location = location,
-                                    manualTags = tagsList.toList(),
-                                    attachedImageUri = attachedImageUri,
-                                    pages = pages.toList(),
-                                    audioRecords = audioRecords.toList(),
-                                    onComplete = onSaved
-                                )
+                                persistEntry(onSaved)
                             }
                         },
                         enabled = title.isNotBlank() || body.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
-                        modifier = Modifier.padding(end = 8.dp).testTag("save_entry_button")
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .testTag("save_entry_button")
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Save")
+                        Text("Guardar")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -294,172 +326,224 @@ fun EntryEditScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp)
+                .padding(horizontal = 20.dp)
         ) {
-            // Quick Reusable Templates Picker
-            if (entryId == null || entryId == 0L) {
+            // Auto date + weather context line
+            Text(
+                text = dateFormat.format(Date()),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            realWeather.temperature?.let { temp ->
                 Text(
-                    text = "Journal Templates",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    text = "· $temp° ${realWeather.conditionText ?: ""} ${realWeather.locationName ?: ""}".trim(),
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    JournalTemplate.ALL_TEMPLATES.forEach { tmpl ->
-                        FilterChip(
-                            selected = false,
-                            onClick = {
-                                if (title.isBlank()) title = tmpl.defaultTitle.ifBlank { tmpl.name }
-                                if (body.isBlank()) {
-                                    body = tmpl.defaultBody
-                                } else {
-                                    body = "$body\n\n${tmpl.defaultBody}"
-                                }
-                                tmpl.defaultTags.forEach { t ->
-                                    if (t !in tagsList) tagsList.add(t)
-                                }
-                                tmpl.defaultMood?.let { m -> selectedMood = m }
-                            },
-                            label = { Text(tmpl.name) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(14.dp))
-                            }
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
             }
 
-            // Title Input
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Title: clean, borderless
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title / Summary") },
-                placeholder = { Text("What's on your mind today?") },
+                placeholder = { Text("Título") },
                 textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ForestPrimary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent
                 ),
-                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("entry_title_input")
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Storypad-style Emoji Mood Picker
+            // Compact mood row
             EmojiMoodPicker(
                 selectedMood = selectedMood,
                 onMoodSelected = { selectedMood = it },
                 modifier = Modifier.testTag("emoji_mood_picker")
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Location, Contacts, & Image Attach Row
+            // The writing surface: live markdown, the only mode (Obsidian style)
+            LiveMarkdownEditor(
+                value = body,
+                onValueChange = { body = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("entry_body_input"),
+                placeholder = "Escribe libremente… **negrita**, # títulos, - listas, [[enlaces]]"
+            )
+
+            // Voice note: compact recorder with REAL live transcript
+            if (isRecording) {
+                Spacer(modifier = Modifier.height(12.dp))
+                VoiceRecordingBar(
+                    isPaused = isPaused,
+                    isDictating = isDictating,
+                    liveTranscript = liveTranscript,
+                    partialTranscript = partialTranscript,
+                    onPause = { viewModel.pauseVoiceRecording() },
+                    onResume = { viewModel.resumeVoiceRecording() },
+                    onStop = {
+                        val transcript = viewModel.voiceManager.consumeLiveTranscript()
+                        val (file, duration) = viewModel.voiceManager.stopRecording()
+                        if (file != null && file.exists()) {
+                            audioRecords.add(
+                                AudioRecordItem(
+                                    entryId = entryId ?: 0L,
+                                    filePath = file.absolutePath,
+                                    durationMs = duration,
+                                    transcript = transcript,
+                                    transcriptionStatus = if (transcript.isNotBlank()) "COMPLETED" else "RECORDED",
+                                    title = "Nota de voz"
+                                )
+                            )
+                        }
+                    }
+                )
+            }
+
+            // Attached voice notes
+            audioRecords.forEachIndexed { index, record ->
+                key(record.filePath) {
+                    AttachedVoiceNote(
+                        record = record,
+                        isPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath,
+                        onPlayToggle = {
+                            if (playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath) {
+                                viewModel.stopAudio()
+                            } else {
+                                viewModel.playAudio(record.filePath)
+                            }
+                        },
+                        onEdit = { editingAudioIndex = index },
+                        onDelete = { audioRecords.removeAt(index) }
+                    )
+                }
+            }
+
+            // Attached photo
+            if (attachedImageUri != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    AsyncImage(
+                        model = attachedImageUri,
+                        contentDescription = "Foto adjunta",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                    IconButton(
+                        onClick = { attachedImageUri = null },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .clip(CircleShape)
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))
+                            .size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Quitar foto", tint = androidx.compose.ui.graphics.Color.White)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Single action row: photo / voice / contact / details
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = location,
-                    onValueChange = { location = it },
-                    label = { Text("Location") },
-                    placeholder = { Text("e.g. Blue Bottle, Kyoto...") },
-                    leadingIcon = {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = ForestPrimary)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f).testTag("entry_location_input")
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // Link Device Contact Button
-                IconButton(
+                ActionChip(
+                    icon = Icons.Default.AddPhotoAlternate,
+                    label = "Foto",
                     onClick = {
-                        val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.READ_CONTACTS
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }
+                )
+                ActionChip(
+                    icon = Icons.Default.Mic,
+                    label = "Voz",
+                    onClick = {
+                        val hasPerm = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasPerm) {
+                            viewModel.startVoiceRecordingWithDictation()
+                        } else {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                )
+                ActionChip(
+                    icon = Icons.Default.PersonAdd,
+                    label = "Contacto",
+                    onClick = {
+                        val hasPerm = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.READ_CONTACTS
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasPerm) {
                             contactPickerLauncher.launch(null)
                         } else {
                             contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                         }
-                    },
-                    modifier = Modifier.testTag("link_contact_button")
-                ) {
+                    }
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(onClick = { showDetails = !showDetails }) {
                     Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = "Link Contact",
-                        tint = TerracottaAccent,
-                        modifier = Modifier.size(26.dp)
+                        if (showDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
                     )
-                }
-
-                IconButton(
-                    onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    modifier = Modifier.testTag("attach_photo_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddPhotoAlternate,
-                        contentDescription = "Attach Photo",
-                        tint = ForestPrimary,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(if (showDetails) "Menos" else "Detalles")
                 }
             }
 
-            // Linked Contacts Display with Direct Actions
+            // Linked contacts chips
             if (linkedContacts.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.height(10.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "Contacts:",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = TerracottaAccent
-                    )
                     linkedContacts.forEach { contact ->
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(50),
                             color = TerracottaAccent.copy(alpha = 0.12f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, TerracottaAccent.copy(alpha = 0.35f)),
                             modifier = Modifier.clickable { selectedContactAction = contact }
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)
                             ) {
                                 Text(
-                                    text = "👤 ${contact.displayName}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    text = contact.displayName,
+                                    style = MaterialTheme.typography.labelMedium,
                                     color = TerracottaAccent
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Remove contact",
+                                    Icons.Default.Close,
+                                    contentDescription = "Quitar",
                                     tint = TerracottaAccent,
                                     modifier = Modifier
-                                        .size(12.dp)
+                                        .size(14.dp)
                                         .clickable { linkedContacts.remove(contact) }
                                 )
                             }
@@ -468,473 +552,120 @@ fun EntryEditScreen(
                 }
             }
 
-            // Attached Photo Preview
-            if (attachedImageUri != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    AsyncImage(
-                        model = attachedImageUri,
-                        contentDescription = "Attached photo preview",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(12.dp))
+            // Collapsed details: tags, sections, linked contact actions
+            AnimatedVisibility(visible = showDetails) {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    // Tags
+                    Text(
+                        text = "Etiquetas",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    IconButton(
-                        onClick = { attachedImageUri = null },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))
-                            .size(32.dp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Remove photo", tint = androidx.compose.ui.graphics.Color.White)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Voice Journal Recording Bar
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isRecording) TerracottaAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().testTag("voice_recorder_card")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isRecording) TerracottaAccent else ForestPrimary.copy(alpha = 0.15f),
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = null,
-                                    tint = if (isRecording) androidx.compose.ui.graphics.Color.White else ForestPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = if (isRecording) "Recording Voice Note..." else "Voice Journal Note",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = if (isRecording) "Transcribing locally after stop" else "Tap mic to record audio with offline speech-to-text",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (!isRecording) {
-                        IconButton(
-                            onClick = {
-                                val hasPerm = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
-                                ) == PackageManager.PERMISSION_GRANTED
-                                if (hasPerm) {
-                                    viewModel.startVoiceRecording()
-                                } else {
-                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            modifier = Modifier.testTag("start_voice_recording_btn")
-                        ) {
-                            Icon(Icons.Default.Mic, contentDescription = "Start Voice Recording", tint = ForestPrimary)
-                        }
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (isPaused) {
-                                IconButton(onClick = { viewModel.resumeVoiceRecording() }) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Resume", tint = ForestPrimary)
-                                }
-                            } else {
-                                IconButton(onClick = { viewModel.pauseVoiceRecording() }) {
-                                    Icon(Icons.Default.Pause, contentDescription = "Pause", tint = ForestPrimary)
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    val (file, duration) = viewModel.voiceManager.stopRecording()
-                                    if (file != null && file.exists()) {
-                                        val filePath = file.absolutePath
-                                        val newRecord = AudioRecordItem(
-                                            entryId = entryId ?: 0L,
-                                            filePath = filePath,
-                                            durationMs = duration,
-                                            transcript = "",
-                                            transcriptionStatus = "RECORDED",
-                                            title = "Voice Note (${title.ifBlank { "Memory" }})"
-                                        )
-                                        audioRecords.add(newRecord)
-                                        val recordIdx = audioRecords.size - 1
-                                        scope.launch {
-                                            viewModel.voiceManager.transcribeAudioOffline { transcript, status ->
-                                                if (transcript.isNotBlank() && recordIdx in audioRecords.indices) {
-                                                    audioRecords[recordIdx] = audioRecords[recordIdx].copy(
-                                                        transcript = transcript,
-                                                        transcriptionStatus = status
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.testTag("stop_voice_recording_btn")
-                            ) {
-                                Icon(Icons.Default.Stop, contentDescription = "Stop Recording", tint = TerracottaAccent)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Attached Voice Notes in Editor
-            if (audioRecords.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                audioRecords.forEachIndexed { index, record ->
-                    val isPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == record.filePath
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("recorded_audio_$index")
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(record.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                    val sec = record.durationMs / 1000
-                                    Text("${sec / 60}m ${sec % 60}s • Attached Audio", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (record.filePath.isNotBlank()) {
-                                        IconButton(onClick = {
-                                            if (isPlaying) viewModel.stopAudio() else viewModel.playAudio(record.filePath)
-                                        }) {
-                                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = ForestPrimary)
-                                        }
-                                    }
-                                    IconButton(
-                                        onClick = { editingAudioIndex = index },
-                                        modifier = Modifier.testTag("transcribe_audio_edit_btn_$index")
-                                    ) {
-                                        Icon(
-                                            imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.Edit,
-                                            contentDescription = "Transcribe / Dictate",
-                                            tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary
-                                        )
-                                    }
-                                    IconButton(onClick = { audioRecords.removeAt(index) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
-                                    }
-                                }
-                            }
-                            if (record.transcript.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
+                        tagsList.forEach { tag ->
+                            key(tag) {
                                 Surface(
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    color = ForestPrimary.copy(alpha = 0.12f)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
                                     ) {
-                                        Text(
-                                            text = "Transcript: ${record.transcript}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f)
+                                        Text("#$tag", style = MaterialTheme.typography.labelMedium, color = ForestPrimary)
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Quitar etiqueta",
+                                            tint = ForestPrimary,
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable { tagsList.remove(tag) }
                                         )
-                                        TextButton(
-                                            onClick = { editingAudioIndex = index },
-                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                            modifier = Modifier.height(24.dp).testTag("edit_transcript_edit_screen_btn_$index")
-                                        ) {
-                                            Text("Edit", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
-                                        }
                                     }
                                 }
-                            } else {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                OutlinedButton(
-                                    onClick = { editingAudioIndex = index },
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    modifier = Modifier.fillMaxWidth().testTag("transcribe_audio_prompt_btn_$index")
-                                ) {
-                                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
-                                }
                             }
                         }
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Reflection & Live Dictation Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Journal Reflection",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isDictating) {
-                        Button(
-                            onClick = { viewModel.stopDictation() },
-                            colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
-                            modifier = Modifier.testTag("dictate_stop_button")
-                        ) {
-                            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Listening... Stop")
-                        }
-                    } else {
-                        OutlinedButton(
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = newTagInput,
+                            onValueChange = { newTagInput = it },
+                            placeholder = { Text("Añadir etiqueta") },
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("new_tag_input")
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
                             onClick = {
-                                val hasPerm = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
-                                ) == PackageManager.PERMISSION_GRANTED
-                                if (hasPerm) {
-                                    viewModel.startDictation(
-                                        onResult = { recognized ->
-                                            body = if (body.isBlank()) recognized else "$body $recognized"
-                                        },
-                                        onError = {
-                                            showBodyDictationModal = true
-                                        }
-                                    )
-                                } else {
-                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                val clean = newTagInput.trim().removePrefix("#")
+                                if (clean.isNotBlank() && clean !in tagsList) {
+                                    tagsList.add(clean)
+                                    newTagInput = ""
                                 }
                             },
-                            modifier = Modifier.testTag("dictate_button")
+                            modifier = Modifier.testTag("add_tag_button")
                         ) {
-                            Icon(Icons.Default.Mic, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Dictate")
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = { showBodyDictationModal = true },
-                            modifier = Modifier.size(36.dp).testTag("dictate_sheet_button")
-                        ) {
-                            Icon(Icons.Default.RecordVoiceOver, contentDescription = "Dictation Tool", tint = ForestPrimary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Add, contentDescription = "Añadir etiqueta", tint = ForestPrimary)
                         }
                     }
-                }
-            }
 
-            Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-            // Markdown WYSIWYG Editor & Live Rendered Preview
-            MarkdownWysiwygEditor(
-                value = body,
-                onValueChange = { body = it },
-                label = "Write reflection in markdown",
-                minLines = 8,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Multi-Page / Section Support
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Sections & Sub-Pages (${pages.size})",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                OutlinedButton(
-                    onClick = { showAddPageDialog = true },
-                    modifier = Modifier.testTag("add_page_button")
-                ) {
-                    Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Section")
-                }
-            }
-
-            if (pages.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                pages.forEachIndexed { index, page ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    // Sections / sub-pages
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = page.title.ifBlank { "Section ${index + 1}" },
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = page.body.take(150),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(onClick = { pages.removeAt(index) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete section", tint = MaterialTheme.colorScheme.error)
-                            }
+                        Text(
+                            text = "Secciones (${pages.size})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedButton(onClick = { showAddPageDialog = true }) {
+                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Añadir")
                         }
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Live On-Device Semantic Extraction Preview
-            if (liveEntities.isNotEmpty() || liveKeywords.isNotEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = AmberNode,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Live On-Device Semantic Intelligence",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        if (liveEntities.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Discovered entities to be linked in knowledge graph:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    pages.forEachIndexed { index, page ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.Top
                             ) {
-                                liveEntities.forEach { entity ->
-                                    EntityChip(name = entity.displayName, type = entity.type)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = page.title.ifBlank { "Sección ${index + 1}" },
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = page.body.take(120),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(onClick = { pages.removeAt(index) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Eliminar sección", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
-
-                        if (liveKeywords.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Extracted keywords for semantic matching: ${liveKeywords.joinToString(", ")}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            // Tags Editor
-            Text(
-                text = "Tags",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                tagsList.forEach { tag ->
-                    key(tag) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .background(ForestPrimary.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                                .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
-                        ) {
-                            Text("#$tag", style = MaterialTheme.typography.labelMedium, color = ForestPrimary)
-                            IconButton(
-                                onClick = { tagsList.remove(tag) },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Remove tag", modifier = Modifier.size(12.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Add Tag Input
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = newTagInput,
-                    onValueChange = { newTagInput = it },
-                    placeholder = { Text("Add tag (e.g. philosophy)") },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f).testTag("new_tag_input")
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        val clean = newTagInput.trim().removePrefix("#")
-                        if (clean.isNotBlank() && clean !in tagsList) {
-                            tagsList.add(clean)
-                            newTagInput = ""
-                        }
-                    },
-                    modifier = Modifier.testTag("add_tag_button")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add tag", tint = ForestPrimary)
                 }
             }
 
@@ -942,24 +673,24 @@ fun EntryEditScreen(
         }
     }
 
-    // Add Section / Sub-Page Dialog
+    // Add Section dialog
     if (showAddPageDialog) {
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { showAddPageDialog = false },
-            title = { Text("Add Section / Page") },
+            title = { Text("Añadir sección") },
             text = {
                 Column {
                     OutlinedTextField(
                         value = newPageTitle,
                         onValueChange = { newPageTitle = it },
-                        label = { Text("Section Title (e.g. Day 2, Quotes)") },
+                        label = { Text("Título de la sección") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = newPageBody,
                         onValueChange = { newPageBody = it },
-                        label = { Text("Content") },
+                        label = { Text("Contenido") },
                         minLines = 4,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -984,23 +715,24 @@ fun EntryEditScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
                 ) {
-                    Text("Add")
+                    Text("Añadir")
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showAddPageDialog = false }) {
-                    Text("Cancel")
+                TextButton(onClick = { showAddPageDialog = false }) {
+                    Text("Cancelar")
                 }
             }
         )
     }
 
+    // Edit transcript of an attached voice note
     if (editingAudioIndex != null) {
         val idx = editingAudioIndex!!
         if (idx in audioRecords.indices) {
             val rec = audioRecords[idx]
-            VoiceTranscriptionModal(
-                title = "Transcribe Attached Audio",
+            com.example.ui.components.VoiceTranscriptionModal(
+                title = "Transcripción de la nota de voz",
                 initialTranscript = rec.transcript,
                 audioFilePath = rec.filePath,
                 durationMs = rec.durationMs,
@@ -1018,37 +750,21 @@ fun EntryEditScreen(
         }
     }
 
-    if (showBodyDictationModal) {
-        VoiceTranscriptionModal(
-            title = "Dictate Journal Reflection",
-            initialTranscript = body,
-            audioFilePath = null,
-            durationMs = 0L,
-            viewModel = viewModel,
-            onDismiss = { showBodyDictationModal = false },
-            onSaveTranscript = { newTranscript ->
-                body = newTranscript
-                Toast.makeText(context, "Spoken text applied to reflection!", Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
-
+    // Contact quick actions dialog
     if (selectedContactAction != null) {
         val contact = selectedContactAction!!
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { selectedContactAction = null },
             title = { Text(contact.displayName) },
             text = {
                 Column {
-                    if (contact.phoneNumber != null) {
-                        Text("Phone: ${contact.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
+                    contact.phoneNumber?.let {
+                        Text("Tel: $it", style = MaterialTheme.typography.bodyMedium)
                         Spacer(modifier = Modifier.height(4.dp))
                     }
-                    if (contact.email != null) {
-                        Text("Email: ${contact.email}", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(modifier = Modifier.height(4.dp))
+                    contact.email?.let {
+                        Text("Email: $it", style = MaterialTheme.typography.bodyMedium)
                     }
-                    Text("Direct device actions:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
             confirmButton = {
@@ -1062,8 +778,7 @@ fun EntryEditScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
                         ) {
                             Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Call")
+                            Text("Llamar")
                         }
                         Button(
                             onClick = {
@@ -1073,7 +788,6 @@ fun EntryEditScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent)
                         ) {
                             Icon(Icons.Default.Message, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("SMS")
                         }
                     }
@@ -1085,17 +799,162 @@ fun EntryEditScreen(
                             }
                         ) {
                             Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Email")
                         }
                     }
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { selectedContactAction = null }) {
-                    Text("Close")
+                TextButton(onClick = { selectedContactAction = null }) {
+                    Text("Cerrar")
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun ActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun VoiceRecordingBar(
+    isPaused: Boolean,
+    isDictating: Boolean,
+    liveTranscript: String,
+    partialTranscript: String,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = TerracottaAccent.copy(alpha = 0.10f)),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth().testTag("voice_recorder_card")
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = TerracottaAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isDictating) "Escuchando…" else "Grabando…",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = TerracottaAccent
+                    )
+                }
+                Row {
+                    IconButton(onClick = if (isPaused) onResume else onPause) {
+                        Icon(
+                            if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = "Pausa/Reanudar",
+                            tint = ForestPrimary
+                        )
+                    }
+                    IconButton(
+                        onClick = onStop,
+                        modifier = Modifier.testTag("stop_voice_recording_btn")
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = "Detener", tint = TerracottaAccent)
+                    }
+                }
+            }
+            // Real live transcript while speaking
+            val transcriptPreview = (liveTranscript + " " + partialTranscript).trim()
+            if (transcriptPreview.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = transcriptPreview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachedVoiceNote(
+    record: AudioRecordItem,
+    isPlaying: Boolean,
+    onPlayToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onPlayToggle) {
+                    Icon(
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Reproducir",
+                        tint = ForestPrimary
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    val sec = record.durationMs / 1000
+                    Text("Nota de voz · ${sec / 60}:${String.format(Locale.US, "%02d", sec % 60)}", style = MaterialTheme.typography.titleSmall)
+                    if (record.transcript.isBlank()) {
+                        Text(
+                            "Sin transcripción",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Editar transcripción", tint = ForestPrimary)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            if (record.transcript.isNotBlank()) {
+                Text(
+                    text = record.transcript,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
+                )
+            }
+        }
     }
 }

@@ -56,6 +56,7 @@ fun GoogleSearchHubHeader(
     onVoiceClick: () -> Unit,
     onCameraClick: () -> Unit,
     onWeatherClick: () -> Unit = {},
+    onChooseCityClick: () -> Unit = {},
     onReminderClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
@@ -101,6 +102,7 @@ fun GoogleSearchHubHeader(
             calendarEvent = calendarEvent,
             telemetry = telemetry,
             onWeatherClick = onWeatherClick,
+            onChooseCityClick = onChooseCityClick,
             onReminderClick = onReminderClick,
             onCalendarClick = onCalendarClick,
             modifier = Modifier.padding(bottom = 6.dp)

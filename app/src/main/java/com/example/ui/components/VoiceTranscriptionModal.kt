@@ -5,12 +5,8 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,17 +14,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -40,11 +31,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -64,21 +52,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.media.PlaybackState
-import com.example.ui.theme.AmberNode
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material3.LinearProgressIndicator
-import com.example.media.SpeechModelStatus
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
-import kotlinx.coroutines.launch
+import java.util.Locale
 
+/**
+ * Dictation sheet — honest by design: it uses the Android system speech
+ * recognizer for live dictation. There is no fake "model download", no
+ * bundled engine, and no sample text button. If the device has no speech
+ * service, it says so.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceTranscriptionModal(
-    title: String = "Voice Transcription & Dictation",
+    title: String = "Dictado de voz",
     initialTranscript: String = "",
     audioFilePath: String? = null,
     durationMs: Long = 0,
@@ -87,14 +75,13 @@ fun VoiceTranscriptionModal(
     onSaveTranscript: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var transcriptText by remember { mutableStateOf(initialTranscript) }
     val isDictating by viewModel.isDictating.collectAsState()
     val playbackState by viewModel.voiceManager.playbackState.collectAsState()
     val currentPlayingPath by viewModel.voiceManager.currentPlayingPath.collectAsState()
-    val speechModelStatus by viewModel.speechModelStatus.collectAsState()
 
     val isAudioPlaying = playbackState == PlaybackState.PLAYING && currentPlayingPath == audioFilePath
+    val dictationAvailable = viewModel.isDictationAvailable
 
     val sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -107,238 +94,109 @@ fun VoiceTranscriptionModal(
                     transcriptText = if (transcriptText.isBlank()) recognized else "$transcriptText $recognized"
                 },
                 onError = {
-                    Toast.makeText(context, "Microphone offline speech recognition not ready. You can type or insert sample text.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        "El reconocimiento de voz no está disponible ahora. Puedes escribir directamente.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             )
         } else {
-            Toast.makeText(context, "Microphone permission needed for dictation", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Se necesita permiso del micrófono para dictar", Toast.LENGTH_SHORT).show()
         }
     }
 
+    // Stop any dictation session when leaving the sheet.
     DisposableEffect(Unit) {
         onDispose {
             viewModel.stopDictation()
-            if (audioFilePath != null) {
-                viewModel.stopAudio()
-            }
         }
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.testTag("voice_transcription_modal")
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.RecordVoiceOver,
-                        contentDescription = null,
-                        tint = ForestPrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Speech-to-text dictation & offline audio transcription",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        when (val status = speechModelStatus) {
-                            is SpeechModelStatus.Ready -> {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = GoogleGreen.copy(alpha = 0.12f)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = GoogleGreen,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text(
-                                            text = "Modelo offline descargado (42 MB • Sin nube)",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-                                            color = GoogleGreen
-                                        )
-                                    }
-                                }
-                            }
-                            is SpeechModelStatus.Downloading -> {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = GoogleBlue.copy(alpha = 0.12f)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = GoogleBlue)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Descargando modelo (${(status.progress * 100).toInt()}%)...",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-                                            color = GoogleBlue
-                                        )
-                                    }
-                                }
-                            }
-                            is SpeechModelStatus.NotDownloaded -> {
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            viewModel.downloadSpeechModel { ok ->
-                                                Toast.makeText(
-                                                    context,
-                                                    if (ok) "¡Modelo de voz descargado e instalado!" else "Error de descarga",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    modifier = Modifier
-                                        .height(32.dp)
-                                        .testTag("download_speech_model_btn")
-                                ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Descargar modelo offline (42 MB)", fontSize = 11.sp)
-                                }
-                            }
-                        }
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = if (isDictating) TerracottaAccent else ForestPrimary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
+                )
+                if (isDictating) {
+                    TextButton(onClick = { viewModel.stopDictation() }) {
+                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Text("Detener")
                     }
-                }
-                IconButton(onClick = onDismiss, modifier = Modifier.testTag("close_transcription_modal_btn")) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (dictationAvailable) {
+                    "Habla y el texto aparecerá aquí. También puedes editarlo a mano."
+                } else {
+                    "Este dispositivo no tiene servicio de reconocimiento de voz. Escribe directamente."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-            // Audio Player Bar (if audio file exists)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Playback of the attached recording, if any
             if (!audioFilePath.isNullOrBlank()) {
-                var isTranscribingAudio by remember { mutableStateOf(false) }
-                val scope = androidx.compose.runtime.rememberCoroutineScope()
-
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("modal_audio_player_card")
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = {
-                                        if (isAudioPlaying) {
-                                            viewModel.stopAudio()
-                                        } else {
-                                            viewModel.playAudio(audioFilePath)
-                                        }
-                                    },
-                                    modifier = Modifier.testTag("modal_play_pause_audio_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (isAudioPlaying) "Pause" else "Play",
-                                        tint = ForestPrimary,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = if (isAudioPlaying) "Playing Recorded Audio..." else "Recorded Audio File",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                    )
-                                    val sec = durationMs / 1000
-                                    Text(
-                                        text = "${sec / 60}m ${sec % 60}s duration",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            if (isAudioPlaying) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .background(ForestPrimary, CircleShape)
-                                )
-                            }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { if (isAudioPlaying) viewModel.stopAudio() else viewModel.playAudio(audioFilePath) }) {
+                            Icon(
+                                if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Reproducir",
+                                tint = ForestPrimary
+                            )
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Button(
-                            onClick = {
-                                isTranscribingAudio = true
-                                scope.launch {
-                                    viewModel.voiceManager.transcribeAudioOffline(audioFilePath) { transcript, _ ->
-                                        isTranscribingAudio = false
-                                        if (transcript.isNotBlank()) {
-                                            transcriptText = if (transcriptText.isBlank()) transcript else "$transcriptText\n\n$transcript"
-                                        }
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("transcribe_audio_file_btn")
-                        ) {
-                            if (isTranscribingAudio) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Transcribing Audio with Bundled Engine...", fontSize = 12.sp)
-                            } else {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Transcribe Audio (Bundled English Engine)", fontSize = 12.sp)
-                            }
-                        }
+                        val sec = durationMs / 1000
+                        Text(
+                            text = "Grabación · ${sec / 60}:${String.format(Locale.US, "%02d", sec % 60)}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Dictation Control Card
+            // Dictation control
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDictating) TerracottaAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                    containerColor = if (isDictating) TerracottaAccent.copy(alpha = 0.12f)
+                    else ForestPrimary.copy(alpha = 0.08f)
                 ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -349,10 +207,14 @@ fun VoiceTranscriptionModal(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isDictating) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = TerracottaAccent, strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = TerracottaAccent,
+                                strokeWidth = 2.dp
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Listening... Speak clearly",
+                                text = "Escuchando…",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = TerracottaAccent
                             )
@@ -360,29 +222,17 @@ fun VoiceTranscriptionModal(
                             Icon(Icons.Default.Mic, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Live Dictation",
+                                text = "Dictado en vivo",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = ForestPrimary
                             )
                         }
                     }
-
-                    if (isDictating) {
-                        Button(
-                            onClick = { viewModel.stopDictation() },
-                            colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
-                            modifier = Modifier.testTag("modal_stop_dictation_btn")
-                        ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Stop", fontSize = 12.sp)
-                        }
-                    } else {
+                    if (!isDictating) {
                         Button(
                             onClick = {
                                 val hasPerm = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
+                                    context, Manifest.permission.RECORD_AUDIO
                                 ) == PackageManager.PERMISSION_GRANTED
                                 if (hasPerm) {
                                     viewModel.startDictation(
@@ -390,96 +240,65 @@ fun VoiceTranscriptionModal(
                                             transcriptText = if (transcriptText.isBlank()) recognized else "$transcriptText $recognized"
                                         },
                                         onError = {
-                                            Toast.makeText(context, "Microphone recognition offline unavailable. You can type or use sample below.", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Reconocimiento de voz no disponible. Puedes escribir.", Toast.LENGTH_SHORT).show()
                                         }
                                     )
                                 } else {
                                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
+                            enabled = dictationAvailable,
                             colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                             modifier = Modifier.testTag("modal_start_dictation_btn")
                         ) {
                             Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Start Speaking", fontSize = 12.sp)
+                            Text("Hablar", fontSize = 12.sp)
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Quick helpers
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        val sample = "Reflected with Sarah at Starbucks today about building offline knowledge graph architectures and cognitive mapping."
-                        transcriptText = if (transcriptText.isBlank()) sample else "$transcriptText $sample"
-                    },
-                    modifier = Modifier.testTag("modal_sample_transcript_btn")
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Insert Sample Note", fontSize = 11.sp)
-                }
-
-                if (transcriptText.isNotBlank()) {
-                    TextButton(onClick = { transcriptText = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Clear", fontSize = 11.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Editable Transcript Body
+            // Editable transcript
             OutlinedTextField(
                 value = transcriptText,
                 onValueChange = { transcriptText = it },
-                label = { Text("Transcript / Dictated Text") },
-                placeholder = { Text("Spoken words will appear here in real-time, or you can type directly...") },
+                label = { Text("Texto") },
+                placeholder = { Text("Lo que digas o escribas aparecerá aquí…") },
                 minLines = 5,
                 maxLines = 10,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ForestPrimary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("modal_transcript_text_input")
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Footer Actions
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp),
+                    .padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
+                if (transcriptText.isNotBlank()) {
+                    TextButton(onClick = { transcriptText = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Text("Limpiar")
+                    }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = {
                         onSaveTranscript(transcriptText)
                         onDismiss()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
-                    modifier = Modifier.testTag("save_transcript_confirm_btn")
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
                 ) {
-                    Text("Save & Apply Transcript")
+                    Text("Guardar")
                 }
             }
         }

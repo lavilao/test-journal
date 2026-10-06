@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLocation
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
@@ -55,6 +56,7 @@ fun AtAGlanceBar(
     calendarEvent: DeviceCalendarEvent? = null,
     telemetry: LifeHubTelemetry? = null,
     onWeatherClick: () -> Unit = {},
+    onChooseCityClick: () -> Unit = {},
     onReminderClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -73,6 +75,7 @@ fun AtAGlanceBar(
         }
     }
 
+    val hasWeather = weather.temperature != null
     val weatherIcon: ImageVector = when (weather.weatherCode) {
         0 -> Icons.Default.WbSunny
         1, 2, 3 -> Icons.Default.WbCloudy
@@ -105,25 +108,43 @@ fun AtAGlanceBar(
 
             Row(
                 modifier = Modifier
-                    .clickable(onClick = onWeatherClick)
+                    .clickable(onClick = if (hasWeather) onWeatherClick else onChooseCityClick)
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = weatherIcon,
-                    contentDescription = weather.conditionText,
-                    tint = weatherTint,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "${weather.temperature}°C",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                if (hasWeather) {
+                    Icon(
+                        imageVector = weatherIcon,
+                        contentDescription = weather.conditionText,
+                        tint = weatherTint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "${weather.temperature}°C",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.AddLocation,
+                        contentDescription = "Elegir ciudad",
+                        tint = GoogleBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Elegir ciudad",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp
+                        ),
+                        color = GoogleBlue
+                    )
+                }
             }
         }
 
@@ -185,11 +206,17 @@ fun AtAGlanceBar(
                         }
                     } else {
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable(onClick = onWeatherClick),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = if (hasWeather) onWeatherClick else onChooseCityClick),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${weather.conditionText} • ${weather.locationName}",
+                                text = if (hasWeather) {
+                                    "${weather.conditionText} • ${weather.locationName}"
+                                } else {
+                                    "Toca para elegir tu ciudad y ver el clima"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -221,11 +248,17 @@ fun AtAGlanceBar(
                         }
                     } else {
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable(onClick = onWeatherClick),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = if (hasWeather) onWeatherClick else onChooseCityClick),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${weather.conditionText} en ${weather.locationName}",
+                                text = if (hasWeather) {
+                                    "${weather.conditionText} en ${weather.locationName}"
+                                } else {
+                                    "Toca para elegir tu ciudad y ver el clima"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -252,7 +285,11 @@ fun AtAGlanceBar(
                             )
                         } else {
                             Text(
-                                text = "${weather.conditionText} • ${weather.locationName}",
+                                text = if (hasWeather) {
+                                    "${weather.conditionText} • ${weather.locationName}"
+                                } else {
+                                    "Toca para elegir tu ciudad y ver el clima"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

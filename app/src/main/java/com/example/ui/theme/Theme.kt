@@ -65,3 +65,53 @@ fun MyApplicationTheme(
         content = content
     )
 }
+
+// ---------------------------------------------------------------
+// NowBrief theme (Samsung mode)
+// ---------------------------------------------------------------
+
+private val NowBriefDarkColorScheme = darkColorScheme(
+    primary = NowBriefPrimaryDark,
+    onPrimary = NowBriefOnPrimaryDark,
+    primaryContainer = NowBriefPrimaryContainerDark,
+    onPrimaryContainer = NowBriefOnSurfaceDark,
+    secondary = NowBriefTertiaryDark,
+    onSecondary = NowBriefOnPrimaryDark,
+    tertiary = NowBriefTertiaryDark,
+    background = NowBriefBackgroundDark,
+    onBackground = NowBriefOnSurfaceDark,
+    surface = NowBriefSurfaceDark,
+    onSurface = NowBriefOnSurfaceDark,
+    surfaceVariant = NowBriefSurfaceVariantDark,
+    onSurfaceVariant = NowBriefOnSurfaceVariantDark,
+    outline = NowBriefOutlineDark
+)
+
+private val NowBriefLightColorScheme = lightColorScheme(
+    primary = NowBriefPrimaryLight,
+    onPrimary = NowBriefOnPrimaryLight,
+    primaryContainer = NowBriefPrimaryContainerLight,
+    onPrimaryContainer = NowBriefOnSurfaceLight,
+    secondary = NowBriefTertiaryLight,
+    onSecondary = NowBriefOnPrimaryLight,
+    tertiary = NowBriefTertiaryLight,
+    background = NowBriefBackgroundLight,
+    onBackground = NowBriefOnSurfaceLight,
+    surface = NowBriefSurfaceLight,
+    onSurface = NowBriefOnSurfaceLight,
+    surfaceVariant = NowBriefSurfaceVariantLight,
+    onSurfaceVariant = NowBriefOnSurfaceVariantLight,
+    outline = NowBriefOutlineLight
+)
+
+@Composable
+fun NowBriefTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
+    MaterialTheme(
+        colorScheme = if (darkTheme) NowBriefDarkColorScheme else NowBriefLightColorScheme,
+        typography = Typography,
+        content = content
+    )
+}

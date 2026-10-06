@@ -174,7 +174,7 @@ fun EntryDetailScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            viewModel.startVoiceRecording()
+            viewModel.startVoiceRecordingWithDictation()
         } else {
             Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
         }
@@ -327,7 +327,7 @@ fun EntryDetailScreen(
                                 Manifest.permission.RECORD_AUDIO
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasPerm) {
-                                viewModel.startVoiceRecording()
+                                viewModel.startVoiceRecordingWithDictation()
                             } else {
                                 audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
@@ -598,7 +598,7 @@ fun EntryDetailScreen(
                                     Manifest.permission.RECORD_AUDIO
                                 ) == PackageManager.PERMISSION_GRANTED
                                 if (hasPerm) {
-                                    viewModel.startVoiceRecording()
+                                    viewModel.startVoiceRecordingWithDictation()
                                 } else {
                                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }

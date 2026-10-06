@@ -2,10 +2,10 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,32 +17,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.GraphEdge
 import com.example.data.model.GraphNode
 import com.example.data.model.GraphNodeType
 import com.example.ui.theme.AmberNode
@@ -64,7 +67,19 @@ import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.InkPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
+import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
 
+/**
+ * Force-directed, animated knowledge graph in the spirit of Obsidian's
+ * graph view: nodes repel, links act as springs, and the whole layout
+ * settles organically. You can drag nodes, pan and pinch-zoom. The
+ * simulation sleeps once it settles to keep the app smooth on low-end
+ * hardware.
+ */
 @Composable
 fun KnowledgeGraphScreen(
     viewModel: JournalViewModel,
@@ -74,21 +89,65 @@ fun KnowledgeGraphScreen(
     val graphData by viewModel.graphData.collectAsState()
     val isLoading by viewModel.isGraphLoading.collectAsState()
 
-    var selectedFilter by remember { mutableStateOf<GraphNodeType?>(null) }
     var selectedNode by remember { mutableStateOf<GraphNode?>(null) }
 
-    // Canvas Transformation State (Pan & Pinch-to-zoom)
-    var scale by remember { mutableFloatStateOf(0.9f) }
+    // Canvas transformation state (pan & pinch-to-zoom)
+    var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(0.4f, 2.5f)
+        scale = (scale * zoomChange).coerceIn(0.25f, 3.5f)
         offset += panChange
     }
 
+    // Simulation state
     val textMeasurer = rememberTextMeasurer()
+    val labelCache = remember { mutableMapOf<String, androidx.compose.ui.text.TextLayoutResult>() }
+    val positionTick = remember { mutableIntStateOf(0) }
+    var simulation by remember { mutableStateOf<ForceSimulation?>(null) }
+    var canvasSize by remember { mutableStateOf(Offset(1080f, 1920f)) }
+    var isDraggingNode by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize().testTag("knowledge_graph_canvas_container")) {
+    // (Re)build the simulation whenever fresh graph data arrives.
+    LaunchedEffect(graphData) {
+        if (graphData.nodes.isNotEmpty()) {
+            simulation = ForceSimulation(graphData.nodes, graphData.edges).also { sim ->
+                sim.initialize(canvasSize.x, canvasSize.y)
+            }
+        } else {
+            simulation = null
+        }
+    }
+
+    // Physics animation loop. Runs while unstable; sleeps when settled.
+    LaunchedEffect(simulation, canvasSize) {
+        val sim = simulation ?: return@LaunchedEffect
+        var settled = false
+        while (true) {
+            if (!settled) {
+                withFrameNanos { }
+                val energy = sim.step(canvasSize.x, canvasSize.y)
+                positionTick.intValue++
+                if (energy < 0.6f && !isDraggingNode) settled = true
+            } else {
+                // Idle: cheap polling; a node drag wakes the simulation.
+                delay(120)
+                if (isDraggingNode || sim.wasDisturbed()) {
+                    settled = false
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                if (size.width > 0 && size.height > 0) {
+                    canvasSize = Offset(size.width.toFloat(), size.height.toFloat())
+                }
+            }
+            .testTag("knowledge_graph_canvas_container")
+    ) {
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = ForestPrimary)
@@ -104,19 +163,19 @@ fun KnowledgeGraphScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Knowledge Graph Empty",
+                        text = "Tu grafo está vacío",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Save journal entries to generate your private semantic graph",
+                        text = "Guarda memorias para generar tu grafo semántico privado",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
             }
         } else {
-            // Interactive 2D Graph Canvas
+            val currentSim = simulation
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -127,104 +186,142 @@ fun KnowledgeGraphScreen(
                         translationY = offset.y
                     )
                     .transformable(state = transformState)
-                    .pointerInput(graphData.nodes, scale, offset) {
+                    .pointerInput(currentSim) {
                         detectTapGestures { tapOffset ->
-                            // Convert tap into graph space
+                            val sim = currentSim ?: return@detectTapGestures
                             val graphX = (tapOffset.x - offset.x) / scale
                             val graphY = (tapOffset.y - offset.y) / scale
-
-                            val hit = graphData.nodes.find { node ->
-                                val dist = kotlin.math.hypot(node.x - graphX, node.y - graphY)
-                                dist <= node.size + 14f
-                            }
-                            selectedNode = hit
+                            selectedNode = sim.hitTest(graphX, graphY)
                         }
                     }
+                    .pointerInput(currentSim, scale, offset) {
+                        detectDragGestures(
+                            onDragStart = { dragStart ->
+                                val sim = currentSim ?: return@detectDragGestures
+                                val graphX = (dragStart.x - offset.x) / scale
+                                val graphY = (dragStart.y - offset.y) / scale
+                                val hit = sim.hitTest(graphX, graphY)
+                                if (hit != null) {
+                                    sim.beginDrag(hit, graphX, graphY)
+                                    isDraggingNode = true
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                val sim = currentSim ?: return@detectDragGestures
+                                if (isDraggingNode) {
+                                    val graphX = (change.position.x - offset.x) / scale
+                                    val graphY = (change.position.y - offset.y) / scale
+                                    sim.dragTo(graphX, graphY)
+                                    positionTick.intValue++
+                                } else {
+                                    offset += change.position - change.previousPosition
+                                }
+                            },
+                            onDragEnd = {
+                                currentSim?.endDrag()
+                                isDraggingNode = false
+                            },
+                            onDragCancel = {
+                                currentSim?.endDrag()
+                                isDraggingNode = false
+                            }
+                        )
+                    }
             ) {
-                val nodesMap = graphData.nodes.associateBy { it.id }
+                // Reading this state invalidates the canvas every tick.
+                positionTick.intValue
 
-                // 1. Draw Edges
-                graphData.edges.forEach { edge ->
-                    val src = nodesMap[edge.sourceId]
-                    val tgt = nodesMap[edge.targetId]
+                val sim = currentSim ?: return@Canvas
+                val nodes = sim.nodes
+                val nodeById = nodes.associateBy { it.id }
+
+                // 1. Edges as soft curves (slight curve looks organic)
+                sim.edges.forEach { edge ->
+                    val src = nodeById[edge.sourceId]
+                    val tgt = nodeById[edge.targetId]
                     if (src != null && tgt != null) {
                         val isHighlighted = selectedNode != null &&
                                 (selectedNode?.id == edge.sourceId || selectedNode?.id == edge.targetId)
-
-                        val strokeWidth = if (isHighlighted) 3.5f else 1.2f
-                        val edgeColor = if (isHighlighted) AmberNode else Color(0xFFC7BCAD).copy(alpha = 0.5f)
-
-                        drawLine(
-                            color = edgeColor,
-                            start = Offset(src.x, src.y),
-                            end = Offset(tgt.x, tgt.y),
-                            strokeWidth = strokeWidth
+                        val alpha = if (selectedNode == null) 0.35f else if (isHighlighted) 0.9f else 0.10f
+                        val strokeWidth = if (isHighlighted) 3.5f else 1.4f
+                        val midX = (src.x + tgt.x) / 2f
+                        val midY = (src.y + tgt.y) / 2f
+                        // Curve perpendicular for a living, organic feel
+                        val dx = tgt.x - src.x
+                        val dy = tgt.y - src.y
+                        val len = max(1f, sqrt(dx * dx + dy * dy))
+                        val curve = min(0.12f * len, 26f)
+                        val ctrlX = midX - (dy / len) * curve
+                        val ctrlY = midY + (dx / len) * curve
+                        drawPath(
+                            path = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(src.x, src.y)
+                                quadraticBezierTo(ctrlX, ctrlY, tgt.x, tgt.y)
+                            },
+                            color = if (isHighlighted) AmberNode else Color(0xFF8A8071),
+                            alpha = alpha,
+                            style = Stroke(width = strokeWidth)
                         )
                     }
                 }
 
-                // 2. Draw Nodes
-                graphData.nodes.forEach { node ->
+                // 2. Nodes
+                val showLabels = scale > 0.55f
+                nodes.forEach { node ->
                     val isSelected = selectedNode?.id == node.id
-                    val isConnectedToSelected = selectedNode != null && graphData.edges.any {
+                    val isConnectedToSelected = selectedNode != null && sim.edges.any {
                         (it.sourceId == selectedNode?.id && it.targetId == node.id) ||
                                 (it.targetId == selectedNode?.id && it.sourceId == node.id)
                     }
 
-                    val nodeColor = when (node.type) {
-                        GraphNodeType.ENTRY -> InkPrimary
-                        GraphNodeType.PERSON -> ForestPrimary
-                        GraphNodeType.PLACE -> TerracottaAccent
-                        GraphNodeType.TOPIC, GraphNodeType.TAG -> AmberNode
-                        GraphNodeType.ORGANIZATION -> Color(0xFF4338CA)
-                        GraphNodeType.EVENT -> TerracottaAccent
-                        GraphNodeType.PROJECT -> Color(0xFF6D28D9)
-                    }
-
+                    val nodeColor = nodeColorFor(node.type)
                     val radius = if (isSelected) node.size + 6f else node.size
 
-                    // Outer pulse/halo for selected
-                    if (isSelected) {
+                    // Soft halo
+                    if (isSelected || isConnectedToSelected) {
                         drawCircle(
-                            color = nodeColor.copy(alpha = 0.25f),
-                            radius = radius + 12f,
+                            color = nodeColor.copy(alpha = 0.18f),
+                            radius = radius + 14f,
                             center = Offset(node.x, node.y)
                         )
                     }
 
-                    // Node body
                     drawCircle(
-                        color = nodeColor,
+                        color = nodeColor.copy(alpha = if (selectedNode == null) 0.9f else if (isSelected || isConnectedToSelected) 1f else 0.25f),
                         radius = radius,
                         center = Offset(node.x, node.y)
                     )
 
-                    // Node border
                     drawCircle(
-                        color = Color.White,
+                        color = Color.White.copy(alpha = 0.85f),
                         radius = radius,
                         center = Offset(node.x, node.y),
-                        style = Stroke(width = 2.5f)
+                        style = Stroke(width = 2f)
                     )
 
-                    // Label
-                    val textLayout = textMeasurer.measure(
-                        text = node.label.take(18) + (if (node.label.length > 18) "..." else ""),
-                        style = TextStyle(
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected || isConnectedToSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) nodeColor else InkPrimary
+                    // 3. Labels (cached — measuring text every frame is expensive)
+                    if (showLabels) {
+                        val textLayout = labelCache.getOrPut(node.id) {
+                            textMeasurer.measure(
+                                text = node.label.take(18) + (if (node.label.length > 18) "…" else ""),
+                                style = TextStyle(
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = InkPrimary
+                                )
+                            )
+                        }
+                        drawText(
+                            textLayoutResult = textLayout,
+                            topLeft = Offset(node.x - (textLayout.size.width / 2f), node.y + radius + 4f),
+                            alpha = if (selectedNode == null) 0.95f else if (isSelected || isConnectedToSelected) 1f else 0.2f
                         )
-                    )
-                    drawText(
-                        textLayoutResult = textLayout,
-                        topLeft = Offset(node.x - (textLayout.size.width / 2f), node.y + radius + 4f)
-                    )
+                    }
                 }
             }
         }
 
-        // Top Filter Bar & Legend
+        // Top bar & legend
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -233,7 +330,10 @@ fun KnowledgeGraphScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(12.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                        RoundedCornerShape(12.dp)
+                    )
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -242,40 +342,30 @@ fun KnowledgeGraphScreen(
                     Icon(Icons.Default.Hub, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Semantic Knowledge Graph",
+                        text = "Grafo semántico",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${graphData.nodes.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 IconButton(
                     onClick = {
-                        scale = 0.9f
+                        scale = 1f
                         offset = Offset.Zero
                         viewModel.refreshGraph()
                     },
                     modifier = Modifier.size(28.dp).testTag("refresh_graph_button")
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reset view", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.CenterFocusStrong, contentDescription = "Reset view", modifier = Modifier.size(18.dp))
                 }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Legend Chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                LegendBadge(color = InkPrimary, label = "Entries")
-                LegendBadge(color = ForestPrimary, label = "People")
-                LegendBadge(color = TerracottaAccent, label = "Places")
-                LegendBadge(color = AmberNode, label = "Topics")
-                LegendBadge(color = Color(0xFF4338CA), label = "Orgs")
             }
         }
 
-        // Selected Node Inspection Card (Bottom)
+        // Selected node inspector (bottom)
         selectedNode?.let { node ->
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -296,15 +386,7 @@ fun KnowledgeGraphScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
                                 shape = CircleShape,
-                                color = when (node.type) {
-                                    GraphNodeType.ENTRY -> InkPrimary
-                                    GraphNodeType.PERSON -> ForestPrimary
-                                    GraphNodeType.PLACE -> TerracottaAccent
-                                    GraphNodeType.TOPIC, GraphNodeType.TAG -> AmberNode
-                                    GraphNodeType.ORGANIZATION -> Color(0xFF4338CA)
-                                    GraphNodeType.EVENT -> TerracottaAccent
-                                    GraphNodeType.PROJECT -> Color(0xFF6D28D9)
-                                },
+                                color = nodeColorFor(node.type),
                                 modifier = Modifier.size(14.dp)
                             ) {}
                             Spacer(modifier = Modifier.width(8.dp))
@@ -318,13 +400,13 @@ fun KnowledgeGraphScreen(
                             onClick = { selectedNode = null },
                             modifier = Modifier.size(24.dp)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = "Cerrar", modifier = Modifier.size(16.dp))
                         }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Type: ${node.type.name} • Connected Associations",
+                        text = typeLabel(node.type),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -344,7 +426,7 @@ fun KnowledgeGraphScreen(
                     ) {
                         Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (node.type == GraphNodeType.ENTRY) "Read Memory" else "Explore Entity Timeline")
+                        Text(if (node.type == GraphNodeType.ENTRY) "Leer memoria" else "Explorar entidad")
                     }
                 }
             }
@@ -352,27 +434,192 @@ fun KnowledgeGraphScreen(
     }
 }
 
-@Composable
-private fun LegendBadge(color: Color, label: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = color,
-                modifier = Modifier.size(10.dp)
-            ) {}
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+private fun nodeColorFor(type: GraphNodeType): Color = when (type) {
+    GraphNodeType.ENTRY -> InkPrimary
+    GraphNodeType.PERSON -> ForestPrimary
+    GraphNodeType.PLACE -> TerracottaAccent
+    GraphNodeType.TOPIC, GraphNodeType.TAG -> AmberNode
+    GraphNodeType.ORGANIZATION -> Color(0xFF4338CA)
+    GraphNodeType.EVENT -> TerracottaAccent
+    GraphNodeType.PROJECT -> Color(0xFF6D28D9)
+}
+
+private fun typeLabel(type: GraphNodeType): String = when (type) {
+    GraphNodeType.ENTRY -> "Memoria"
+    GraphNodeType.PERSON -> "Persona"
+    GraphNodeType.PLACE -> "Lugar"
+    GraphNodeType.TOPIC -> "Tema"
+    GraphNodeType.TAG -> "Etiqueta"
+    GraphNodeType.ORGANIZATION -> "Organización"
+    GraphNodeType.EVENT -> "Evento"
+    GraphNodeType.PROJECT -> "Proyecto"
+}
+
+/**
+ * Classic force-directed layout: pairwise repulsion, link springs, weak
+ * center gravity and velocity damping. `step()` returns the total kinetic
+ * energy so the animation loop can stop when the layout settles.
+ */
+class ForceSimulation(
+    graphNodes: List<GraphNode>,
+    graphEdges: List<GraphEdge>
+) {
+    val nodes: List<GraphNode> = graphNodes.take(MAX_NODES)
+    val edges: List<GraphEdge> = graphEdges.filter { edge ->
+        nodes.any { it.id == edge.sourceId } && nodes.any { it.id == edge.targetId }
+    }
+
+    private val nodeIndex = nodes.associateBy { it.id }
+    private var draggedNode: GraphNode? = null
+    private var disturbed = false
+
+    fun initialize(width: Float, height: Float) {
+        // Circle initial positions so the forces can breathe.
+        val n = nodes.size
+        val radius = min(width, height) * 0.35f
+        val cx = width / 2f
+        val cy = height / 2f
+        nodes.forEachIndexed { index, node ->
+            val angle = (2.0 * Math.PI * index / n).toFloat()
+            node.x = cx + radius * kotlin.math.cos(angle)
+            node.y = cy + radius * kotlin.math.sin(angle)
+            node.vx = 0f
+            node.vy = 0f
         }
+        disturbed = true
+    }
+
+    fun markDisturbed() {
+        disturbed = true
+    }
+
+    fun wasDisturbed(): Boolean {
+        val value = disturbed
+        disturbed = false
+        return value
+    }
+
+    fun hitTest(graphX: Float, graphY: Float): GraphNode? {
+        var best: GraphNode? = null
+        var bestDist = Float.MAX_VALUE
+        nodes.forEach { node ->
+            val d = kotlin.math.hypot(node.x - graphX, node.y - graphY)
+            if (d <= node.size + 24f && d < bestDist) {
+                best = node
+                bestDist = d
+            }
+        }
+        return best
+    }
+
+    fun beginDrag(node: GraphNode, x: Float, y: Float) {
+        draggedNode = node
+        node.x = x
+        node.y = y
+        node.vx = 0f
+        node.vy = 0f
+    }
+
+    fun dragTo(x: Float, y: Float) {
+        draggedNode?.let { node ->
+            node.x = x
+            node.y = y
+            node.vx = 0f
+            node.vy = 0f
+        }
+    }
+
+    fun endDrag() {
+        draggedNode = null
+        markDisturbed()
+    }
+
+    /** One physics step. Returns total kinetic energy. */
+    fun step(width: Float, height: Float): Float {
+        val cx = width / 2f
+        val cy = height / 2f
+        var energy = 0f
+
+        // Pairwise repulsion (O(n²), n capped at MAX_NODES)
+        val n = nodes.size
+        for (i in 0 until n) {
+            val a = nodes[i]
+            for (j in i + 1 until n) {
+                val b = nodes[j]
+                var dx = a.x - b.x
+                var dy = a.y - b.y
+                var distSq = dx * dx + dy * dy
+                if (distSq < 1f) {
+                    // Nudge overlapping nodes apart deterministically
+                    dx = ((i % 7) - 3) * 2f + 0.5f
+                    dy = ((j % 5) - 2) * 2f + 0.5f
+                    distSq = dx * dx + dy * dy
+                }
+                val dist = sqrt(distSq)
+                val minDist = a.size + b.size + 34f
+                if (dist < minDist * 4.5f) {
+                    var force = REPULSION / distSq
+                    if (dist < minDist) force *= 3.2f // hard separation
+                    val fx = (dx / dist) * force
+                    val fy = (dy / dist) * force
+                    if (a !== draggedNode) {
+                        a.vx += fx
+                        a.vy += fy
+                    }
+                    if (b !== draggedNode) {
+                        b.vx -= fx
+                        b.vy -= fy
+                    }
+                }
+            }
+        }
+
+        // Link springs
+        edges.forEach { edge ->
+            val src = nodeIndex[edge.sourceId] ?: return@forEach
+            val tgt = nodeIndex[edge.targetId] ?: return@forEach
+            val dx = tgt.x - src.x
+            val dy = tgt.y - src.y
+            val dist = max(1f, sqrt(dx * dx + dy * dy))
+            val target = 150f
+            val force = SPRING * (dist - target)
+            val fx = (dx / dist) * force
+            val fy = (dy / dist) * force
+            if (src !== draggedNode) {
+                src.vx += fx
+                src.vy += fy
+            }
+            if (tgt !== draggedNode) {
+                tgt.vx -= fx
+                tgt.vy -= fy
+            }
+        }
+
+        // Center gravity + integration + damping
+        nodes.forEach { node ->
+            if (node !== draggedNode) {
+                node.vx += (cx - node.x) * CENTER_PULL
+                node.vy += (cy - node.y) * CENTER_PULL
+                node.vx *= DAMPING
+                node.vy *= DAMPING
+                // Clamp per-step movement for stability
+                node.vx = node.vx.coerceIn(-MAX_SPEED, MAX_SPEED)
+                node.vy = node.vy.coerceIn(-MAX_SPEED, MAX_SPEED)
+                node.x += node.vx
+                node.y += node.vy
+                energy += abs(node.vx) + abs(node.vy)
+            }
+        }
+
+        return energy
+    }
+
+    companion object {
+        private const val MAX_NODES = 150
+        private const val REPULSION = 260_000f
+        private const val SPRING = 0.012f
+        private const val CENTER_PULL = 0.0016f
+        private const val DAMPING = 0.86f
+        private const val MAX_SPEED = 14f
     }
 }

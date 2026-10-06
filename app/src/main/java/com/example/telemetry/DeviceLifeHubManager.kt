@@ -37,11 +37,17 @@ data class CalendarEventInfo(
 )
 
 data class LifeHubTelemetry(
-    val todaySteps: Int = 4280,
+    val todaySteps: Int = 0,
     val stepGoal: Int = 8000,
-    val screenTimeMinutes: Int = 114,
+    /**
+     * Screen time in minutes for today. Null when the usage-stats permission
+     * is not granted or no data is available — we never invent a number.
+     */
+    val screenTimeMinutes: Int? = null,
     val hasUsageStatsPermission: Boolean = false,
     val hasCalendarPermission: Boolean = false,
+    val hasActivityRecognitionPermission: Boolean = false,
+    val isStepSensorAvailable: Boolean = false,
     val nextCalendarEvent: CalendarEventInfo? = null,
     val activeRemindersCount: Int = 0
 )
@@ -54,7 +60,9 @@ class DeviceLifeHubManager(
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
     private val stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
 
-    private val _telemetry = MutableStateFlow(LifeHubTelemetry())
+    private val _telemetry = MutableStateFlow(
+        LifeHubTelemetry(isStepSensorAvailable = stepSensor != null)
+    )
     val telemetry: StateFlow<LifeHubTelemetry> = _telemetry.asStateFlow()
 
     private var initialSteps = -1
@@ -65,13 +73,27 @@ class DeviceLifeHubManager(
     }
 
     fun registerStepSensor() {
-        if (stepSensor != null) {
-            sensorManager?.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI)
+        if (stepSensor != null && hasActivityRecognitionPermission()) {
+            try {
+                sensorManager?.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI)
+            } catch (_: Exception) {}
         }
     }
 
     fun unregisterStepSensor() {
-        sensorManager?.unregisterListener(this)
+        try {
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+    }
+
+    fun hasActivityRecognitionPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACTIVITY_RECOGNITION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true // Pre-Q, the step counter did not need this permission.
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -89,8 +111,10 @@ class DeviceLifeHubManager(
 
     fun refreshTelemetry() {
         scope.launch(Dispatchers.IO) {
+            val hasActivity = hasActivityRecognitionPermission()
             val hasUsage = checkUsageStatsPermission()
-            val screenTime = if (hasUsage) queryTodayScreenTime() else 114 // Clean estimated baseline if not yet authorized
+            // Real value or null. No invented baselines.
+            val screenTime = if (hasUsage) queryTodayScreenTime() else null
             val hasCal = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
             val nextEvent = if (hasCal) queryNextCalendarEvent() else null
 
@@ -98,12 +122,16 @@ class DeviceLifeHubManager(
                 screenTimeMinutes = screenTime,
                 hasUsageStatsPermission = hasUsage,
                 hasCalendarPermission = hasCal,
+                hasActivityRecognitionPermission = hasActivity,
+                isStepSensorAvailable = stepSensor != null,
                 nextCalendarEvent = nextEvent
             )
         }
     }
 
-    private fun checkUsageStatsPermission(): Boolean {
+    /** Uses AppOps (the real source of truth) instead of a usage query that
+     *  may legitimately return nothing even when permission is granted. */
+    fun checkUsageStatsPermission(): Boolean {
         return try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -126,9 +154,9 @@ class DeviceLifeHubManager(
         }
     }
 
-    private fun queryTodayScreenTime(): Int {
+    private fun queryTodayScreenTime(): Int? {
         return try {
-            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return 114
+            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
             val cal = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 0)
                 set(Calendar.MINUTE, 0)
@@ -139,14 +167,15 @@ class DeviceLifeHubManager(
             val endTime = System.currentTimeMillis()
 
             val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+            if (stats.isNullOrEmpty()) return null
             var totalTimeMs = 0L
-            stats?.forEach {
+            stats.forEach {
                 totalTimeMs += it.totalTimeInForeground
             }
-            val minutes = (totalTimeMs / (1000 * 60)).toInt()
-            if (minutes > 0) minutes else 45
+            if (totalTimeMs <= 0L) return null
+            (totalTimeMs / (1000 * 60)).toInt()
         } catch (_: Exception) {
-            114
+            null
         }
     }
 

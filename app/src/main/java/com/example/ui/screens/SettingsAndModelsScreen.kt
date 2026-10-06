@@ -30,6 +30,7 @@ import com.example.data.AppInterfaceMode
 import com.example.ui.components.GoogleBlue
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Add
@@ -70,6 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
+import com.example.ui.components.GoogleGreen
+import com.example.ui.components.CityPickerModal
 import com.example.ui.components.MlKitDiagnosticsCard
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.ForestPrimary
@@ -90,6 +93,9 @@ fun SettingsAndModelsScreen(
     val events by viewModel.events.collectAsState()
     val isRebuilding by viewModel.isRebuildingMetadata.collectAsState()
     val interfaceMode by viewModel.interfaceMode.collectAsState()
+    val selectedCity by viewModel.selectedWeatherCity.collectAsState()
+    val weather by viewModel.realWeather.collectAsState()
+    var showCityPicker by remember { mutableStateOf(false) }
 
     var exportDialogContent by remember { mutableStateOf<String?>(null) }
     var exportDialogTitle by remember { mutableStateOf("") }
@@ -201,10 +207,80 @@ fun SettingsAndModelsScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Tarjeta dinámica NowBrief con briefing matutino, vespertino y nocturno.",
+                        text = "Now brief: tarjetas de vidrio líquido, fondo aurora y cápsula flotante.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // SECTION: Weather city
+        Text(
+            text = "Clima",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Elige la ciudad para el clima de tus pantallas de inicio.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("weather_city_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = GoogleBlue,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = selectedCity?.name ?: "Sin ciudad elegida",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        val citySubtitle = selectedCity?.let {
+                            listOfNotNull(it.admin, it.country).joinToString(", ")
+                        } ?: "Usa GPS o elige una ciudad manualmente"
+                        Text(
+                            text = citySubtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    weather.temperature?.let { temp ->
+                        Text(
+                            text = "$temp°",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = ForestPrimary
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { showCityPicker = true },
+                    modifier = Modifier.fillMaxWidth().testTag("change_city_btn")
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (selectedCity == null) "Elegir mi ciudad" else "Cambiar ciudad")
                 }
             }
         }
@@ -405,13 +481,13 @@ fun SettingsAndModelsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Bundled English Speech & Dictation Engine Card
+        // Honest dictation status card
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
             ),
-            modifier = Modifier.fillMaxWidth().testTag("bundled_speech_engine_card")
+            modifier = Modifier.fillMaxWidth().testTag("dictation_status_card")
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -428,20 +504,21 @@ fun SettingsAndModelsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Bundled English Dictation",
+                            text = "Dictado de voz",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
 
+                    val available = viewModel.isDictationAvailable
                     Surface(
-                        color = ForestPrimary.copy(alpha = 0.12f),
+                        color = if (available) GoogleGreen.copy(alpha = 0.12f) else MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = "Preloaded",
+                            text = if (available) "Disponible" else "No disponible",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = ForestPrimary,
+                            color = if (available) GoogleGreen else MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -450,7 +527,9 @@ fun SettingsAndModelsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "100% on-device English speech recognition & audio file transcription. Preloaded inside the app—does not depend on Gboard or Google Play Services downloads. Fully optimized for Redmi 9A with MIUI 12.5.",
+                    text = "Las notas de voz se transcriben en vivo con el reconocedor de voz del sistema " +
+                            "mientras grabas. Para que funcione sin internet, descarga tu idioma en " +
+                            "Ajustes del sistema → Entrada de voz (Gboard/Reconocimiento de voz de Google).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -459,17 +538,19 @@ fun SettingsAndModelsScreen(
 
                 OutlinedButton(
                     onClick = {
-                        Toast.makeText(
-                            context,
-                            "Bundled English Speech Engine v2.1 is active and ready (Redmi 9A / MIUI 12.5 verified).",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "No se pudo abrir el ajuste de entrada de voz", Toast.LENGTH_SHORT).show()
+                        }
                     },
-                    modifier = Modifier.fillMaxWidth().testTag("verify_bundled_model_btn")
+                    modifier = Modifier.fillMaxWidth().testTag("open_voice_input_settings_btn")
                 ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Verify Bundled Model Status")
+                    Text("Gestionar idiomas de voz sin conexión")
                 }
             }
         }
@@ -817,6 +898,14 @@ fun SettingsAndModelsScreen(
                     Text("Cancelar")
                 }
             }
+        )
+    }
+
+    // City picker for the weather card
+    if (showCityPicker) {
+        CityPickerModal(
+            viewModel = viewModel,
+            onDismiss = { showCityPicker = false }
         )
     }
 }

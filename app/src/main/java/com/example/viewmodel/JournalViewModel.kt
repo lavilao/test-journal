@@ -32,6 +32,7 @@ import com.example.rss.RssFeedSource
 import com.example.telemetry.DeviceLifeHubManager
 import com.example.telemetry.LifeHubTelemetry
 import com.example.telemetry.RealWeatherData
+import com.example.telemetry.WeatherCity
 import com.example.telemetry.WeatherService
 import com.example.data.model.RelatedEntryDetail
 import com.example.data.model.StorageBreakdown
@@ -39,8 +40,6 @@ import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
 import com.example.media.PlaybackState
 import com.example.media.RecordingState
-import com.example.media.SpeechModelManager
-import com.example.media.SpeechModelStatus
 import com.example.media.VoiceJournalManager
 import com.example.repository.JournalRepository
 import com.example.semantic.MlKitAnalyzer
@@ -100,6 +99,20 @@ data class TranslationUiState(
 class JournalViewModel(application: Application) : AndroidViewModel(application) {
 
     val repository = JournalRepository(application)
+
+    // Voice Journal Manager (must be declared before its dependent flows)
+    val voiceManager = VoiceJournalManager(application)
+    val recordingState: StateFlow<RecordingState> = voiceManager.recordingState
+    val playbackState: StateFlow<PlaybackState> = voiceManager.playbackState
+    val currentPlayingPath: StateFlow<String?> = voiceManager.currentPlayingPath
+    val isDictating: StateFlow<Boolean> = voiceManager.isDictating
+
+    // On-Device speech availability (honest system state, no fake downloads)
+    val isDictationAvailable: Boolean get() = voiceManager.isDictationAvailable
+    val hasOnDeviceRecognizer: Boolean get() = voiceManager.hasOnDeviceRecognizer
+
+    val liveRecordingTranscript: StateFlow<String> = voiceManager.liveTranscript
+    val partialTranscript: StateFlow<String> = voiceManager.partialTranscript
 
     val currentTab = MutableStateFlow(MainNavTab.INICIO)
 
@@ -194,6 +207,34 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // Weather city selection
+    val selectedWeatherCity: StateFlow<WeatherCity?> = weatherService.selectedCity
+
+    fun searchWeatherCities(query: String, onDone: (List<WeatherCity>) -> Unit = {}) {
+        viewModelScope.launch {
+            val results = weatherService.searchCities(query)
+            _citySearchResults.value = results
+            onDone(results)
+        }
+    }
+
+    private val _citySearchResults = MutableStateFlow<List<WeatherCity>>(emptyList())
+    val citySearchResults: StateFlow<List<WeatherCity>> = _citySearchResults.asStateFlow()
+
+    fun selectWeatherCity(city: WeatherCity) {
+        weatherService.setSelectedCity(city)
+        viewModelScope.launch {
+            weatherService.refreshWeather()
+        }
+    }
+
+    fun clearWeatherCity() {
+        weatherService.clearSelectedCity()
+        viewModelScope.launch {
+            weatherService.refreshWeather()
+        }
+    }
+
     fun openSystemWeatherApp() {
         weatherService.openSystemWeatherApp()
     }
@@ -229,17 +270,6 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     fun launchDeviceApp(packageName: String) {
         deviceSearchManager.launchApp(packageName)
-    }
-
-    // On-Device Speech Model Manager (Downloadable like Translation)
-    val speechModelManager = SpeechModelManager(application)
-    val speechModelStatus: StateFlow<SpeechModelStatus> = speechModelManager.modelStatus
-
-    fun downloadSpeechModel(onComplete: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
-            val success = speechModelManager.downloadModel()
-            onComplete(success)
-        }
     }
 
     // TagSpaces Smart Vault States
@@ -344,13 +374,6 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     private val _graphData = MutableStateFlow(KnowledgeGraphData())
     val graphData: StateFlow<KnowledgeGraphData> = _graphData.asStateFlow()
     val isGraphLoading = MutableStateFlow(false)
-
-    // Voice Journal Manager
-    val voiceManager = VoiceJournalManager(application)
-    val recordingState: StateFlow<RecordingState> = voiceManager.recordingState
-    val playbackState: StateFlow<PlaybackState> = voiceManager.playbackState
-    val currentPlayingPath: StateFlow<String?> = voiceManager.currentPlayingPath
-    val isDictating: StateFlow<Boolean> = voiceManager.isDictating
 
     // Storage Management
     private val _storageBreakdown = MutableStateFlow(StorageBreakdown())
@@ -514,6 +537,11 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         voiceManager.startRecording()
     }
 
+    /** Start a voice note with REAL live dictation running in parallel. */
+    fun startVoiceRecordingWithDictation() {
+        voiceManager.startRecordingWithLiveDictation()
+    }
+
     fun pauseVoiceRecording() {
         voiceManager.pauseRecording()
     }
@@ -524,28 +552,21 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     fun stopVoiceRecording(entryId: Long, title: String = "Voice Note") {
         viewModelScope.launch {
+            // Capture the transcript BEFORE stopping (stop ends the dictation session).
+            val transcript = voiceManager.consumeLiveTranscript()
             val (file, duration) = voiceManager.stopRecording()
             if (file != null && file.exists()) {
                 val filePath = file.absolutePath
-                // Insert immediately so audio note is instantly visible
-                val recordId = repository.addAudioRecord(
+                val status = if (transcript.isNotBlank()) "COMPLETED" else "RECORDED"
+                repository.addAudioRecord(
                     entryId = entryId,
                     title = title,
                     filePath = filePath,
                     durationMs = duration,
-                    transcript = "",
-                    status = "RECORDED"
+                    transcript = transcript,
+                    status = status
                 )
                 selectEntry(entryId)
-                // Asynchronously attempt speech recognition
-                voiceManager.transcribeAudioOffline { transcript, status ->
-                    if (transcript.isNotBlank()) {
-                        viewModelScope.launch {
-                            repository.updateAudioRecordTranscript(recordId, entryId, transcript, status)
-                            selectEntry(entryId)
-                        }
-                    }
-                }
             }
         }
     }

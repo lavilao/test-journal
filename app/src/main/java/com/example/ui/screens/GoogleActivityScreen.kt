@@ -77,6 +77,21 @@ fun GoogleActivityScreen(
 
     var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
 
+    // Re-check the permission when the user comes back from system settings —
+    // this was the cause of the "activate usage access" button reappearing
+    // even though the permission was already granted.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasUsageAccess = viewModel.deviceSearchManager.hasUsageStatsPermission()
+                viewModel.refreshRecentActivity()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.refreshRecentActivity()
         hasUsageAccess = viewModel.deviceSearchManager.hasUsageStatsPermission()

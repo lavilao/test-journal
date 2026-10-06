@@ -315,16 +315,22 @@ fun PixelAtAGlanceCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
-                            val hours = telemetry.screenTimeMinutes / 60
-                            val mins = telemetry.screenTimeMinutes % 60
-                            val timeText = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                            val screenTime = telemetry.screenTimeMinutes
+                            val timeText = screenTime?.let {
+                                val hours = it / 60
+                                val mins = it % 60
+                                if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                            } ?: "—"
                             Text(
                                 text = timeText,
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (telemetry.hasUsageStatsPermission) "Screen on" else "Tap for stats",
+                                text = when {
+                                    telemetry.hasUsageStatsPermission -> "Screen on"
+                                    else -> "Toca para stats"
+                                },
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
