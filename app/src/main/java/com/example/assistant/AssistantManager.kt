@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.provider.AlarmClock
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceSearchManager
 import com.example.telemetry.RealWeatherData
@@ -312,16 +313,19 @@ class AssistantManager(private val context: Context) {
 
     fun startTimer(minutes: Int) {
         try {
-            val intent = Intent(Intent.ACTION_SET_TIMER).apply {
-                putExtra(Intent.EXTRA_DURATION, minutes * 60)
-                putExtra(Intent.EXTRA_TITLE, "Mnemosyne")
+            // android.provider.AlarmClock constants (NOT Intent.* — those do
+            // not exist, which broke the previous build).
+            val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
+                putExtra(AlarmClock.EXTRA_LENGTH, minutes * 60)
+                putExtra(AlarmClock.EXTRA_MESSAGE, "Mnemosyne")
+                putExtra(AlarmClock.EXTRA_SKIP_UI, false)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
         } catch (_: Exception) {
             // Clock apps without SET_TIMER support still accept SHOW_ALARMS
             try {
-                val fallback = Intent(Intent.ACTION_SHOW_ALARMS).apply {
+                val fallback = Intent(AlarmClock.ACTION_SHOW_ALARMS).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(fallback)
@@ -331,10 +335,10 @@ class AssistantManager(private val context: Context) {
 
     fun setAlarm(hour: Int, minute: Int) {
         try {
-            val intent = Intent(Intent.ACTION_SET_ALARM).apply {
-                putExtra(Intent.EXTRA_HOUR, hour)
-                putExtra(Intent.EXTRA_MINUTES, minute)
-                putExtra(Intent.EXTRA_SKIP_UI, false)
+            val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+                putExtra(AlarmClock.EXTRA_HOUR, hour)
+                putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                putExtra(AlarmClock.EXTRA_SKIP_UI, false)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

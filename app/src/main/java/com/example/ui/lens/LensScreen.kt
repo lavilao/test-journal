@@ -92,7 +92,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.semantic.BarcodeResult
 import com.example.semantic.MlKitAnalyzer
 import com.example.viewmodel.JournalViewModel
-import com.google.android.gms.tasks.ListenableFuture
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -127,13 +126,18 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-/** Await a CameraX ListenableFuture without kotlinx-guava. */
-private suspend fun <T> ListenableFuture<T>.awaitValue(): T =
-    suspendCancellableCoroutine { cont ->
-        addListener(
+/**
+ * Await CameraX's Guava ListenableFuture (the type is deliberately not
+ * imported — CameraX returns com.google.common.util.concurrent.ListenableFuture,
+ * which is NOT the GMS one; inferring it keeps us out of that trap).
+ */
+private suspend fun awaitCameraProvider(context: Context): ProcessCameraProvider {
+    val future = ProcessCameraProvider.getInstance(context)
+    return suspendCancellableCoroutine { cont ->
+        future.addListener(
             {
                 try {
-                    cont.resume(get())
+                    cont.resume(future.get())
                 } catch (e: Exception) {
                     cont.resumeWithException(e)
                 }
@@ -141,6 +145,7 @@ private suspend fun <T> ListenableFuture<T>.awaitValue(): T =
             Runnable::run
         )
     }
+}
 
 /** Suspend wrapper around ImageCapture.takePicture. */
 private suspend fun takeShot(capture: ImageCapture, context: Context): Uri =
@@ -218,7 +223,7 @@ fun LensScreen(
             return@LaunchedEffect
         }
         try {
-            val provider = ProcessCameraProvider.getInstance(context).awaitValue()
+            val provider = awaitCameraProvider(context)
             val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
             provider.unbindAll()
             provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
@@ -286,8 +291,11 @@ fun LensScreen(
     }
 
     // ---- Document scanner (Play Services) ----
+    // NOTE: the contract is StartIntentSenderForResult (verified against the
+    // actual androidx.activity 1.10.1 artifact — plain StartIntentSender does
+    // NOT exist there).
     val docScanLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSender()
+        ActivityResultContracts.StartIntentSenderForResult()
     ) { activityResult ->
         try {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(activityResult.data)
@@ -596,8 +604,8 @@ fun LensScreen(
         // Results panel
         AnimatedVisibility(
             visible = result != null,
-            enter = slideInVertically(initialOffset = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffset = { it }) + fadeOut(),
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
