@@ -79,7 +79,14 @@ class VoiceJournalManager(private val context: Context) {
             false
         }
 
-    /** Whether the device exposes the dedicated on-device recognizer (API 31+). */
+    /**
+     * True only when the system exposes the dedicated on-device recognizer
+     * (the NEW offline engine, API 31+). The user may instead have the
+     * LEGACY offline models (downloaded via the Google app's "offline speech
+     * recognition" settings — often by uninstalling Google app updates);
+     * those are consumed by the regular recognizer when
+     * EXTRA_PREFER_OFFLINE is set, which is exactly what we do as fallback.
+     */
     val hasOnDeviceRecognizer: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 try {
@@ -87,6 +94,17 @@ class VoiceJournalManager(private val context: Context) {
                 } catch (_: Exception) {
                     false
                 }
+
+    /** Human-readable engine status for the settings screen. */
+    fun dictationEngineDescription(): String {
+        val onDevice = hasOnDeviceRecognizer
+        val service = isDictationAvailable
+        return when {
+            onDevice -> "Motor en el dispositivo (nuevo) + preferencia sin conexión activa"
+            service -> "Reconocedor del sistema con preferencia sin conexión (usa los modelos offline de Google/Gboard si están instalados)"
+            else -> "Ningún servicio de reconocimiento de voz en este dispositivo"
+        }
+    }
 
     /** Last dictation error code, so the UI can show what really happened. */
     private val _lastDictationError = MutableStateFlow(0)
@@ -330,7 +348,20 @@ class VoiceJournalManager(private val context: Context) {
         }
 
         try {
-            val recognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Pick the engine that matches the models actually installed:
+            //  1. The NEW on-device recognizer, when the system exposes it.
+            //  2. Otherwise the regular recognizer with EXTRA_PREFER_OFFLINE,
+            //     which is what picks up the LEGACY offline language models
+            //     the user downloaded (downgraded Google app / Gboard).
+            // Using createOnDeviceSpeechRecognizer blindly broke dictation
+            // on devices that only have the legacy models.
+            val useOnDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    try {
+                        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+                    } catch (_: Exception) {
+                        false
+                    }
+            val recognizer = if (useOnDevice) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             } else {
                 SpeechRecognizer.createSpeechRecognizer(context)

@@ -45,14 +45,49 @@ class DeviceSearchManager(private val context: Context) {
     }
 
     /**
+     * True when the app can read media + downloads from OTHER apps on this
+     * device (what makes the device-wide file search actually useful).
+     * Android 13+ uses the granular READ_MEDIA_* permissions; older devices
+     * use READ_EXTERNAL_STORAGE.
+     */
+    fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    /** The exact runtime permissions to request for device-wide file search. */
+    fun requiredStoragePermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO
+            )
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    /**
      * Reliable usage-stats permission check via AppOps (the same source of
      * truth Android Settings uses). A queryUsageStats-based check returns
      * false when there simply was no usage in the window, which made the UI
      * ask for an already-granted permission.
+     *
+     * Some OEM ROMs report the op as MODE_DEFAULT even when the user flipped
+     * the switch, so we add a second, empirical fallback: actually query the
+     * usage stats — if the system hands us real rows, the permission IS
+     * granted no matter what AppOps claims.
      */
     fun hasUsageStatsPermission(): Boolean {
-        return try {
-            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+        val appOpsSaysYes = try {
+            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+                ?: return fallbackUsageStatsCheck()
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 appOps.unsafeCheckOpNoThrow(
                     AppOpsManager.OPSTR_GET_USAGE_STATS,
@@ -68,6 +103,25 @@ class DeviceSearchManager(private val context: Context) {
                 )
             }
             mode == AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            false
+        }
+        if (appOpsSaysYes) return true
+        return fallbackUsageStatsCheck()
+    }
+
+    /**
+     * Empirical check: query real usage rows for the last 24 h. Getting any
+     * row back proves the permission is granted (an unauthorized query
+     * returns an empty list).
+     */
+    private fun fallbackUsageStatsCheck(): Boolean {
+        return try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+                ?: return false
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 86_400_000L, now)
+            !stats.isNullOrEmpty()
         } catch (_: Exception) {
             false
         }
@@ -122,18 +176,15 @@ class DeviceSearchManager(private val context: Context) {
     }
 
     /**
-     * Search real device files (MediaStore) by filename.
+     * Search real device files (MediaStore) by filename. Queries BOTH the
+     * general Files collection and the Downloads collection — with the
+     * storage permission granted, Downloads is where PDFs and documents
+     * from other apps become visible on Android 11+.
      */
     suspend fun searchFiles(query: String): List<DeviceFileInfo> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
 
         val results = mutableListOf<DeviceFileInfo>()
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Files.getContentUri("external")
-        }
-
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -145,18 +196,34 @@ class DeviceSearchManager(private val context: Context) {
         val selectionArgs = arrayOf("%$query%")
 
         try {
+            val filesCollection = mediaStoreCollection()
             context.contentResolver.query(
-                collection,
+                filesCollection,
                 projection,
                 selection,
                 selectionArgs,
                 "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
             )?.use { cursor ->
-                extractFilesFromCursor(cursor, results, limit = 25)
+                extractFilesFromCursor(cursor, results, limit = 25, collection = filesCollection)
             }
         } catch (_: Exception) {}
 
-        results
+        // Downloads (visible cross-app since Android 11 with READ permission)
+        try {
+            val downloadsCollection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            context.contentResolver.query(
+                downloadsCollection,
+                projection,
+                selection,
+                selectionArgs,
+                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                extractFilesFromCursor(cursor, results, limit = 25, collection = downloadsCollection)
+            }
+        } catch (_: Exception) {}
+
+        // De-duplicate (a file can appear in both collections)
+        results.distinctBy { it.path }.take(25)
     }
 
     /**
@@ -164,12 +231,6 @@ class DeviceSearchManager(private val context: Context) {
      */
     suspend fun getRecentDeviceFiles(limit: Int = 15): List<DeviceFileInfo> = withContext(Dispatchers.IO) {
         val results = mutableListOf<DeviceFileInfo>()
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Files.getContentUri("external")
-        }
-
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -179,6 +240,7 @@ class DeviceSearchManager(private val context: Context) {
         )
 
         try {
+            val collection = mediaStoreCollection()
             context.contentResolver.query(
                 collection,
                 projection,
@@ -186,25 +248,45 @@ class DeviceSearchManager(private val context: Context) {
                 null,
                 "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
             )?.use { cursor ->
-                extractFilesFromCursor(cursor, results, limit)
+                extractFilesFromCursor(cursor, results, limit, collection = collection)
             }
         } catch (_: Exception) {}
 
-        results
+        try {
+            val downloads = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            context.contentResolver.query(
+                downloads,
+                projection,
+                null,
+                null,
+                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                extractFilesFromCursor(cursor, results, limit, collection = downloads)
+            }
+        } catch (_: Exception) {}
+
+        results.distinctBy { it.path }.sortedByDescending { it.dateModifiedMs }.take(limit)
     }
 
-    private fun extractFilesFromCursor(cursor: Cursor, results: MutableList<DeviceFileInfo>, limit: Int) {
+    private fun mediaStoreCollection(): Uri {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Files.getContentUri("external")
+        }
+    }
+
+    private fun extractFilesFromCursor(
+        cursor: Cursor,
+        results: MutableList<DeviceFileInfo>,
+        limit: Int,
+        collection: Uri = mediaStoreCollection()
+    ) {
         val idIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
         val nameIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
         val sizeIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
         val dateIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_MODIFIED)
         val mimeIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.MIME_TYPE)
-
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Files.getContentUri("external")
-        }
 
         while (cursor.moveToNext() && results.size < limit) {
             val id = if (idIdx >= 0) cursor.getLong(idIdx) else 0L
@@ -268,6 +350,43 @@ class DeviceSearchManager(private val context: Context) {
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
             context.startActivity(intent)
         }
+    }
+
+    /**
+     * All launchable apps (name + package), for the assistant's "abrir <app>"
+     * voice command and the app search experience.
+     */
+    suspend fun listLaunchableApps(): List<RecentAppUsageInfo> = withContext(Dispatchers.IO) {
+        val pm = context.packageManager
+        try {
+            pm.getLaunchIntentForPackage(context.packageName) // warm-up, ignored
+            val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(intent, 0)
+                .map { resolveInfo ->
+                    RecentAppUsageInfo(
+                        packageName = resolveInfo.activityInfo.packageName,
+                        appName = resolveInfo.loadLabel(pm).toString(),
+                        lastTimeUsedMs = 0L,
+                        totalTimeInForegroundMs = 0L
+                    )
+                }
+                .filter { it.packageName != context.packageName }
+                .sortedBy { it.appName.lowercase() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Find an installed app by fuzzy name ("whatsapp" -> com.whatsapp). */
+    suspend fun findAppByName(query: String): RecentAppUsageInfo? = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext null
+        val apps = listLaunchableApps()
+        val q = query.trim().lowercase().removePrefix("la ").removePrefix("el ")
+        apps.firstOrNull { it.appName.lowercase() == q }
+            ?: apps.firstOrNull { it.appName.lowercase().contains(q) }
+            ?: apps.firstOrNull {
+                it.packageName.lowercase().contains(q.replace(" ", ""))
+            }
     }
 
     fun openFile(uri: Uri, mimeType: String) {

@@ -201,11 +201,14 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         appModePreferences.setMode(mode)
     }
 
-    fun refreshWeather() {
+    fun refreshWeather(force: Boolean = false) {
         viewModelScope.launch {
-            weatherService.refreshWeather()
+            weatherService.refreshWeather(force)
         }
     }
+
+    /** Minutes since the last real weather reading (for staleness captions). */
+    fun weatherAgeMinutes(): Int = weatherService.cachedAgeMinutes()
 
     // Weather city selection
     val selectedWeatherCity: StateFlow<WeatherCity?> = weatherService.selectedCity
@@ -224,7 +227,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     fun selectWeatherCity(city: WeatherCity) {
         weatherService.setSelectedCity(city)
         viewModelScope.launch {
-            weatherService.refreshWeather()
+            weatherService.refreshWeather(force = true)
         }
     }
 
@@ -531,6 +534,25 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     fun stopDictation() {
         voiceManager.stopDictation()
     }
+
+    // -----------------------------------------------------------------
+    // Local Assistant (Google Assistant replacement, on-device only)
+    // -----------------------------------------------------------------
+
+    val assistantManager = com.example.assistant.AssistantManager(application)
+
+    /** Short, honest engine status line for the assistant UI/settings. */
+    fun dictationEngineDescription(): String = voiceManager.dictationEngineDescription()
+
+    /** Storage permission state observed by the search UIs. */
+    private val _hasStoragePermission = MutableStateFlow(deviceSearchManager.hasStoragePermission())
+    val hasStoragePermission: StateFlow<Boolean> = _hasStoragePermission.asStateFlow()
+
+    fun refreshStoragePermission() {
+        _hasStoragePermission.value = deviceSearchManager.hasStoragePermission()
+    }
+
+    fun requiredStoragePermissions(): Array<String> = deviceSearchManager.requiredStoragePermissions()
 
     // Voice Journal Actions
     fun startVoiceRecording() {

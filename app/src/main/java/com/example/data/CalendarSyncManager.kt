@@ -23,10 +23,18 @@ data class DeviceCalendarEvent(
 
 class CalendarSyncManager(private val context: Context) {
 
+    /**
+     * We only READ the calendar, so READ is the permission that matters.
+     * (The old check also required WRITE, which is requested separately —
+     * after granting only READ the calendar stayed "broken" forever.)
+     */
     fun hasCalendarPermission(): Boolean {
-        val read = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
-        val write = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
-        return read && write
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Both calendar permissions, to request together in one dialog. */
+    fun requiredCalendarPermissions(): Array<String> {
+        return arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
     }
 
     suspend fun getUpcomingEvents(limit: Int = 5): List<DeviceCalendarEvent> = withContext(Dispatchers.IO) {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
@@ -20,16 +21,14 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -110,86 +109,98 @@ fun GoogleSearchHubHeader(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Signature Google Pill Search Bar with clipped rounded shadow
+        // Signature Google Pill Search Bar — ONE compact line, like the
+        // real Google app: just "buscar".
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             shadowElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .height(46.dp)
+                .clip(RoundedCornerShape(24.dp))
                 .testTag("google_pill_search_bar")
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                OutlinedTextField(
+                BasicTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    placeholder = {
-                        Text(
-                            text = "Buscar archivos o notas...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        disabledBorderColor = Color.Transparent
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
+                    cursorBrush = Brush.verticalGradient(listOf(GoogleBlue, GoogleBlue)),
+                    decorationBox = { innerTextField ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "buscar",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .testTag("search_files_input")
                 )
 
                 if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Limpiar búsqueda",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onVoiceClick,
-                    modifier = Modifier.testTag("google_voice_search_btn")
-                ) {
                     Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Dictado de voz",
-                        tint = GoogleBlue,
-                        modifier = Modifier.size(22.dp)
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Limpiar búsqueda",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .clickable { onSearchQueryChange("") }
+                            .padding(4.dp)
                     )
                 }
 
-                IconButton(
-                    onClick = onCameraClick,
-                    modifier = Modifier.testTag("google_lens_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CameraAlt,
-                        contentDescription = "Tomar foto / Cámara",
-                        tint = GoogleRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Asistente de voz",
+                    tint = GoogleBlue,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onVoiceClick)
+                        .padding(6.dp)
+                        .testTag("google_voice_search_btn")
+                )
+
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = "Lens / Cámara",
+                    tint = GoogleRed,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onCameraClick)
+                        .padding(6.dp)
+                        .testTag("google_lens_btn")
+                )
             }
         }
 

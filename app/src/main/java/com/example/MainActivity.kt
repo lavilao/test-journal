@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -51,6 +50,8 @@ import com.example.data.AppInterfaceMode
 import com.example.ui.components.GlassBottomBar
 import com.example.ui.components.GlassTab
 import com.example.ui.components.GoogleBlue
+import com.example.ui.lens.LensScreen
+import com.example.ui.screens.AssistantScreen
 import com.example.ui.screens.EntityExplorerScreen
 import com.example.ui.screens.EntryDetailScreen
 import com.example.ui.screens.EntryEditScreen
@@ -71,6 +72,8 @@ sealed interface AppScreen {
     data class Main(val tab: MainNavTab) : AppScreen
     data class Edit(val entryId: Long?) : AppScreen
     data class Detail(val entryId: Long) : AppScreen
+    data object Assistant : AppScreen
+    data object Lens : AppScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -100,6 +103,16 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                 }
             }
             is AppScreen.Detail -> {
+                BackHandler {
+                    screenState = AppScreen.Main(currentTab)
+                }
+            }
+            is AppScreen.Assistant -> {
+                BackHandler {
+                    screenState = AppScreen.Main(currentTab)
+                }
+            }
+            is AppScreen.Lens -> {
                 BackHandler {
                     screenState = AppScreen.Main(currentTab)
                 }
@@ -145,7 +158,9 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                         NowBriefHomeScreen(
                                             viewModel = viewModel,
                                             onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
-                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
+                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                            onOpenLens = { screenState = AppScreen.Lens },
+                                            onOpenAssistant = { screenState = AppScreen.Assistant }
                                         )
                                     } else {
                                         TimelineScreen(
@@ -155,7 +170,9 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                             onNavigateToEntity = { entityId ->
                                                 viewModel.selectEntity(entityId)
                                                 viewModel.selectTab(MainNavTab.GRAPH)
-                                            }
+                                            },
+                                            onOpenLens = { screenState = AppScreen.Lens },
+                                            onOpenAssistant = { screenState = AppScreen.Assistant }
                                         )
                                     }
                                 }
@@ -193,7 +210,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 entryId = targetScreen.entryId,
                                 viewModel = viewModel,
                                 onBack = { screenState = AppScreen.Main(currentTab) },
-                                onSaved = { savedId -> screenState = AppScreen.Detail(savedId) }
+                                onSaved = { savedId -> screenState = AppScreen.Detail(savedId) },
+                                onOpenLens = { screenState = AppScreen.Lens }
                             )
                         }
                         is AppScreen.Detail -> {
@@ -209,17 +227,34 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) }
                             )
                         }
+                        is AppScreen.Assistant -> {
+                            AssistantScreen(
+                                viewModel = viewModel,
+                                onBack = { screenState = AppScreen.Main(currentTab) },
+                                onOpenLens = { screenState = AppScreen.Lens }
+                            )
+                        }
+                        is AppScreen.Lens -> {
+                            LensScreen(
+                                viewModel = viewModel,
+                                onBack = { screenState = AppScreen.Main(currentTab) },
+                                onNoteSaved = { savedId -> screenState = AppScreen.Detail(savedId) }
+                            )
+                        }
                     }
                 }
 
                 // In Samsung mode the glass capsule floats OVER the content
-                // (drawn after it, so it stays on top).
+                // (drawn after it, so it stays on top), horizontally centered.
+                // The Scaffold's innerPadding already reserves the nav-bar
+                // inset, so no extra windowInsetsPadding here (double inset
+                // used to push the dock too high above the gesture bar).
                 if (screenState is AppScreen.Main && isSamsungMode) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .windowInsetsPadding(WindowInsets.navigationBars)
                             .align(Alignment.BottomCenter)
+                            .padding(bottom = 10.dp)
                     ) {
                         NowBriefGlassNavBar(
                             currentTab = currentTab,
@@ -248,7 +283,9 @@ private fun MnemosyneThemeFor(
 }
 
 /**
- * Samsung mode navigation: the Now brief floating glass capsule.
+ * Samsung mode navigation: the Now brief floating glass capsule, centered.
+ * Settings intentionally NOT here — it already lives in the home header,
+ * so the dock stays minimal (Inicio / Buscar / Actividad) with no duplicate.
  */
 @Composable
 private fun NowBriefGlassNavBar(
@@ -259,27 +296,24 @@ private fun NowBriefGlassNavBar(
     val tabs = listOf(
         GlassTab(label = "Inicio", icon = Icons.Default.Home),
         GlassTab(label = "Buscar", icon = Icons.Default.Search),
-        GlassTab(label = "Actividad", icon = Icons.Default.History),
-        GlassTab(label = "Ajustes", icon = Icons.Default.Settings)
+        GlassTab(label = "Actividad", icon = Icons.Default.History)
     )
     val selected = when (currentTab) {
         MainNavTab.INICIO, MainNavTab.TIMELINE -> 0
         MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> 1
         MainNavTab.NOTIFICACIONES, MainNavTab.ACTIVIDAD -> 2
         MainNavTab.GRAPH, MainNavTab.ENTITIES -> 2
-        MainNavTab.SETTINGS -> 3
+        MainNavTab.SETTINGS -> 0
     }
     val tabTargets = listOf(
         MainNavTab.INICIO,
         MainNavTab.BUSCAR,
-        MainNavTab.ACTIVIDAD,
-        MainNavTab.SETTINGS
+        MainNavTab.ACTIVIDAD
     )
 
     Box(
-        modifier = modifier
-            .padding(bottom = 10.dp),
-        contentAlignment = Alignment.BottomCenter
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
     ) {
         GlassBottomBar(
             tabs = tabs,

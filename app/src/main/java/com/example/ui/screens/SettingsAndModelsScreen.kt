@@ -26,9 +26,10 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Download
 import com.example.data.AppInterfaceMode
 import com.example.ui.components.GoogleBlue
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
@@ -511,12 +512,21 @@ fun SettingsAndModelsScreen(
                     }
 
                     val available = viewModel.isDictationAvailable
+                    val onDevice = viewModel.hasOnDeviceRecognizer
                     Surface(
-                        color = if (available) GoogleGreen.copy(alpha = 0.12f) else MaterialTheme.colorScheme.errorContainer,
+                        color = when {
+                            onDevice -> GoogleGreen.copy(alpha = 0.12f)
+                            available -> GoogleGreen.copy(alpha = 0.12f)
+                            else -> MaterialTheme.colorScheme.errorContainer
+                        },
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = if (available) "Disponible" else "No disponible",
+                            text = when {
+                                onDevice -> "En el dispositivo"
+                                available -> "Disponible"
+                                else -> "No disponible"
+                            },
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = if (available) GoogleGreen else MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -527,9 +537,9 @@ fun SettingsAndModelsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Las notas de voz se transcriben en vivo con el reconocedor de voz del sistema " +
-                            "mientras grabas. Para que funcione sin internet, descarga tu idioma en " +
-                            "Ajustes del sistema → Entrada de voz (Gboard/Reconocimiento de voz de Google).",
+                    text = viewModel.dictationEngineDescription() +
+                            " Los modelos offline del reconocedor de Google/Gboard se gestionan en " +
+                            "Ajustes del sistema → Entrada de voz.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -559,6 +569,63 @@ fun SettingsAndModelsScreen(
 
         // On-Device ML Kit & Model Diagnosis
         MlKitDiagnosticsCard()
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Camera Lens & Scanner (on-device ML Kit vision)
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("lens_models_card")
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DocumentScanner,
+                            contentDescription = null,
+                            tint = ForestPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Lens de cámara y escáner",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Surface(
+                        color = GoogleGreen.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "Sin conexión",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = GoogleGreen,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "El Lens (botón de cámara de la app) ejecuta en tu teléfono: reconocimiento " +
+                            "de texto (OCR), traducción con cámara, códigos QR y de barras, etiquetado " +
+                            "de objetos y escaneo de documentos con limpieza de página. Los modelos " +
+                            "de OCR, códigos y etiquetado van incluidos en la app; el modelo de " +
+                            "traducción de cada idioma se descarga una vez y luego funciona sin internet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(22.dp))
 

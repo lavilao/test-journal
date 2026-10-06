@@ -3,6 +3,8 @@ package com.example.ui.screens
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -85,6 +87,17 @@ fun GoogleNotificationsScreen(
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
+    // "Sincronizar" used to silently return nothing because the calendar
+    // permission was never requested from this screen. Now it asks first.
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) {
+            viewModel.refreshCalendarEvents()
+        }
+        viewModel.refreshTelemetry()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -165,17 +178,37 @@ fun GoogleNotificationsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = "Sin eventos próximos en el calendario de este dispositivo.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            TextButton(
-                                onClick = { viewModel.refreshCalendarEvents() },
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text("Sincronizar eventos ahora", fontSize = 12.sp)
+                            if (telemetry.hasCalendarPermission) {
+                                Text(
+                                    text = "Sin eventos próximos en el calendario de este dispositivo.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                TextButton(
+                                    onClick = { viewModel.refreshCalendarEvents() },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text("Sincronizar eventos ahora", fontSize = 12.sp)
+                                }
+                            } else {
+                                Text(
+                                    text = "Conecta tu calendario para ver aquí tus próximos eventos reales.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Button(
+                                    onClick = {
+                                        calendarPermissionLauncher.launch(
+                                            viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Permitir acceso al calendario", fontSize = 12.sp)
+                                }
                             }
                         }
                     }

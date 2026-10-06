@@ -130,9 +130,12 @@ class DeviceLifeHubManager(
     }
 
     /** Uses AppOps (the real source of truth) instead of a usage query that
-     *  may legitimately return nothing even when permission is granted. */
+     *  may legitimately return nothing even when permission is granted.
+     *  Falls back to an empirical query: if the system returns usage rows,
+     *  the permission is granted regardless of what AppOps reports (some
+     *  OEM ROMs misreport the op mode). */
     fun checkUsageStatsPermission(): Boolean {
-        return try {
+        val appOpsSaysYes = try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 appOps.unsafeCheckOpNoThrow(
@@ -149,6 +152,16 @@ class DeviceLifeHubManager(
                 )
             }
             mode == AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            false
+        }
+        if (appOpsSaysYes) return true
+        // Empirical fallback: real usage rows prove the permission is granted.
+        return try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return false
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 86_400_000L, now)
+            !stats.isNullOrEmpty()
         } catch (_: Exception) {
             false
         }

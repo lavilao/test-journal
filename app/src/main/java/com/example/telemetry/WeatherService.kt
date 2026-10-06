@@ -64,7 +64,7 @@ class WeatherService(private val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("weather_prefs", Context.MODE_PRIVATE)
 
-    private val _weatherState = MutableStateFlow(RealWeatherData())
+    private val _weatherState = MutableStateFlow(loadCachedWeather())
     val weatherState: StateFlow<RealWeatherData> = _weatherState.asStateFlow()
 
     private val _selectedCity = MutableStateFlow(loadSavedCity())
@@ -93,6 +93,51 @@ class WeatherService(private val context: Context) {
             .putFloat(KEY_CITY_LON, city.longitude.toFloat())
             .apply()
         _selectedCity.value = city
+    }
+
+    /** Minutes since the last successful (or cached) weather update. */
+    fun cachedAgeMinutes(): Int {
+        val ts = _weatherState.value.lastUpdated ?: return Int.MAX_VALUE
+        return ((System.currentTimeMillis() - ts) / 60_000L).toInt()
+    }
+
+    /**
+     * Loads the last successful weather reading from disk so the UI can show
+     * real data immediately on cold start (even offline). This is what stops
+     * the app from asking for a city again on every launch.
+     */
+    private fun loadCachedWeather(): RealWeatherData {
+        val temp = prefs.getInt(KEY_CACHE_TEMP, Int.MIN_VALUE)
+        if (temp == Int.MIN_VALUE) return RealWeatherData()
+        return RealWeatherData(
+            temperature = temp,
+            weatherCode = prefs.getInt(KEY_CACHE_CODE, -1).takeIf { it >= 0 },
+            conditionText = prefs.getString(KEY_CACHE_CONDITION, null),
+            locationName = prefs.getString(KEY_CACHE_LOCATION, null),
+            isRealGps = prefs.getBoolean(KEY_CACHE_IS_GPS, false),
+            lastUpdated = prefs.getLong(KEY_CACHE_TIMESTAMP, 0L).takeIf { it > 0L }
+        )
+    }
+
+    private fun persistWeatherToCache(data: RealWeatherData) {
+        val temp = data.temperature ?: run {
+            prefs.edit().remove(KEY_CACHE_TEMP).apply()
+            return
+        }
+        prefs.edit()
+            .putInt(KEY_CACHE_TEMP, temp)
+            .putInt(KEY_CACHE_CODE, data.weatherCode ?: -1)
+            .putString(KEY_CACHE_CONDITION, data.conditionText)
+            .putString(KEY_CACHE_LOCATION, data.locationName)
+            .putBoolean(KEY_CACHE_IS_GPS, data.isRealGps)
+            .putLong(KEY_CACHE_TIMESTAMP, data.lastUpdated ?: System.currentTimeMillis())
+            .apply()
+        // Keep the home-screen widget in sync with the freshest real reading.
+        try {
+            com.example.widget.AtAGlanceWidgetProvider.refreshAll(context)
+        } catch (_: Exception) {
+            // Best-effort; the widget also self-updates on its 30-min tick.
+        }
     }
 
     fun clearSelectedCity() {
@@ -138,8 +183,20 @@ class WeatherService(private val context: Context) {
     /**
      * Refresh weather using the selected city (if any) or GPS. Never returns
      * fabricated data: when nothing is available the state simply keeps nulls.
+     *
+     * The disk cache is served instantly on start; the network is only hit
+     * when the cached reading is older than [STALE_AFTER_MINUTES] (or when
+     * [force] is true, e.g. pull-to-refresh).
      */
-    suspend fun refreshWeather(): RealWeatherData = withContext(Dispatchers.IO) {
+    suspend fun refreshWeather(force: Boolean = false): RealWeatherData = withContext(Dispatchers.IO) {
+        if (!force) {
+            val ageMinutes = cachedAgeMinutes()
+            val hasData = _weatherState.value.temperature != null
+            if (hasData && ageMinutes < STALE_AFTER_MINUTES) {
+                return@withContext _weatherState.value
+            }
+        }
+
         val city = _selectedCity.value
 
         val gpsLocation = if (city == null) getBestLastLocation() else null
@@ -189,6 +246,7 @@ class WeatherService(private val context: Context) {
                             isRealGps = isGps,
                             lastUpdated = System.currentTimeMillis()
                         )
+                        persistWeatherToCache(result)
                         _weatherState.value = result
                         return@withContext result
                     }
@@ -282,5 +340,16 @@ class WeatherService(private val context: Context) {
         private const val KEY_CITY_COUNTRY = "city_country"
         private const val KEY_CITY_LAT = "city_lat"
         private const val KEY_CITY_LON = "city_lon"
+
+        // Disk cache of the last successful weather reading.
+        private const val KEY_CACHE_TEMP = "cache_temp"
+        private const val KEY_CACHE_CODE = "cache_code"
+        private const val KEY_CACHE_CONDITION = "cache_condition"
+        private const val KEY_CACHE_LOCATION = "cache_location"
+        private const val KEY_CACHE_IS_GPS = "cache_is_gps"
+        private const val KEY_CACHE_TIMESTAMP = "cache_timestamp"
+
+        /** A cached reading younger than this is served without touching the network. */
+        private const val STALE_AFTER_MINUTES = 20
     }
 }

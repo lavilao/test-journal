@@ -27,12 +27,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -60,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -96,7 +101,9 @@ fun TimelineScreen(
     viewModel: JournalViewModel,
     onNavigateToNewEntry: () -> Unit,
     onNavigateToDetail: (Long) -> Unit,
-    onNavigateToEntity: (Long) -> Unit = {}
+    onNavigateToEntity: (Long) -> Unit = {},
+    onOpenLens: () -> Unit = {},
+    onOpenAssistant: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -121,15 +128,28 @@ fun TimelineScreen(
     var showPhotoChoiceDialog by remember { mutableStateOf(false) }
     var showCityPicker by remember { mutableStateOf(false) }
 
-    // Calendar permission launcher — the calendar never asked before, which
-    // is why the integration looked broken.
+    val hasStoragePermission by viewModel.hasStoragePermission.collectAsState()
+
+    // Calendar: ask for BOTH calendar permissions in one dialog (the old
+    // single READ request left WRITE denied, and the hasCalendarPermission
+    // check then failed forever -> the calendar looked broken).
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) {
             viewModel.refreshCalendarEvents()
         }
         viewModel.refreshTelemetry()
+    }
+
+    // File search needs READ_MEDIA_* (13+) / READ_EXTERNAL_STORAGE (12-):
+    // without it MediaStore only returns files this app created, which made
+    // the device-wide search look "broken".
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.refreshStoragePermission()
+        if (homeSearchQuery.isNotBlank()) viewModel.searchDevice(homeSearchQuery)
     }
 
     // Device-wide search (files + contacts) while typing
@@ -227,7 +247,7 @@ fun TimelineScreen(
                         nextReminder = nextReminder,
                         weather = realWeather,
                         calendarEvent = calendarEvents.firstOrNull(),
-                        onVoiceClick = { showQuickDictateModal = true },
+                        onVoiceClick = onOpenAssistant,
                         onCameraClick = { showPhotoChoiceDialog = true },
                         onWeatherClick = { viewModel.openSystemWeatherApp() },
                         onChooseCityClick = { showCityPicker = true },
@@ -236,11 +256,51 @@ fun TimelineScreen(
                             if (telemetry.hasCalendarPermission) {
                                 viewModel.calendarSyncManager.openCalendarApp()
                             } else {
-                                calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                                calendarPermissionLauncher.launch(
+                                    viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                )
                             }
                         },
                         onSettingsClick = { viewModel.selectTab(MainNavTab.SETTINGS) }
                     )
+                }
+
+                // Contextual permission pills (parity with Samsung mode):
+                // calendar + file search. They vanish once granted.
+                if (!telemetry.hasCalendarPermission || !hasStoragePermission) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!telemetry.hasCalendarPermission) {
+                                PermissionPill(
+                                    icon = Icons.Default.CalendarToday,
+                                    text = "Calendario",
+                                    tint = GoogleBlue,
+                                    onClick = {
+                                        calendarPermissionLauncher.launch(
+                                            viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                        )
+                                    }
+                                )
+                            }
+                            if (!hasStoragePermission) {
+                                PermissionPill(
+                                    icon = Icons.Default.Folder,
+                                    text = "Buscar archivos",
+                                    tint = ForestPrimary,
+                                    onClick = {
+                                        storagePermissionLauncher.launch(
+                                            viewModel.requiredStoragePermissions()
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Mode 1: Search Query active -> Phone-wide search results
@@ -620,39 +680,59 @@ fun TimelineScreen(
         )
     }
 
-    // Photo Choice Dialog (Camera or Gallery)
+    // Photo / Lens Choice Dialog
     if (showPhotoChoiceDialog) {
         AlertDialog(
             onDismissRequest = { showPhotoChoiceDialog = false },
-            title = { Text("Agregar Foto a tus Recuerdos") },
-            text = { Text("Elige cómo deseas adjuntar la imagen:") },
+            title = { Text("Cámara inteligente") },
+            text = { Text("Elige qué hacer con la cámara:") },
             confirmButton = {
-                Button(
-                    onClick = {
-                        showPhotoChoiceDialog = false
-                        takePictureLauncher.launch(null)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
-                ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Cámara")
+                Column {
+                    Button(
+                        onClick = {
+                            showPhotoChoiceDialog = false
+                            onOpenLens()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Lens: texto, traducir, códigos, escanear")
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = {
+                            showPhotoChoiceDialog = false
+                            takePictureLauncher.launch(null)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Foto rápida para una memoria")
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = {
+                            showPhotoChoiceDialog = false
+                            photoPickerLauncher.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Elegir de la galería")
+                    }
                 }
             },
             dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        showPhotoChoiceDialog = false
-                        photoPickerLauncher.launch(
-                            androidx.activity.result.PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageOnly
-                            )
-                        )
-                    }
-                ) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Galería")
+                TextButton(onClick = { showPhotoChoiceDialog = false }) {
+                    Text("Cancelar")
                 }
             }
         )
@@ -716,4 +796,32 @@ private fun SectionHeader(title: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)
     )
+}
+
+/** Compact contextual permission chip. */
+@Composable
+private fun PermissionPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = tint.copy(alpha = 0.12f),
+        modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = tint
+            )
+        }
+    }
 }

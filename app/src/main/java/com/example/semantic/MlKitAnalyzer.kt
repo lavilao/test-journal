@@ -21,6 +21,9 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.label.ImageLabeling
@@ -33,7 +36,16 @@ import kotlinx.coroutines.withContext
 data class ImageAnalysisResult(
     val labels: List<String> = emptyList(),
     val faceCount: Int = 0,
-    val ocrText: String = ""
+    val ocrText: String = "",
+    /** Values of barcodes/QR codes found in the image. */
+    val barcodes: List<String> = emptyList()
+)
+
+data class BarcodeResult(
+    val rawValue: String,
+    val formatName: String,
+    val url: String? = null,
+    val wifiSsid: String? = null
 )
 
 data class SupportedLanguage(
@@ -265,6 +277,75 @@ object MlKitAnalyzer {
             Result.success(translated)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Scans barcodes & QR codes (ML Kit Barcode Scanning, bundled model).
+     */
+    suspend fun scanBarcodes(bitmap: Bitmap): List<BarcodeResult> = withContext(Dispatchers.IO) {
+        try {
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val options = BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                .build()
+            val scanner = BarcodeScanning.getClient(options)
+            val barcodes = Tasks.await(scanner.process(inputImage))
+            scanner.close()
+            barcodes.mapNotNull { code ->
+                val raw = code.rawValue ?: code.rawBytes?.toString(Charsets.UTF_8) ?: return@mapNotNull null
+                BarcodeResult(
+                    rawValue = raw,
+                    formatName = code.formatString(),
+                    url = code.url?.url,
+                    wifiSsid = code.wifi?.ssid
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun Barcode.formatString(): String = when (format) {
+        Barcode.FORMAT_QR_CODE -> "QR"
+        Barcode.FORMAT_EAN_13 -> "EAN-13"
+        Barcode.FORMAT_EAN_8 -> "EAN-8"
+        Barcode.FORMAT_UPC_A -> "UPC-A"
+        Barcode.FORMAT_UPC_E -> "UPC-E"
+        Barcode.FORMAT_CODE_128 -> "Code 128"
+        Barcode.FORMAT_CODE_39 -> "Code 39"
+        Barcode.FORMAT_CODE_93 -> "Code 93"
+        Barcode.FORMAT_CODABAR -> "Codabar"
+        Barcode.FORMAT_ITF -> "ITF"
+        Barcode.FORMAT_PDF417 -> "PDF417"
+        Barcode.FORMAT_AZTEC -> "Aztec"
+        Barcode.FORMAT_DATA_MATRIX -> "Data Matrix"
+        else -> "Código"
+    }
+
+    /**
+     * Scans barcodes from a Uri (EXIF rotation handled by InputImage).
+     */
+    suspend fun scanBarcodesFromUri(context: Context, uri: Uri): List<BarcodeResult> = withContext(Dispatchers.IO) {
+        try {
+            val inputImage = InputImage.fromFilePath(context, uri)
+            val options = BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                .build()
+            val scanner = BarcodeScanning.getClient(options)
+            val barcodes = Tasks.await(scanner.process(inputImage))
+            scanner.close()
+            barcodes.mapNotNull { code ->
+                val raw = code.rawValue ?: return@mapNotNull null
+                BarcodeResult(
+                    rawValue = raw,
+                    formatName = code.formatString(),
+                    url = code.url?.url,
+                    wifiSsid = code.wifi?.ssid
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

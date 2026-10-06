@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExpandLess
@@ -120,7 +121,8 @@ fun EntryEditScreen(
     entryId: Long?,
     viewModel: JournalViewModel,
     onBack: () -> Unit,
-    onSaved: (Long) -> Unit
+    onSaved: (Long) -> Unit,
+    onOpenLens: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -459,7 +461,7 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Single action row: photo / voice / contact / details
+            // Single action row: photo / voice / contact / lens / details
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -499,6 +501,19 @@ fun EntryEditScreen(
                             contactPickerLauncher.launch(null)
                         } else {
                             contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                        }
+                    }
+                )
+                ActionChip(
+                    icon = Icons.Default.DocumentScanner,
+                    label = "Escanear",
+                    onClick = {
+                        // Day One philosophy: save the draft before leaving
+                        // to scan, so nothing typed is ever lost.
+                        if (title.isNotBlank() || body.isNotBlank()) {
+                            persistEntry { onOpenLens() }
+                        } else {
+                            onOpenLens()
                         }
                     }
                 )

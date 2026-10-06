@@ -22,8 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MenuBook
@@ -81,7 +83,9 @@ import java.util.Locale
 fun NowBriefHomeScreen(
     viewModel: JournalViewModel,
     onNavigateToNewEntry: () -> Unit,
-    onNavigateToDetail: (Long) -> Unit
+    onNavigateToDetail: (Long) -> Unit,
+    onOpenLens: () -> Unit = {},
+    onOpenAssistant: () -> Unit = {}
 ) {
     val entries by viewModel.entries.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
@@ -90,6 +94,7 @@ fun NowBriefHomeScreen(
     val isRssLoading by viewModel.isRssLoading.collectAsState()
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     val nextReminder by viewModel.nextActiveReminder.collectAsState()
+    val selectedCity by viewModel.selectedWeatherCity.collectAsState()
 
     var showCityPicker by remember { mutableStateOf(false) }
 
@@ -99,9 +104,9 @@ fun NowBriefHomeScreen(
     ) { viewModel.refreshTelemetry() }
 
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) viewModel.refreshCalendarEvents()
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.refreshCalendarEvents()
         viewModel.refreshTelemetry()
     }
 
@@ -138,7 +143,7 @@ fun NowBriefHomeScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header: big time + date + city + settings
+            // Header: big time + date + city + assistant + lens + settings
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -179,6 +184,22 @@ fun NowBriefHomeScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                    IconButton(onClick = onOpenAssistant) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "Asistente local",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    IconButton(onClick = onOpenLens) {
+                        Icon(
+                            Icons.Default.DocumentScanner,
+                            contentDescription = "Lens: escanear y traducir",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                     IconButton(onClick = { viewModel.selectTab(com.example.viewmodel.MainNavTab.SETTINGS) }) {
                         Icon(
@@ -229,6 +250,7 @@ fun NowBriefHomeScreen(
             item {
                 WeatherHeroCard(
                     weather = weather,
+                    selectedCity = selectedCity,
                     onChooseCity = { showCityPicker = true }
                 )
             }
@@ -255,7 +277,9 @@ fun NowBriefHomeScreen(
                     hasCalendarPermission = telemetry.hasCalendarPermission,
                     reminderTitle = nextReminder?.title,
                     onRequestCalendarPermission = {
-                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                        calendarPermissionLauncher.launch(
+                            viewModel.calendarSyncManager.requiredCalendarPermissions()
+                        )
                     },
                     onOpenCalendar = { viewModel.calendarSyncManager.openCalendarApp() }
                 )
@@ -317,6 +341,7 @@ fun NowBriefHomeScreen(
 @Composable
 private fun WeatherHeroCard(
     weather: RealWeatherData,
+    selectedCity: com.example.telemetry.WeatherCity?,
     onChooseCity: () -> Unit
 ) {
     val hasWeather = weather.temperature != null
@@ -358,8 +383,43 @@ private fun WeatherHeroCard(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    val freshness = weather.lastUpdated?.let {
+                        val mins = ((System.currentTimeMillis() - it) / 60_000L).toInt()
+                        when {
+                            mins <= 1 -> "ahora"
+                            mins < 60 -> "hace $mins min"
+                            else -> "hace ${mins / 60} h"
+                        }
+                    }
                     Text(
-                        text = weather.locationName ?: "",
+                        text = listOfNotNull(weather.locationName, freshness).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (selectedCity != null) {
+            // City already chosen (persisted): never ask again — show the
+            // city and the honest state of the reading instead.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Cloud,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(40.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedCity.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Actualizando el clima… sin conexión se mostrará la última lectura",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

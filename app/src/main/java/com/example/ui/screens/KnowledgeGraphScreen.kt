@@ -68,7 +68,6 @@ import com.example.ui.theme.InkPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -121,18 +120,18 @@ fun KnowledgeGraphScreen(
     // Physics animation loop. Runs while unstable; sleeps when settled.
     LaunchedEffect(simulation, canvasSize) {
         val sim = simulation ?: return@LaunchedEffect
-        var settled = false
         while (true) {
-            if (!settled) {
+            if (sim.isActive()) {
                 withFrameNanos { }
-                val energy = sim.step(canvasSize.x, canvasSize.y)
+                sim.step(canvasSize.x, canvasSize.y)
                 positionTick.intValue++
-                if (energy < 0.6f && !isDraggingNode) settled = true
             } else {
-                // Idle: cheap polling; a node drag wakes the simulation.
+                // Idle: the simulation has FROZEN (zero velocities). Only a
+                // node drag can wake it. No per-frame work happens here, so
+                // the CPU stays cold and the battery is happy.
                 delay(120)
                 if (isDraggingNode || sim.wasDisturbed()) {
-                    settled = false
+                    sim.reheat(0.35f)
                 }
             }
         }
@@ -456,9 +455,12 @@ private fun typeLabel(type: GraphNodeType): String = when (type) {
 }
 
 /**
- * Classic force-directed layout: pairwise repulsion, link springs, weak
- * center gravity and velocity damping. `step()` returns the total kinetic
- * energy so the animation loop can stop when the layout settles.
+ * Classic force-directed layout with d3-style "alpha" cooling: every force
+ * is scaled by a decaying temperature factor, so the system loses energy
+ * on a fixed schedule and FREEZES after a bounded number of steps. This is
+ * the fix for the endless-trembling graph that kept the CPU hot: nodes
+ * settle once and stay put until the user drags one (which re-heats the
+ * simulation to a fraction of the initial energy for a soft re-settle).
  */
 class ForceSimulation(
     graphNodes: List<GraphNode>,
@@ -473,6 +475,9 @@ class ForceSimulation(
     private var draggedNode: GraphNode? = null
     private var disturbed = false
 
+    /** Simulation "temperature". Decays every step; the sim freezes at 0. */
+    private var alpha = 1.0f
+
     fun initialize(width: Float, height: Float) {
         // Circle initial positions so the forces can breathe.
         val n = nodes.size
@@ -486,7 +491,20 @@ class ForceSimulation(
             node.vx = 0f
             node.vy = 0f
         }
-        disturbed = true
+        alpha = 1f
+        disturbed = false
+    }
+
+    /** True while the simulation still has temperature and should be stepped. */
+    fun isActive(): Boolean = alpha > ALPHA_MIN && nodes.isNotEmpty()
+
+    /**
+     * Re-heats the simulation after a disturbance (e.g. a node drag). A
+     * partial re-heat settles quickly instead of re-exploding the layout.
+     */
+    fun reheat(energy: Float = 0.35f) {
+        alpha = alpha.coerceAtLeast(energy)
+        disturbed = false
     }
 
     fun markDisturbed() {
@@ -531,14 +549,14 @@ class ForceSimulation(
 
     fun endDrag() {
         draggedNode = null
-        markDisturbed()
+        reheat(0.3f)
     }
 
-    /** One physics step. Returns total kinetic energy. */
-    fun step(width: Float, height: Float): Float {
+    /** One physics step. Cools the system by ALPHA_DECAY. */
+    fun step(width: Float, height: Float) {
         val cx = width / 2f
         val cy = height / 2f
-        var energy = 0f
+        val heat = alpha
 
         // Pairwise repulsion (O(n²), n capped at MAX_NODES)
         val n = nodes.size
@@ -558,7 +576,7 @@ class ForceSimulation(
                 val dist = sqrt(distSq)
                 val minDist = a.size + b.size + 34f
                 if (dist < minDist * 4.5f) {
-                    var force = REPULSION / distSq
+                    var force = REPULSION / distSq * heat
                     if (dist < minDist) force *= 3.2f // hard separation
                     val fx = (dx / dist) * force
                     val fy = (dy / dist) * force
@@ -582,7 +600,7 @@ class ForceSimulation(
             val dy = tgt.y - src.y
             val dist = max(1f, sqrt(dx * dx + dy * dy))
             val target = 150f
-            val force = SPRING * (dist - target)
+            val force = SPRING * (dist - target) * heat
             val fx = (dx / dist) * force
             val fy = (dy / dist) * force
             if (src !== draggedNode) {
@@ -598,8 +616,8 @@ class ForceSimulation(
         // Center gravity + integration + damping
         nodes.forEach { node ->
             if (node !== draggedNode) {
-                node.vx += (cx - node.x) * CENTER_PULL
-                node.vy += (cy - node.y) * CENTER_PULL
+                node.vx += (cx - node.x) * CENTER_PULL * heat
+                node.vy += (cy - node.y) * CENTER_PULL * heat
                 node.vx *= DAMPING
                 node.vy *= DAMPING
                 // Clamp per-step movement for stability
@@ -607,11 +625,23 @@ class ForceSimulation(
                 node.vy = node.vy.coerceIn(-MAX_SPEED, MAX_SPEED)
                 node.x += node.vx
                 node.y += node.vy
-                energy += abs(node.vx) + abs(node.vy)
             }
         }
 
-        return energy
+        // d3-style cooling: guaranteed termination in ~ ALPHA_DECAY steps.
+        alpha *= ALPHA_DECAY
+        if (alpha <= ALPHA_MIN) {
+            alpha = 0f
+            freeze()
+        }
+    }
+
+    /** Zeroes all velocities so the layout is pixel-stable while idle. */
+    private fun freeze() {
+        nodes.forEach { node ->
+            node.vx = 0f
+            node.vy = 0f
+        }
     }
 
     companion object {
@@ -621,5 +651,8 @@ class ForceSimulation(
         private const val CENTER_PULL = 0.0016f
         private const val DAMPING = 0.86f
         private const val MAX_SPEED = 14f
+        /** Per-step temperature decay: 0.985^600 ≈ 0.0001 → hard stop. */
+        private const val ALPHA_DECAY = 0.985f
+        private const val ALPHA_MIN = 0.005f
     }
 }

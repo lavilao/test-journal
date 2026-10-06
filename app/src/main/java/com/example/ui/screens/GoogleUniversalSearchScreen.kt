@@ -141,6 +141,17 @@ fun GoogleUniversalSearchScreen(
         }
     }
 
+    // Storage permission: without READ_MEDIA_* / READ_EXTERNAL_STORAGE the
+    // MediaStore query only returns this app's own files, which made the
+    // "Files" tab look permanently empty.
+    var storageGranted by remember { mutableStateOf(viewModel.deviceSearchManager.hasStoragePermission()) }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        storageGranted = viewModel.deviceSearchManager.hasStoragePermission()
+        if (searchQuery.isNotBlank()) viewModel.searchDevice(searchQuery)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -243,6 +254,45 @@ fun GoogleUniversalSearchScreen(
                     )
                 }
             } else {
+                // Contextual storage permission card
+                if (!storageGranted) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Buscar en los archivos del teléfono",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        "Con este permiso podrás encontrar fotos, música y descargas de todo el dispositivo.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        storagePermissionLauncher.launch(
+                                            viewModel.requiredStoragePermissions()
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                                ) {
+                                    Text("Permitir", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
                 // SECTION: Contactos
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.CONTACTOS) {
                     if (!contactsPermissionGranted) {
@@ -315,7 +365,16 @@ fun GoogleUniversalSearchScreen(
 
                 // SECTION: Archivos del Teléfono (MediaStore)
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.ARCHIVOS) {
-                    if (fileResults.isNotEmpty()) {
+                    if (fileResults.isEmpty() && storageGranted) {
+                        item {
+                            Text(
+                                "No se encontraron archivos con ese nombre en el almacenamiento.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                    } else if (fileResults.isNotEmpty()) {
                         item {
                             Text("Archivos en el dispositivo", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
                         }

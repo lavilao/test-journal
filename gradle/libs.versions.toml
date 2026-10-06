@@ -46,6 +46,8 @@ mlkitEntityExtraction = "16.0.0-beta5"
 mlkitImageLabeling = "17.0.9"
 mlkitFaceDetection = "16.1.7"
 mlkitTextRecognition = "16.0.1"
+mlkitBarcodeScanning = "17.3.0"
+mlkitDocScanner = "16.0.0-beta1"
 
 
 [libraries]
@@ -55,6 +57,8 @@ mlkit-entity-extraction = { group = "com.google.mlkit", name = "entity-extractio
 mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version.ref = "mlkitImageLabeling" }
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
+mlkit-doc-scanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version.ref = "mlkitDocScanner" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
