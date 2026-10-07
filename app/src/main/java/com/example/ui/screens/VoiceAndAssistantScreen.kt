@@ -1,7 +1,7 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.app.RoleManager
+import android.app.role.RoleManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -83,8 +83,8 @@ import com.example.speech.hotword.HotwordService
 import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
 import com.example.speech.voiceprint.VoiceSampleRecorder
+import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
-import com.example.ui.theme.GoogleGreen
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
