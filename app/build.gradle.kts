@@ -20,6 +20,14 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Cactus Needle 3 native engine: builds for every ABI; x86_64 and other
+    // ABIs without the prebuilt engine fall back to a stub automatically.
+    externalNativeBuild {
+      cmake {
+        arguments += listOf("-DANDROID_STL=c++_static")
+      }
+    }
   }
 
   signingConfigs {
@@ -54,6 +62,12 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  externalNativeBuild {
+    // NOTE: AGP 9 removed cmake.version — the SDK's CMake is auto-selected.
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+    }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {

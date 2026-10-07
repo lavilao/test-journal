@@ -43,6 +43,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +77,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.ai.needle.NeedleModelManager
+import com.example.ai.needle.NeedleRuntime
 import com.example.speech.OfflineSpeechSupport
 import com.example.speech.RecognitionEngineInfo
 import com.example.speech.SpeechEngineManager
@@ -152,6 +155,28 @@ fun VoiceAndAssistantScreen(
 
     // ---- assistant role state ----
     var roleHeld by remember { mutableStateOf(isAssistantRoleHeld(context)) }
+
+    // ---- local AI (Cactus Needle 3) state ----
+    var needleTick by remember { mutableIntStateOf(0) }
+    val needleDownload by NeedleModelManager.downloadState.collectAsState()
+    val needleSupported = remember(needleTick) { NeedleRuntime.isSupported() }
+    val needleSupportError = remember(needleTick) { NeedleRuntime.supportError() }
+    val needleRuntimeError = remember(needleTick) { NeedleRuntime.lastErrorMessage }
+    val needleDownloaded = remember(needleTick) { NeedleModelManager.isNeedleDownloaded(context) }
+    val whistleDownloaded = remember(needleTick) { NeedleModelManager.isWhistleDownloaded(context) }
+    val needleLoaded = remember(needleTick) { NeedleRuntime.isTextModelLoaded() }
+    val whistleLoaded = remember(needleTick) { NeedleRuntime.isSpeechModelLoaded() }
+    var assistantAiChecked by remember(needleTick) {
+        mutableStateOf(NeedleModelManager.isAssistantEnabled(context))
+    }
+    var whistleDictChecked by remember(needleTick) {
+        mutableStateOf(NeedleModelManager.isWhistleDictationEnabled(context))
+    }
+
+    LaunchedEffect(Unit) {
+        NeedleModelManager.ensureLoaded(context)
+        needleTick++
+    }
 
     fun refreshAll() { refreshTick++ }
 
@@ -508,6 +533,198 @@ fun VoiceAndAssistantScreen(
                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Reconsultar")
+            }
+        }
+
+        // ============ 2.5 Local AI (Cactus Needle 3, optional download) ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.AutoAwesome, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "IA local opcional — Cactus Needle 3",
+            badge = {
+                when {
+                    !needleSupported -> BadgePill("No soportado", Color(0xFFB3261E))
+                    needleDownloaded && needleLoaded -> BadgePill("Activa", GoogleGreen)
+                    needleDownloaded -> BadgePill("Descargado", GoogleGreen)
+                    else -> BadgePill("No instalado", MaterialTheme.colorScheme.outline)
+                }
+            }
+        ) {
+            Text(
+                text = "Needle 3 es un modelo de IA de 35 MB hecho para móviles: entiende lo " +
+                        "que pides, elige la herramienta correcta del asistente y rellena los " +
+                        "argumentos — todo dentro del teléfono, sin nube. Es opcional: " +
+                        "descárgalo con el botón y pruébalo; el asistente funciona igual sin él " +
+                        "(con el analizador de reglas). Coste real: ~80 MB de RAM mientras " +
+                        "responde y de 1 a 8 s por respuesta según el teléfono. Nada se " +
+                        "descarga solo ni se envía nada afuera.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!needleSupported) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Este procesador no tiene motor nativo disponible (el motor de " +
+                            "Cactus se compila para ARM de 32 y 64 bits). " +
+                            (needleSupportError ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            needleDownload?.let { dl ->
+                Spacer(modifier = Modifier.height(10.dp))
+                val label = if (dl.model == NeedleModelManager.NEEDLE_FILE) "Needle 3" else "Whistle"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Descargando $label…",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${(dl.progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ForestPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { dl.progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "${NeedleModelManager.formatBytes(dl.receivedBytes)} / " +
+                            NeedleModelManager.formatBytes(dl.totalBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                dl.error?.let { err ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Error: $err",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                TextButton(onClick = { NeedleModelManager.cancelDownload() }) {
+                    Text("Cancelar descarga")
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val ok = NeedleModelManager.download(context, NeedleModelManager.NEEDLE_FILE)
+                            needleTick++
+                            if (!ok) Toast.makeText(context, "No se pudo descargar el modelo", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = needleSupported && !needleDownloaded && needleDownload == null
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Modelo Needle 3 · 35 MB")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val ok = NeedleModelManager.download(context, NeedleModelManager.WHISTLE_FILE)
+                            needleTick++
+                            if (!ok) Toast.makeText(context, "No se pudo descargar Whistle", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = needleSupported && !whistleDownloaded && needleDownload == null
+                ) {
+                    Icon(Icons.Default.Mic, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Whistle (voz a texto) · 17 MB")
+                }
+            }
+            if (whistleDownloaded) {
+                Text(
+                    text = "Whistle transcribe español en local; con él, el micrófono del " +
+                            "asistente va directo del audio a la acción sin pasar por el " +
+                            "reconocedor del sistema.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Usar la IA local en el asistente", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (needleLoaded) "Modelo cargado y listo" else "Se activa al descargar el modelo",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = assistantAiChecked,
+                    onCheckedChange = {
+                        assistantAiChecked = it
+                        NeedleModelManager.setAssistantEnabled(context, it)
+                    },
+                    enabled = needleDownloaded
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Dictado del asistente con Whistle", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (whistleLoaded) "Modelo de voz cargado" else "Requiere descargar Whistle",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = whistleDictChecked,
+                    onCheckedChange = {
+                        whistleDictChecked = it
+                        NeedleModelManager.setWhistleDictationEnabled(context, it)
+                    },
+                    enabled = whistleDownloaded
+                )
+            }
+            needleRuntimeError?.let { err ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Aviso del motor: $err",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (needleDownloaded || whistleDownloaded) {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            NeedleModelManager.delete(context, null)
+                            needleTick++
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Borrar los modelos descargados")
+                }
             }
         }
 

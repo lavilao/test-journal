@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,11 +59,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.assistant.AssistantIntent
 import com.example.assistant.AssistantParser
+import com.example.ai.needle.NeedleModelManager
+import com.example.ai.needle.NeedleRuntime
+import com.example.ai.needle.NeedleTools
+import com.example.ai.needle.WhistleDictationController
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** One exchange in the assistant conversation log. */
 data class AssistantMessage(
@@ -89,22 +99,77 @@ fun AssistantScreen(
     val deviceFiles by viewModel.deviceFilesResults.collectAsState()
     val deviceContacts by viewModel.deviceContactsResults.collectAsState()
     val hasContactsPermission = remember { viewModel.deviceSearchManager.hasContactsPermission() }
+    val context = LocalContext.current
 
     var messages by remember { mutableStateOf(listOf(AssistantMessage(false, WELCOME_TEXT))) }
     var typedInput by remember { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
 
+    // ---- optional local AI (Cactus Needle 3 + Whistle) ----
+    var needleTick by remember { mutableIntStateOf(0) }
+    val whistleController = remember { WhistleDictationController() }
+    val whistleRecording by whistleController.isRecording.collectAsState()
+    val needleReady = remember(needleTick) { NeedleRuntime.isReady() }
+    val speechReady = remember(needleTick) { NeedleRuntime.isSpeechModelLoaded() }
+    val needleSupported = remember(needleTick) { NeedleRuntime.isSupported() }
+    val needleEnabled = remember(needleTick) { NeedleModelManager.isAssistantEnabled(context) }
+    val whistleDictation = remember(needleTick) {
+        NeedleModelManager.isWhistleDictationEnabled(context) &&
+            NeedleModelManager.isWhistleDownloaded(context)
+    }
+    val needleUsable = needleSupported && needleEnabled && needleReady
+    val whistleUsable = needleUsable && speechReady && whistleDictation
+
+    // Load the downloaded models (if any) so the router is ready.
+    LaunchedEffect(Unit) {
+        NeedleModelManager.ensureLoaded(context)
+        needleTick++
+    }
+
     fun post(message: AssistantMessage) {
         messages = messages + message
     }
 
-    /** Executes a parsed intent; appends the assistant's reply. */
-    fun execute(utterance: String) {
-        val intent = AssistantParser.parse(utterance)
-        post(AssistantMessage(false, describe(intent)))
-        thinking = true
-        scope.launch {
-            when (intent) {
+    /** Mic permission for the local Whistle dictation path. */
+    val whistlePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            if (!whistleController.start()) {
+                post(AssistantMessage(false, "No pude abrir el micrófono."))
+            }
+        } else {
+            post(AssistantMessage(false, "Sin permiso de micrófono no puedo usar el dictado local."))
+        }
+    }
+
+    fun startWhistleCapture() {
+        if (WhistleDictationController.hasMicrophonePermission(context)) {
+            if (!whistleController.start()) {
+                post(AssistantMessage(false, "No pude abrir el micrófono."))
+            }
+        } else {
+            whistlePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    /**
+     * Resolves an utterance to intents. The optional local AI (Cactus Needle)
+     * routes first when it is downloaded, enabled and initialized; the
+     * deterministic rule parser is always the fallback, so the assistant
+     * keeps working identically without the model.
+     */
+    suspend fun resolveIntents(utterance: String): Pair<List<AssistantIntent>, Boolean> {
+        if (needleUsable) {
+            val routed = withTimeoutOrNull(25_000) { NeedleTools.route(utterance) }
+            if (!routed.isNullOrEmpty()) return routed to true
+        }
+        return listOf(AssistantParser.parse(utterance)) to false
+    }
+
+    /** Executes one parsed intent; appends the assistant's reply. */
+    suspend fun runIntent(intent: AssistantIntent) {
+        when (intent) {
                 is AssistantIntent.OpenApp -> {
                     val app = viewModel.assistantManager.findApp(intent.appName)
                     if (app != null) {
@@ -223,7 +288,21 @@ fun AssistantScreen(
                 AssistantIntent.Unknown -> {
                     post(AssistantMessage(false, HELP_TEXT))
                 }
-            }
+        }
+    }
+
+    /** Routes an utterance and executes whatever it resolves to. */
+    fun execute(utterance: String, fromUser: Boolean = true) {
+        val clean = utterance.trim()
+        if (clean.isBlank()) return
+        if (fromUser) post(AssistantMessage(true, clean))
+        thinking = true
+        scope.launch {
+            val (intents, viaNeedle) = resolveIntents(clean)
+            val suffix = if (viaNeedle) " · IA local" else ""
+            post(AssistantMessage(false, describe(intents.first()) + suffix))
+            for (intent in intents) runIntent(intent)
+            needleTick++
             thinking = false
         }
     }
@@ -233,17 +312,54 @@ fun AssistantScreen(
         if (clean.isBlank()) return
         post(AssistantMessage(true, clean))
         typedInput = ""
-        execute(clean)
+        execute(clean, fromUser = false)
     }
 
-    // Voice input: one-shot system dictation
+    // Voice input: local Whistle transcription when downloaded, otherwise
+    // one-shot system dictation.
     fun startVoiceInput() {
-        viewModel.startDictation(
-            onResult = { recognized -> submit(recognized) },
-            onError = {
-                post(AssistantMessage(false, "No pude escucharte. ¿Hay un servicio de voz en el dispositivo?"))
+        if (whistleUsable) {
+            startWhistleCapture()
+        } else {
+            viewModel.startDictation(
+                onResult = { recognized -> submit(recognized) },
+                onError = {
+                    post(AssistantMessage(false, "No pude escucharte. ¿Hay un servicio de voz en el dispositivo?"))
+                }
+            )
+        }
+    }
+
+    /** Stops the Whistle capture and runs audio straight to tool calls. */
+    fun stopWhistleAndProcess() {
+        val pcm = whistleController.stop()
+        if (pcm.isEmpty()) {
+            post(AssistantMessage(false, "No capté audio."))
+            return
+        }
+        thinking = true
+        scope.launch {
+            val raw = withTimeoutOrNull(45_000) { NeedleRuntime.completeAudio(pcm, "es") }
+            val parsed = raw?.let { NeedleTools.parseResponse(it) }
+            val transcript = parsed?.audioText.orEmpty()
+            if (transcript.isNotBlank()) {
+                post(AssistantMessage(true, transcript))
             }
-        )
+            val calls = parsed
+                ?.takeIf { it.calls.isNotEmpty() && it.confidence >= NeedleTools.MIN_CONFIDENCE }
+                ?.let { p -> p.calls.mapNotNull { NeedleTools.callToIntent(it) } }
+                    .orEmpty()
+            if (calls.isNotEmpty()) {
+                post(AssistantMessage(false, describe(calls.first()) + " · IA local"))
+                for (intent in calls) runIntent(intent)
+            } else if (transcript.isNotBlank()) {
+                // Nothing the model trusted: fall back to the normal text path.
+                execute(transcript, fromUser = false)
+            } else {
+                post(AssistantMessage(false, "No te entendí (silencio o ruido)."))
+            }
+            thinking = false
+        }
     }
 
     // Keep the log scrolled to the latest message
@@ -273,7 +389,11 @@ fun AssistantScreen(
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
                 Text(
-                    text = "100% en tu dispositivo · sin nube",
+                    text = if (needleUsable) {
+                        "100% en tu dispositivo · IA local activa"
+                    } else {
+                        "100% en tu dispositivo · sin nube"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -417,7 +537,24 @@ fun AssistantScreen(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (isDictating) {
+            if (whistleRecording) {
+                Surface(
+                    shape = CircleShape,
+                    color = ForestPrimary,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable { stopWhistleAndProcess() }
+                        .testTag("assistant_whistle_stop")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = "Procesar con IA local",
+                            tint = androidx.compose.ui.graphics.Color.White
+                        )
+                    }
+                }
+            } else if (isDictating) {
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.error,
@@ -468,8 +605,19 @@ fun AssistantScreen(
             }
         }
 
-        // Live partial transcript caption
-        if (isDictating && partialTranscript.isNotBlank()) {
+        // Live partial transcript caption (system dictation), or the local
+        // Whistle capture indicator.
+        if (whistleRecording) {
+            Text(
+                text = "Escuchando (IA local)… pulsa detener para procesar",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+        } else if (isDictating && partialTranscript.isNotBlank()) {
             Text(
                 text = "Escuchando: $partialTranscript",
                 style = MaterialTheme.typography.labelSmall,
