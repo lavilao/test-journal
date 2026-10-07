@@ -19,6 +19,15 @@ if (EXISTS "${NEEDLE_PREBUILT}")
     # the __ndk1 libc++ namespace), so link the static STL into this .so.
     # No STL types cross the library boundary: the needle API is plain C.
     target_link_libraries(needlejni "${NEEDLE_PREBUILT}" c++_static log)
+    # armeabi-v7a only: the prebuilt engine references
+    # std::__ndk1::__hash_memory out of line (arm64 inlined it), which the
+    # NDK's own libc++_static.a (r28+) no longer defines. Link the weak
+    # shim compiled from the verbatim libc++ murmur2 algorithm
+    # (hash_memory_shim.cpp). Weak, so a future libc++ definition would win.
+    set(NEEDLE_HASH_SHIM "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/hash_memory_shim.o")
+    if (EXISTS "${NEEDLE_HASH_SHIM}")
+        target_link_libraries(needlejni "${NEEDLE_HASH_SHIM}")
+    endif()
 else()
     target_compile_definitions(needlejni PRIVATE NEEDLE_AVAILABLE=0)
     target_link_libraries(needlejni c++_static log)
