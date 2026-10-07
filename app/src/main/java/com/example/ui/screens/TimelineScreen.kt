@@ -142,6 +142,13 @@ fun TimelineScreen(
         viewModel.refreshTelemetry()
     }
 
+    // Steps counter: parity with the Samsung home — the At a Glance bar can
+    // now ask for ACTIVITY_RECOGNITION contextually instead of showing a
+    // silent "0 pasos".
+    val activityPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { viewModel.refreshTelemetry() }
+
     // File search needs READ_MEDIA_* (13+) / READ_EXTERNAL_STORAGE (12-):
     // without it MediaStore only returns files this app created, which made
     // the device-wide search look "broken".
@@ -260,6 +267,9 @@ fun TimelineScreen(
                                     viewModel.calendarSyncManager.requiredCalendarPermissions()
                                 )
                             }
+                        },
+                        onActivateSteps = {
+                            activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
                         },
                         onSettingsClick = { viewModel.selectTab(MainNavTab.SETTINGS) }
                     )

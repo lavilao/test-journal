@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import com.example.speech.SpeechEngineManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,15 +33,21 @@ enum class PlaybackState {
 /**
  * Real voice journal manager.
  *
- * Dictation uses the Android system SpeechRecognizer (the same engine behind
- * Gboard voice typing). While a voice note is being recorded, a recognition
- * session runs in parallel and accumulates the recognized text in
+ * Dictation goes through the [SpeechEngineManager], which binds the
+ * recognizer to the ENGINE THE USER PICKED (Google Speech Services, Samsung
+ * Voice Input, or the on-device one) instead of blindly taking the system
+ * default — the default on Samsung phones is Samsung Voice Input, the same
+ * engine behind Gboard voice typing, which is why dictation used to "sound
+ * like Gboard". While a voice note is being recorded, a recognition session
+ * runs in parallel and accumulates the recognized text in
  * [liveTranscript], so audio files get a REAL transcript without any fake
- * bundled model. When the system recognizer is unavailable (no speech
- * service), [isDictationAvailable] reports false and the UI can tell the
- * user the honest truth instead of pretending.
+ * bundled model. When no speech service exists, [isDictationAvailable]
+ * reports false and the UI tells the honest truth.
  */
-class VoiceJournalManager(private val context: Context) {
+class VoiceJournalManager(
+    private val context: Context,
+    val engineManager: SpeechEngineManager = SpeechEngineManager(context)
+) {
 
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
@@ -79,29 +86,16 @@ class VoiceJournalManager(private val context: Context) {
             false
         }
 
-    /**
-     * True only when the system exposes the dedicated on-device recognizer
-     * (the NEW offline engine, API 31+). The user may instead have the
-     * LEGACY offline models (downloaded via the Google app's "offline speech
-     * recognition" settings — often by uninstalling Google app updates);
-     * those are consumed by the regular recognizer when
-     * EXTRA_PREFER_OFFLINE is set, which is exactly what we do as fallback.
-     */
+    /** True only when the system exposes the dedicated on-device recognizer
+     * (the NEW offline engine, API 31+). */
     val hasOnDeviceRecognizer: Boolean
-        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                try {
-                    SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-                } catch (_: Exception) {
-                    false
-                }
+        get() = engineManager.isOnDeviceAvailable()
 
     /** Human-readable engine status for the settings screen. */
     fun dictationEngineDescription(): String {
-        val onDevice = hasOnDeviceRecognizer
-        val service = isDictationAvailable
+        val available = isDictationAvailable
         return when {
-            onDevice -> "Motor en el dispositivo (nuevo) + preferencia sin conexión activa"
-            service -> "Reconocedor del sistema con preferencia sin conexión (usa los modelos offline de Google/Gboard si están instalados)"
+            available -> engineManager.engineDescription()
             else -> "Ningún servicio de reconocimiento de voz en este dispositivo"
         }
     }
@@ -348,24 +342,11 @@ class VoiceJournalManager(private val context: Context) {
         }
 
         try {
-            // Pick the engine that matches the models actually installed:
-            //  1. The NEW on-device recognizer, when the system exposes it.
-            //  2. Otherwise the regular recognizer with EXTRA_PREFER_OFFLINE,
-            //     which is what picks up the LEGACY offline language models
-            //     the user downloaded (downgraded Google app / Gboard).
-            // Using createOnDeviceSpeechRecognizer blindly broke dictation
-            // on devices that only have the legacy models.
-            val useOnDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                    try {
-                        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-                    } catch (_: Exception) {
-                        false
-                    }
-            val recognizer = if (useOnDevice) {
-                SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-            } else {
-                SpeechRecognizer.createSpeechRecognizer(context)
-            }
+            // The engine (on-device / Google / Samsung / default) is chosen by
+            // SpeechEngineManager from the user's selection in Ajustes →
+            // Voz y asistente; EXTRA_PREFER_OFFLINE asks it to use its
+            // offline models whenever they exist.
+            val recognizer = engineManager.createRecognizer()
 
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
@@ -466,7 +447,7 @@ class VoiceJournalManager(private val context: Context) {
         }
 
         try {
-            dictationRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+            dictationRecognizer = engineManager.createRecognizer().apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
                         _isDictating.value = true

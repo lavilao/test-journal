@@ -58,6 +58,7 @@ fun GoogleSearchHubHeader(
     onChooseCityClick: () -> Unit = {},
     onReminderClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
+    onActivateSteps: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -104,6 +105,7 @@ fun GoogleSearchHubHeader(
             onChooseCityClick = onChooseCityClick,
             onReminderClick = onReminderClick,
             onCalendarClick = onCalendarClick,
+            onActivateSteps = onActivateSteps,
             modifier = Modifier.padding(bottom = 6.dp)
         )
 

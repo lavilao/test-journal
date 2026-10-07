@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -138,6 +139,57 @@ fun GoogleActivityScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // SECTION: Screen time today (parity with the Samsung vitals ring)
+            item {
+                val telemetry by viewModel.telemetry.collectAsState()
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Smartphone,
+                            contentDescription = null,
+                            tint = GoogleBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Tiempo de pantalla hoy",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val minutes = telemetry.screenTimeMinutes
+                            Text(
+                                text = if (minutes == null) {
+                                    "Activa el acceso de uso para verlo"
+                                } else {
+                                    val h = minutes / 60
+                                    val m = minutes % 60
+                                    if (h > 0) "${h} h ${m} min" else "${m} min"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (!hasUsageAccess) {
+                            TextButton(onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() }) {
+                                Text("Activar", fontSize = 11.sp, color = GoogleBlue)
+                            }
+                        }
+                    }
+                }
+            }
+
             // SECTION: Aplicaciones Usadas Recientemente (UsageStatsManager)
             item {
                 Row(

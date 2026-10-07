@@ -24,11 +24,13 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Settings
@@ -64,6 +66,8 @@ import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.GlassRing
 import com.example.ui.components.LiquidGlassCard
+import com.example.ui.components.RssOfflineReaderModal
+import com.example.ui.components.VoiceTranscriptionModal
 import com.example.ui.theme.NowBriefNewsBlue
 import com.example.ui.theme.NowBriefPrimaryDark
 import com.example.ui.theme.NowBriefPrimaryLight
@@ -97,6 +101,12 @@ fun NowBriefHomeScreen(
     val selectedCity by viewModel.selectedWeatherCity.collectAsState()
 
     var showCityPicker by remember { mutableStateOf(false) }
+
+    // Parity with the Google home: full news reader, quick dictation and
+    // reminders destination are reachable from the Samsung home too.
+    var readerArticle by remember { mutableStateOf<com.example.rss.RssArticle?>(null) }
+    var showQuickDictateModal by remember { mutableStateOf(false) }
+    var fabExpanded by remember { mutableStateOf(false) }
 
     // Runtime permission launchers (contextual, asked inside the relevant card)
     val activityPermissionLauncher = rememberLauncherForActivityResult(
@@ -251,7 +261,8 @@ fun NowBriefHomeScreen(
                 WeatherHeroCard(
                     weather = weather,
                     selectedCity = selectedCity,
-                    onChooseCity = { showCityPicker = true }
+                    onChooseCity = { showCityPicker = true },
+                    onOpenWeatherApp = { viewModel.openSystemWeatherApp() }
                 )
             }
 
@@ -281,16 +292,20 @@ fun NowBriefHomeScreen(
                             viewModel.calendarSyncManager.requiredCalendarPermissions()
                         )
                     },
-                    onOpenCalendar = { viewModel.calendarSyncManager.openCalendarApp() }
+                    onOpenCalendar = { viewModel.calendarSyncManager.openCalendarApp() },
+                    onOpenReminders = {
+                        viewModel.selectTab(com.example.viewmodel.MainNavTab.NOTIFICACIONES)
+                    }
                 )
             }
 
-            // News digest
+            // News digest (each headline opens the full offline reader)
             if (rssArticles.isNotEmpty()) {
                 item {
                     NewsGlassCard(
                         articles = rssArticles.take(3),
-                        accent = NowBriefNewsBlue
+                        accent = NowBriefNewsBlue,
+                        onOpenArticle = { article -> readerArticle = article }
                     )
                 }
             }
@@ -307,25 +322,45 @@ fun NowBriefHomeScreen(
             item { Spacer(modifier = Modifier.height(84.dp)) }
         }
 
-        // Glass FAB for quick capture
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary,
-            shadowElevation = 10.dp,
+        // Glass FAB for quick capture: expands into note types for parity
+        // with the Google home (text, voice dictation, scan).
+        Column(
+            horizontalAlignment = Alignment.End,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 108.dp)
         ) {
-            IconButton(
-                onClick = onNavigateToNewEntry,
+            if (fabExpanded) {
+                GlassQuickAction(label = "Nueva memoria", icon = Icons.Default.Edit) {
+                    fabExpanded = false
+                    onNavigateToNewEntry()
+                }
+                GlassQuickAction(label = "Nota de voz", icon = Icons.Default.Mic) {
+                    fabExpanded = false
+                    showQuickDictateModal = true
+                }
+                GlassQuickAction(label = "Escanear con Lens", icon = Icons.Default.DocumentScanner) {
+                    fabExpanded = false
+                    onOpenLens()
+                }
+            }
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                shadowElevation = 10.dp,
                 modifier = Modifier.size(56.dp)
             ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Nueva memoria",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(26.dp)
-                )
+                IconButton(
+                    onClick = { fabExpanded = !fabExpanded },
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        if (fabExpanded) Icons.Default.Clear else Icons.Default.Add,
+                        contentDescription = "Captura rápida",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
             }
         }
     }
@@ -336,13 +371,88 @@ fun NowBriefHomeScreen(
             onDismiss = { showCityPicker = false }
         )
     }
+
+    // Full offline article reader (same as the Google home)
+    readerArticle?.let { article ->
+        RssOfflineReaderModal(
+            article = article,
+            onDismiss = { readerArticle = null },
+            onSaveToNotes = { savedArticle ->
+                viewModel.saveEntry(
+                    id = 0L,
+                    title = savedArticle.title,
+                    body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
+                    onComplete = { newId -> onNavigateToDetail(newId) }
+                )
+            },
+            onFetchFullText = { art ->
+                viewModel.rssFeedManager.fetchFullArticleText(art)
+            }
+        )
+    }
+
+    // Quick voice dictation → note (same as the Google home)
+    if (showQuickDictateModal) {
+        VoiceTranscriptionModal(
+            title = "Dictado de Voz Rápido",
+            viewModel = viewModel,
+            onDismiss = { showQuickDictateModal = false },
+            onSaveTranscript = { text ->
+                if (text.isNotBlank()) {
+                    viewModel.saveEntry(
+                        id = 0L,
+                        title = "Nota de Voz",
+                        body = text,
+                        onComplete = { newId -> onNavigateToDetail(newId) }
+                    )
+                }
+                showQuickDictateModal = false
+            }
+        )
+    }
+}
+
+/** Small glass pill used by the expanded FAB quick actions. */
+@Composable
+private fun GlassQuickAction(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        shadowElevation = 6.dp,
+        modifier = Modifier.padding(bottom = 10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
 }
 
 @Composable
 private fun WeatherHeroCard(
     weather: RealWeatherData,
     selectedCity: com.example.telemetry.WeatherCity?,
-    onChooseCity: () -> Unit
+    onChooseCity: () -> Unit,
+    onOpenWeatherApp: () -> Unit = {}
 ) {
     val hasWeather = weather.temperature != null
     val icon: ImageVector = when (weather.weatherCode) {
@@ -447,6 +557,18 @@ private fun WeatherHeroCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Elegir ciudad")
                 }
+            }
+        }
+
+        if (hasWeather) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(
+                onClick = onOpenWeatherApp,
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Icon(Icons.Default.WbCloudy, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Abrir la app del clima", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -573,7 +695,8 @@ private fun TodayGlassCard(
     hasCalendarPermission: Boolean,
     reminderTitle: String?,
     onRequestCalendarPermission: () -> Unit,
-    onOpenCalendar: () -> Unit
+    onOpenCalendar: () -> Unit,
+    onOpenReminders: () -> Unit = {}
 ) {
     val eventTimeFormat = SimpleDateFormat("H:mm", Locale.getDefault())
 
@@ -659,7 +782,13 @@ private fun TodayGlassCard(
 
         reminderTitle?.let {
             Spacer(modifier = Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenReminders)
+                    .padding(vertical = 2.dp)
+            ) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -687,7 +816,8 @@ private fun TodayGlassCard(
 @Composable
 private fun NewsGlassCard(
     articles: List<com.example.rss.RssArticle>,
-    accent: Color
+    accent: Color,
+    onOpenArticle: (com.example.rss.RssArticle) -> Unit = {}
 ) {
     LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -708,7 +838,12 @@ private fun NewsGlassCard(
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                 )
             }
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = { onOpenArticle(article) })
+                    .padding(vertical = 2.dp)
+            ) {
                 Text(
                     text = article.title,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -717,7 +852,7 @@ private fun NewsGlassCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = article.sourceTitle,
+                    text = article.sourceTitle + " · toca para leer",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

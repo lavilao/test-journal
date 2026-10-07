@@ -59,6 +59,7 @@ fun AtAGlanceBar(
     onChooseCityClick: () -> Unit = {},
     onReminderClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
+    onActivateSteps: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val dateFormat = remember { SimpleDateFormat("EEEE, d 'de' MMMM", Locale.getDefault()) }
@@ -271,18 +272,34 @@ fun AtAGlanceBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (telemetry != null) {
-                            Icon(
-                                imageVector = Icons.Default.DirectionsWalk,
-                                contentDescription = null,
-                                tint = GoogleGreen,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(7.dp))
-                            Text(
-                                text = "${telemetry.todaySteps} pasos hoy",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (telemetry.hasActivityRecognitionPermission) {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsWalk,
+                                    contentDescription = null,
+                                    tint = GoogleGreen,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(7.dp))
+                                Text(
+                                    text = "${telemetry.todaySteps} pasos hoy",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsWalk,
+                                    contentDescription = null,
+                                    tint = GoogleGreen.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(7.dp))
+                                Text(
+                                    text = "Toca para activar el contador de pasos",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = GoogleGreen,
+                                    modifier = Modifier.clickable(onClick = onActivateSteps)
+                                )
+                            }
                         } else {
                             Text(
                                 text = if (hasWeather) {

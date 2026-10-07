@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -36,6 +37,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppInterfaceMode
+import com.example.speech.hotword.HotwordService
 import com.example.ui.components.GlassBottomBar
 import com.example.ui.components.GlassTab
 import com.example.ui.components.GoogleBlue
@@ -63,10 +66,12 @@ import com.example.ui.screens.NowBriefHomeScreen
 import com.example.ui.screens.SettingsAndModelsScreen
 import com.example.ui.screens.TimelineScreen
 import com.example.ui.screens.VaultExplorerScreen
+import com.example.ui.screens.VoiceAndAssistantScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NowBriefTheme
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
+import kotlinx.coroutines.flow.MutableStateFlow
 
 sealed interface AppScreen {
     data class Main(val tab: MainNavTab) : AppScreen
@@ -74,16 +79,57 @@ sealed interface AppScreen {
     data class Detail(val entryId: Long) : AppScreen
     data object Assistant : AppScreen
     data object Lens : AppScreen
+    data object VoiceSettings : AppScreen
 }
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        const val EXTRA_VOICE_COMMAND = "voice_command"
+
+        /** Voice commands that must open the assistant screen (from the
+         *  hotword notification or the system-assistant session). */
+        val voiceCommandRequests = MutableStateFlow<String?>(null)
+
+        /** Whether the app UI is visible — the hotword service uses it to
+         *  decide between direct execution and notification hand-off. */
+        var isResumed = false
+    }
+
+    private fun handleVoiceCommandIntent(intent: Intent?) {
+        val command = intent?.getStringExtra(EXTRA_VOICE_COMMAND)
+            ?: intent?.getStringExtra(HotwordService.EXTRA_VOICE_COMMAND)
+        if (!command.isNullOrBlank()) {
+            voiceCommandRequests.value = command
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleVoiceCommandIntent(intent)
         setContent {
             val viewModel: JournalViewModel = viewModel()
             MnemosyneApp(viewModel = viewModel)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleVoiceCommandIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isResumed = true
+        HotwordService.appInForeground = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isResumed = false
+        HotwordService.appInForeground = false
     }
 }
 
@@ -93,6 +139,26 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
     val currentTab by viewModel.currentTab.collectAsState()
     val interfaceMode by viewModel.interfaceMode.collectAsState()
     val darkTheme = isSystemInDarkTheme()
+
+    // Voice commands arriving from the hotword notification or the
+    // system-assistant gesture open the local assistant with the utterance.
+    val voiceCommandRequest by MainActivity.voiceCommandRequests.collectAsState()
+    LaunchedEffect(voiceCommandRequest) {
+        val command = voiceCommandRequest
+        if (!command.isNullOrBlank()) {
+            screenState = AppScreen.Assistant
+            MainActivity.voiceCommandRequests.value = null
+        }
+    }
+
+    // A hotword exchange that happened while the UI was visible surfaces
+    // directly in the assistant chat (command + reply, already executed).
+    val hotwordCommand by HotwordService.lastCommand.collectAsState()
+    LaunchedEffect(hotwordCommand) {
+        if (!hotwordCommand.isNullOrBlank() && MainActivity.isResumed) {
+            screenState = AppScreen.Assistant
+        }
+    }
 
     MnemosyneThemeFor(interfaceMode, darkTheme) {
         // Handle system back button for sub-screens
@@ -113,6 +179,11 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                 }
             }
             is AppScreen.Lens -> {
+                BackHandler {
+                    screenState = AppScreen.Main(currentTab)
+                }
+            }
+            is AppScreen.VoiceSettings -> {
                 BackHandler {
                     screenState = AppScreen.Main(currentTab)
                 }
@@ -178,7 +249,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 }
                                 MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> GoogleUniversalSearchScreen(
                                     viewModel = viewModel,
-                                    onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
+                                    onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                    onOpenVoiceModal = { screenState = AppScreen.Assistant }
                                 )
                                 MainNavTab.NOTIFICACIONES -> GoogleNotificationsScreen(
                                     viewModel = viewModel
@@ -201,7 +273,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 )
                                 MainNavTab.SETTINGS -> SettingsAndModelsScreen(
                                     viewModel = viewModel,
-                                    onBack = { viewModel.selectTab(MainNavTab.INICIO) }
+                                    onBack = { viewModel.selectTab(MainNavTab.INICIO) },
+                                    onOpenVoiceSettings = { screenState = AppScreen.VoiceSettings }
                                 )
                             }
                         }
@@ -232,6 +305,12 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 viewModel = viewModel,
                                 onBack = { screenState = AppScreen.Main(currentTab) },
                                 onOpenLens = { screenState = AppScreen.Lens }
+                            )
+                        }
+                        is AppScreen.VoiceSettings -> {
+                            VoiceAndAssistantScreen(
+                                viewModel = viewModel,
+                                onBack = { screenState = AppScreen.Main(currentTab) }
                             )
                         }
                         is AppScreen.Lens -> {
@@ -284,8 +363,8 @@ private fun MnemosyneThemeFor(
 
 /**
  * Samsung mode navigation: the Now brief floating glass capsule, centered.
- * Settings intentionally NOT here — it already lives in the home header,
- * so the dock stays minimal (Inicio / Buscar / Actividad) with no duplicate.
+ * Four destinations for full feature parity with the Google mode dock:
+ * Inicio / Buscar / Tareas (notificaciones y recordatorios) / Actividad.
  */
 @Composable
 private fun NowBriefGlassNavBar(
@@ -296,18 +375,21 @@ private fun NowBriefGlassNavBar(
     val tabs = listOf(
         GlassTab(label = "Inicio", icon = Icons.Default.Home),
         GlassTab(label = "Buscar", icon = Icons.Default.Search),
+        GlassTab(label = "Tareas", icon = Icons.Default.Notifications),
         GlassTab(label = "Actividad", icon = Icons.Default.History)
     )
     val selected = when (currentTab) {
         MainNavTab.INICIO, MainNavTab.TIMELINE -> 0
         MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> 1
-        MainNavTab.NOTIFICACIONES, MainNavTab.ACTIVIDAD -> 2
-        MainNavTab.GRAPH, MainNavTab.ENTITIES -> 2
+        MainNavTab.NOTIFICACIONES -> 2
+        MainNavTab.ACTIVIDAD -> 3
+        MainNavTab.GRAPH, MainNavTab.ENTITIES -> 3
         MainNavTab.SETTINGS -> 0
     }
     val tabTargets = listOf(
         MainNavTab.INICIO,
         MainNavTab.BUSCAR,
+        MainNavTab.NOTIFICACIONES,
         MainNavTab.ACTIVIDAD
     )
 

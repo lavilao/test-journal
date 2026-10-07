@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Hotword foreground service (microphone type) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Media/file search: granular media permissions (Android 13+) and the
          legacy blanket permission for older devices. Without these,
          MediaStore only returns files this app itself created, which made
@@ -28,11 +33,16 @@
         android:maxSdkVersion="32" />
 
     <!-- Android 11+ package visibility: lets the assistant "open <app>"
-     * voice command resolve any installed launcher-capable app. -->
+     * voice command resolve any installed launcher-capable app, and lets
+     * SpeechEngineManager enumerate the installed recognition services
+     * (Google Speech Services vs Samsung Voice Input vs others). -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
@@ -49,6 +59,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -56,6 +67,33 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Software hotword listener: foreground service with the
+             microphone type. Always runs on-device, no network needed. -->
+        <service
+            android:name=".speech.hotword.HotwordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- System-assistant integration: lets the user pick Mnemosyne as
+             the default assistant (home long-press gesture). -->
+        <service
+            android:name=".assistant.MnemosyneVoiceInteractionService"
+            android:exported="true"
+            android:label="Asistente Mnemosyne"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+        </service>
+
+        <service
+            android:name=".assistant.MnemosyneSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
 
         <!-- Google At a Glance Android Home Screen Widget -->
         <receiver

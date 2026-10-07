@@ -1,0 +1,1016 @@
+package com.example.ui.screens
+
+import android.Manifest
+import android.app.RoleManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.speech.OfflineSpeechSupport
+import com.example.speech.RecognitionEngineInfo
+import com.example.speech.SpeechEngineManager
+import com.example.speech.hotword.HotwordService
+import com.example.speech.voiceprint.VoicePrintEngine
+import com.example.speech.voiceprint.VoicePrintStore
+import com.example.speech.voiceprint.VoiceSampleRecorder
+import com.example.ui.theme.ForestPrimary
+import com.example.ui.theme.GoogleGreen
+import com.example.viewmodel.JournalViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+/**
+ * "Voz y asistente" settings: recognition engine picker (fixes the
+ * Gboard/Samsung voice confusion), offline model manager (with in-app
+ * download on Android 13+), software hotword, our own Voice Match and the
+ * system-assistant role. Everything here is honest about platform limits.
+ */
+@Composable
+fun VoiceAndAssistantScreen(
+    viewModel: JournalViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val engineManager = viewModel.speechEngineManager
+    val store = remember { VoicePrintStore(context) }
+
+    var refreshTick by remember { mutableIntStateOf(0) }
+
+    // ---- engine state ----
+    val engines = remember(refreshTick) { engineManager.availableEngines() }
+    val currentSelection = remember(refreshTick) { engineManager.currentSelection() }
+    val resolvedEngine = remember(refreshTick) { engineManager.resolvedEngineInfo() }
+    var showEngineDialog by remember { mutableStateOf(false) }
+
+    // ---- offline models state ----
+    var offlineSupport by remember { mutableStateOf<OfflineSpeechSupport?>(null) }
+    var offlineCheckInProgress by remember { mutableStateOf(false) }
+    var offlineMessage by remember { mutableStateOf<String?>(null) }
+    val localeTag = Locale.getDefault().toLanguageTag()
+
+    // ---- hotword state ----
+    val hotwordRunning by HotwordService.isRunning.collectAsState()
+    val hotwordListening by HotwordService.isListening.collectAsState()
+    val hotwordStatus by HotwordService.status.collectAsState()
+    val hotwordPartial by HotwordService.lastPartial.collectAsState()
+    val hotwordCommand by HotwordService.lastCommand.collectAsState()
+    val hotwordReply by HotwordService.lastReply.collectAsState()
+    val matchScore by HotwordService.voiceMatchScore.collectAsState()
+    var wakeWordField by remember(refreshTick) { mutableStateOf(HotwordService.wakeWord(context)) }
+    var hotwordChecked by remember(refreshTick) {
+        mutableStateOf(HotwordService.isEnabled(context) || hotwordRunning)
+    }
+    var ttsChecked by remember(refreshTick) { mutableStateOf(HotwordService.ttsReplyEnabled(context)) }
+    var voiceMatchChecked by remember(refreshTick) {
+        mutableStateOf(HotwordService.voiceMatchEnabled(context))
+    }
+
+    // ---- voice print state ----
+    val enrolled = remember(refreshTick) { store.isEnrolled() }
+    val sampleCount = remember(refreshTick) { store.sampleCount() }
+    val thresholdValue = remember(refreshTick) { store.threshold() }
+    var enrollPhase by remember { mutableStateOf<String?>(null) } // countdown|recording|computing
+    var countdown by remember { mutableIntStateOf(3) }
+    var voicePrintMessage by remember { mutableStateOf<String?>(null) }
+    var testScore by remember { mutableStateOf<Float?>(null) }
+    var testVerdict by remember { mutableStateOf<Boolean?>(null) }
+    // Which recording mode is active (set before starting the countdown).
+    var enrollMode by remember { mutableStateOf("enroll") }
+
+    // ---- assistant role state ----
+    var roleHeld by remember { mutableStateOf(isAssistantRoleHeld(context)) }
+
+    fun refreshAll() { refreshTick++ }
+
+    // Refresh role state every time the screen resumes (user may have
+    // changed the default assistant in system settings).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                roleHeld = isAssistantRoleHeld(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ------------------------------------------------------------------
+    // Permission launchers
+    // ------------------------------------------------------------------
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            hotwordChecked = true
+            HotwordService.setEnabled(context, true)
+            HotwordService.start(context)
+        } else {
+            hotwordChecked = false
+            Toast.makeText(context, "Sin micrófono no hay hotword ni Voice Match", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Start either way: the service is valid without notification
+        // visibility, it just won't show its ongoing card on Android 13+.
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            hotwordChecked = true
+            HotwordService.setEnabled(context, true)
+            HotwordService.start(context)
+        } else {
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    val roleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        roleHeld = isAssistantRoleHeld(context)
+        Toast.makeText(
+            context,
+            if (roleHeld) "Mnemosyne es ahora tu asistente" else "No se cambió el asistente",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    // ------------------------------------------------------------------
+    // Recording flows (enrollment / verification)
+    // ------------------------------------------------------------------
+
+    fun runRecordingSample(durationMs: Long, onSample: (ShortArray?) -> Unit) {
+        VoiceSampleRecorder.record(durationMs) { result ->
+            scope.launch(Dispatchers.Main) { onSample(result.samples) }
+        }
+    }
+
+    fun handleEnrollSample(samples: ShortArray?) {
+        if (samples == null) {
+            enrollPhase = null
+            voicePrintMessage = "No pude grabar la muestra. Intenta de nuevo."
+            return
+        }
+        enrollPhase = "computing"
+        scope.launch(Dispatchers.Default) {
+            val embedding = VoicePrintEngine.computeEmbedding(samples)
+            launch(Dispatchers.Main) {
+                enrollPhase = null
+                if (embedding == null) {
+                    voicePrintMessage =
+                        "La muestra salió muy corta o silenciosa: di una frase completa."
+                } else if (!store.isEnrolled()) {
+                    store.startEnrollment(embedding)
+                    voicePrintMessage = "Primera muestra guardada. Graba otra para reforzarla."
+                } else {
+                    store.addSample(embedding)
+                    voicePrintMessage = "Muestra ${store.sampleCount()} guardada."
+                }
+                testScore = null
+                testVerdict = null
+                refreshAll()
+            }
+        }
+    }
+
+    fun handleTestSample(samples: ShortArray?) {
+        if (samples == null) {
+            enrollPhase = null
+            voicePrintMessage = "No pude grabar la prueba."
+            return
+        }
+        enrollPhase = "computing"
+        scope.launch(Dispatchers.Default) {
+            val embedding = VoicePrintEngine.computeEmbedding(samples)
+            val verdict = embedding?.let { store.verifyVerdict(it) }
+            launch(Dispatchers.Main) {
+                enrollPhase = null
+                testScore = verdict?.first
+                testVerdict = verdict?.second
+                voicePrintMessage = when {
+                    verdict == null -> "No hay huella de voz inscrita todavía."
+                    verdict.second -> "Coincide: es tu voz (similitud ${(verdict.first * 100).toInt()}%)."
+                    else -> "NO coincide (similitud ${(verdict.first * 100).toInt()}%): " +
+                            "otra voz o condiciones distintas."
+                }
+                refreshAll()
+            }
+        }
+    }
+
+    // Countdown → record → process, for both enrollment and testing.
+    LaunchedEffect(enrollPhase) {
+        when (enrollPhase) {
+            "enroll-countdown" -> {
+                countdown = 3
+                repeat(3) {
+                    delay(1000)
+                    countdown--
+                }
+                delay(400)
+                enrollPhase = "recording"
+            }
+
+            "test-countdown" -> {
+                countdown = 3
+                repeat(3) {
+                    delay(1000)
+                    countdown--
+                }
+                delay(400)
+                enrollPhase = "recording"
+            }
+
+            "recording" -> {
+                runRecordingSample(durationMs = 2600) { samples ->
+                    when {
+                        enrollMode == "enroll" -> handleEnrollSample(samples)
+                        else -> handleTestSample(samples)
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Offline support check
+    // ------------------------------------------------------------------
+
+    fun checkOfflineSupport() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            offlineSupport = null
+            offlineMessage = "Este Android es anterior a 13: la descarga directa de modelos " +
+                    "no existe; usa el botón de abajo para abrir el ajuste del sistema."
+            return
+        }
+        offlineCheckInProgress = true
+        engineManager.checkOfflineSupport(
+            onResult = { support ->
+                offlineSupport = support
+                offlineCheckInProgress = false
+                offlineMessage = null
+            },
+            onError = { code ->
+                offlineCheckInProgress = false
+                offlineMessage = "El motor respondió con error $code al consultar los modelos."
+            }
+        )
+    }
+
+    LaunchedEffect(Unit) { checkOfflineSupport() }
+
+    // ------------------------------------------------------------------
+    // Screen
+    // ------------------------------------------------------------------
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Column {
+                Text(
+                    text = "Voz y asistente",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "Motor, modelos sin conexión, hotword y Voice Match",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // ============ 1. Recognition engine ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.RecordVoiceOver, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Motor de reconocimiento",
+            badge = {
+                BadgePill(text = resolvedEngine.label, color = GoogleGreen)
+            }
+        ) {
+            Text(
+                text = "El dictado usa el motor que elijas aquí. En los Samsung el " +
+                        "predeterminado del sistema es «Samsung Voice Input», el mismo motor " +
+                        "que usa el teclado de voz de Gboard — por eso las voces sonaban a " +
+                        "Gboard. Si quieres las voces de Google, elige «Speech Services by " +
+                        "Google»; si prefieres las de Samsung, elige el suyo. «Automático» " +
+                        "prioriza el motor en el dispositivo y luego el de Google.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = { showEngineDialog = true },
+                modifier = Modifier.fillMaxWidth().testTag("engine_picker_btn")
+            ) {
+                Text("Elegir motor (${engines.size} disponibles)")
+            }
+            engineManager.lastError.value?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        // ============ 2. Offline voice models ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.CloudOff, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Modelos de voz sin conexión",
+            badge = {
+                val installed = offlineSupport?.let { s ->
+                    s.installed.any { it == localeTag || it.startsWith(localeTag.substringBefore('-')) }
+                }
+                if (installed == true) BadgePill("Instalado", GoogleGreen)
+                else BadgePill(
+                    if (offlineSupport == null) "Android 12−" else "Sin instalar",
+                    Color(0xFFB3261E)
+                )
+            }
+        ) {
+            Text(
+                text = "Idioma del teléfono: $localeTag.",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            offlineSupport?.let { s ->
+                Text(
+                    text = buildString {
+                        append("Instalados: ")
+                        append(if (s.installed.isEmpty()) "—" else s.installed.joinToString())
+                        append("\nPendientes: ")
+                        append(if (s.pending.isEmpty()) "—" else s.pending.joinToString())
+                        append("\nDescargables: ")
+                        append(if (s.downloadable.isEmpty()) "—" else s.downloadable.joinToString())
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            if (offlineCheckInProgress) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Consultando al motor…", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            offlineMessage?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        engineManager.triggerOfflineModelDownload(
+                            onScheduled = {
+                                offlineMessage = "Descarga PEDIDA al motor. La baja «Servicios de " +
+                                        "Voz de Google» en segundo plano; reconsulta en un rato " +
+                                        "(puede tardar y necesita Wi-Fi o datos)."
+                                scope.launch { delay(3000); checkOfflineSupport() }
+                            },
+                            onUnavailable = {
+                                offlineMessage = "En este Android la app no puede pedir la " +
+                                        "descarga: abre el ajuste del sistema con el botón de al lado."
+                            }
+                        )
+                    },
+                    enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    modifier = Modifier.weight(1f).testTag("download_offline_model_btn")
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Descargar", fontSize = 12.sp)
+                }
+                OutlinedButton(
+                    onClick = {
+                        val ok = engineManager.openOfflineModelsSettings()
+                        if (!ok) Toast.makeText(context, "No encontré el ajuste de voz", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Ajustes", fontSize = 12.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "¿Se pueden descargar los modelos de Google desde la app? En Android 13+ " +
+                        "SÍ: el botón «Descargar» se lo pide directamente al motor. En Android 12 " +
+                        "o menos solo se puede desde el ajuste del sistema. Sobre tu caso: los " +
+                        "modelos offline pertenecen a «Servicios de Voz de Google»; cuando la " +
+                        "app de Google se actualiza puede retirar los modelos de la versión " +
+                        "anterior (por eso dejaban de funcionar tras actualizar y solo volvían " +
+                        "al desinstalar actualizaciones). Volver a descargarlos — desde aquí o " +
+                        "desde el ajuste del sistema — los deja disponibles de nuevo sin " +
+                        "desinstalar nada.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = { checkOfflineSupport() }) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Reconsultar")
+            }
+        }
+
+        // ============ 3. Hotword ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.GraphicEq, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Hotword — «$wakeWordField»",
+            badge = {
+                if (hotwordRunning) {
+                    BadgePill(if (hotwordListening) "Escuchando" else "Activo", GoogleGreen)
+                } else {
+                    BadgePill("Apagado", MaterialTheme.colorScheme.outline)
+                }
+            }
+        ) {
+            OutlinedTextField(
+                value = wakeWordField,
+                onValueChange = { wakeWordField = it.take(40) },
+                label = { Text("Palabra de activación") },
+                supportingText = { Text("Dila seguida del comando: «$wakeWordField abre whatsapp»") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        HotwordService.setWakeWord(context, wakeWordField)
+                        if (hotwordRunning) {
+                            HotwordService.stop(context)
+                            HotwordService.start(context)
+                        }
+                        Toast.makeText(context, "Palabra guardada: «${HotwordService.wakeWord(context)}»", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Guardar palabra")
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (hotwordRunning) HotwordService.stop(context)
+                        else {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) !=
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else if (Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                HotwordService.start(context)
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (hotwordRunning) {
+                        Text("Detener")
+                    } else {
+                        Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Probar")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Escucha activa (servicio)", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Servicio en primer plano con micrófono",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = hotwordChecked,
+                    onCheckedChange = { checked ->
+                        hotwordChecked = checked
+                        HotwordService.setEnabled(context, checked)
+                        if (checked) {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) !=
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                HotwordService.start(context)
+                            }
+                        } else {
+                            HotwordService.stop(context)
+                        }
+                    },
+                    modifier = Modifier.testTag("hotword_switch")
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = hotwordStatus,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium
+            )
+            if (hotwordPartial.isNotBlank()) {
+                Text(
+                    text = "«$hotwordPartial»",
+                    style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (hotwordCommand != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Último comando: «$hotwordCommand»", style = MaterialTheme.typography.labelMedium)
+                hotwordReply?.let { r ->
+                    Text("Respuesta: $r", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            matchScore?.let { s ->
+                Text("Voice Match: ${(s * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Límites honestos: el hotword de bajo consumo tipo «Hey Google» corre en " +
+                        "el chip DSP con APIs privilegiadas que Android YA NO expone a apps de " +
+                        "terceros (AlwaysOnHotwordDetector salió del SDK público) — ni siquiera " +
+                        "siendo el asistente del sistema. Este hotword es por software: escucha " +
+                        "mientras el servicio esté vivo y Android permita el micrófono (consume " +
+                        "más batería). Con la pantalla apagada, algunas ROMs lo pausan.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // ============ 4. Voice Match ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.Fingerprint, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Voice Match (huella de voz propia)",
+            badge = {
+                if (enrolled) BadgePill("Inscrito · $sampleCount muestras", GoogleGreen)
+                else BadgePill("Sin inscribir", MaterialTheme.colorScheme.outline)
+            }
+        ) {
+            Text(
+                text = "La huella de voz de Google («Hey Google») es privilegiada y no está " +
+                        "disponible para terceros. Esta es NUESTRA huella on-device: 12 " +
+                        "coeficientes MFCC por tramo sonoro → embedding que se compara por " +
+                        "similitud coseno. Es más débil que un modelo neuronal, pero es real " +
+                        "y local: tras detectar el hotword se te pedirá repetir tu frase y " +
+                        "solo tu voz ejecutará el comando.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (enrollPhase == null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            enrollMode = "enroll"
+                            testScore = null
+                            testVerdict = null
+                            enrollPhase = "enroll-countdown"
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                        modifier = Modifier.weight(1f).testTag("voice_enroll_btn")
+                    ) {
+                        Icon(if (enrolled) Icons.Default.Refresh else Icons.Default.Mic, null,
+                            modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (enrolled) "Añadir muestra" else "Inscribir mi voz", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            enrollMode = "test"
+                            enrollPhase = "test-countdown"
+                        },
+                        enabled = enrolled,
+                        modifier = Modifier.weight(1f).testTag("voice_test_btn")
+                    ) {
+                        Icon(Icons.Default.Verified, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Probar mi voz", fontSize = 12.sp)
+                    }
+                }
+            } else {
+                RecordingIndicator(
+                    phase = enrollPhase ?: "",
+                    countdown = countdown,
+                    label = when (enrollMode) {
+                        "test" -> "Prueba de voz"
+                        else -> "Muestra de enrolamiento"
+                    }
+                )
+            }
+
+            testScore?.let { s ->
+                Spacer(modifier = Modifier.height(8.dp))
+                val good = testVerdict == true
+                Surface(
+                    color = (if (good) GoogleGreen else MaterialTheme.colorScheme.error).copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Similitud ${(s * 100).toInt()}% · umbral ${(thresholdValue * 100).toInt()}% → " +
+                                (if (good) "ACEPTADA" else "RECHAZADA"),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (good) GoogleGreen else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+            voicePrintMessage?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+
+            if (enrolled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Sensibilidad del umbral", style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        "low" to "Sensible",
+                        "medium" to "Media",
+                        "high" to "Estricta"
+                    ).forEach { (key, label) ->
+                        val selected = store.threshold() == when (key) {
+                            "low" -> VoicePrintStore.THRESHOLD_LOW
+                            "high" -> VoicePrintStore.THRESHOLD_HIGH
+                            else -> VoicePrintStore.THRESHOLD_MEDIUM
+                        }
+                        OutlinedButton(
+                            onClick = { store.setThreshold(key); refreshAll() },
+                            colors = if (selected) {
+                                ButtonDefaults.outlinedButtonColors(contentColor = ForestPrimary)
+                            } else {
+                                ButtonDefaults.outlinedButtonColors()
+                            }
+                        ) {
+                            Text(label, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Verificar la voz tras el hotword", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Antes de ejecutar el comando debes repetir tu frase",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = voiceMatchChecked,
+                    enabled = enrolled,
+                    onCheckedChange = { checked ->
+                        voiceMatchChecked = checked
+                        HotwordService.setVoiceMatchEnabled(context, checked)
+                    },
+                    modifier = Modifier.testTag("voice_match_switch")
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Responder por voz (TTS)", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Lee en voz alta la respuesta del asistente",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = ttsChecked,
+                    onCheckedChange = { checked ->
+                        ttsChecked = checked
+                        HotwordService.setTtsReplyEnabled(context, checked)
+                    }
+                )
+            }
+            if (enrolled) {
+                TextButton(onClick = {
+                    store.clear()
+                    HotwordService.setVoiceMatchEnabled(context, false)
+                    voiceMatchChecked = false
+                    voicePrintMessage = "Huella de voz borrada"
+                    testScore = null
+                    testVerdict = null
+                    refreshAll()
+                }) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Borrar huella de voz")
+                }
+            }
+        }
+
+        // ============ 5. System assistant role ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.AutoAwesome, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Asistente del sistema",
+            badge = {
+                if (roleHeld) BadgePill("Asistente activo", GoogleGreen)
+                else BadgePill("No configurado", MaterialTheme.colorScheme.outline)
+            }
+        ) {
+            Text(
+                text = "Haz de Mnemosyne tu asistente predeterminado: el gesto de asistente " +
+                        "(pulsación larga del inicio / deslizamiento) abrirá el asistente local " +
+                        "en vez de Google Assistant o Bixby. Selecciona «Mnemosyne» en el " +
+                        "diálogo del sistema. Puedes volver atrás cuando quieras.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val rm = context.getSystemService(RoleManager::class.java)
+                        if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+                            roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+                            return@Button
+                        }
+                    }
+                    // Fallback for old Androids: voice input settings.
+                    engineManager.openOfflineModelsSettings()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                modifier = Modifier.fillMaxWidth().testTag("request_assistant_role_btn")
+            ) {
+                Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (roleHeld) "Cambiar / revisar asistente" else "Configurar como asistente")
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Ser el asistente del sistema NO incluye el hotword DSP (esa API es " +
+                        "privilegiada); el hotword de esta app es el de la tarjeta de arriba.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+
+    // ------------------------------------------------------------------
+    // Dialogs
+    // ------------------------------------------------------------------
+
+    if (showEngineDialog) {
+        AlertDialog(
+            onDismissRequest = { showEngineDialog = false },
+            title = { Text("Motor de reconocimiento de voz") },
+            text = {
+                Column {
+                    engines.forEach { engine: RecognitionEngineInfo ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            RadioButton(
+                                selected = engine.id == currentSelection,
+                                onClick = {
+                                    engineManager.selectEngine(engine.id)
+                                    refreshAll()
+                                    showEngineDialog = false
+                                }
+                            )
+                            Column {
+                                Text(engine.label, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    engine.sublabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    if (engines.size <= 2) {
+                        Text(
+                            "Pocas opciones: el sistema solo expone estos servicios de voz.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showEngineDialog = false }) { Text("Cerrar") }
+            }
+        )
+    }
+}
+
+// ----------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------
+
+@Composable
+private fun SettingsCard(
+    icon: @Composable () -> Unit,
+    title: String,
+    badge: @Composable () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    icon()
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                badge()
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BadgePill(text: String, color: Color) {
+    Surface(color = color.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun RecordingIndicator(phase: String, countdown: Int, label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            when (phase) {
+                "countdown", "enroll-countdown", "test-countdown" -> {
+                    Text(
+                        text = "$countdown",
+                        style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.ExtraBold)
+                    )
+                    Text("preparado(a) para hablar…", style = MaterialTheme.typography.bodySmall)
+                }
+                "recording" -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Grabando — di tu frase normal", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                "computing" -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Calculando huella de voz…")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun isAssistantRoleHeld(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+    return try {
+        val rm = context.getSystemService(RoleManager::class.java) ?: return false
+        rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+    } catch (_: Exception) {
+        false
+    }
+}

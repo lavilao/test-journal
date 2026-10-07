@@ -84,7 +84,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsAndModelsScreen(
     viewModel: JournalViewModel,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onOpenVoiceSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -538,13 +539,25 @@ fun SettingsAndModelsScreen(
 
                 Text(
                     text = viewModel.dictationEngineDescription() +
-                            " Los modelos offline del reconocedor de Google/Gboard se gestionan en " +
-                            "Ajustes del sistema → Entrada de voz.",
+                            " Elige el motor (Google / Samsung / en el dispositivo), consulta y descarga los " +
+                            "modelos sin conexión, el hotword y el Voice Match en «Voz y asistente».",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = onOpenVoiceSettings,
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    modifier = Modifier.fillMaxWidth().testTag("open_voice_and_assistant_btn")
+                ) {
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Voz y asistente: motor, hotword, Voice Match")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedButton(
                     onClick = {

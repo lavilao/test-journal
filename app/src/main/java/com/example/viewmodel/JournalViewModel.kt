@@ -100,8 +100,13 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     val repository = JournalRepository(application)
 
+    // Speech engine manager: exposes the recognition engines installed on
+    // the device (Google Speech Services / Samsung Voice Input / on-device)
+    // and the offline-model status & download APIs (Android 13+).
+    val speechEngineManager = com.example.speech.SpeechEngineManager(application)
+
     // Voice Journal Manager (must be declared before its dependent flows)
-    val voiceManager = VoiceJournalManager(application)
+    val voiceManager = VoiceJournalManager(application, speechEngineManager)
     val recordingState: StateFlow<RecordingState> = voiceManager.recordingState
     val playbackState: StateFlow<PlaybackState> = voiceManager.playbackState
     val currentPlayingPath: StateFlow<String?> = voiceManager.currentPlayingPath
