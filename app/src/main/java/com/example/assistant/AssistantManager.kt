@@ -524,4 +524,265 @@ class AssistantManager(private val context: Context) {
         val percent = readBatteryPercent() ?: return@withContext "No pude leer la batería."
         "La batería está al $percent%."
     }
+
+    // ------------------------------------------------------------------
+    // New tool executors (events/tasks/messages/apps/places/volume…)
+    // ------------------------------------------------------------------
+
+    /** Kills an app's background processes (best-effort, no root). */
+    suspend fun closeApp(name: String): String = withContext(Dispatchers.IO) {
+        val app = searchManager.findAppByName(name)
+        if (app == null) {
+            return@withContext "No encontré una app llamada \"$name\"."
+        }
+        return@withContext try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            am?.killBackgroundProcesses(app.packageName)
+            "Cerré ${app.appName} en segundo plano."
+        } catch (e: Exception) {
+            "No pude cerrar ${app.appName}: ${e.message}"
+        }
+    }
+
+    /** Opens the SMS app with the message pre-filled (no SMS permission needed). */
+    suspend fun sendMessage(contactName: String, message: String): String =
+        withContext(Dispatchers.IO) {
+            val contact = searchManager.searchContacts(contactName).firstOrNull { c ->
+                c.displayName.lowercase(Locale.getDefault()).contains(contactName.lowercase(Locale.getDefault()))
+            }
+            if (contact?.phoneNumber.isNullOrBlank()) {
+                return@withContext "No encontré a \"$contactName\" en tus contactos (revisa el permiso)."
+            }
+            try {
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${contact!!.phoneNumber}")).apply {
+                    putExtra("sms_body", message)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                "Mensaje para ${contact.displayName} listo para enviar${if (message.isBlank()) "" else ": \"$message\""}."
+            } catch (e: Exception) {
+                "No pude abrir la app de mensajes: ${e.message}"
+            }
+        }
+
+    /** Creates a real task in the app's reminder database. */
+    suspend fun createTask(title: String, dueInMinutes: Int?): String =
+        withContext(Dispatchers.IO) {
+            return@withContext try {
+                val due = System.currentTimeMillis() + (dueInMinutes?.times(60_000L) ?: 24 * 3600_000L)
+                AppDatabase.getInstance(context).localReminderDao().insertReminder(
+                    LocalReminder(title = title.take(80), dueTimestamp = due)
+                )
+                if (dueInMinutes != null) {
+                    "Tarea \"$title\" creada, vence en $dueInMinutes min."
+                } else {
+                    "Tarea \"$title\" creada para mañana."
+                }
+            } catch (e: Exception) {
+                "No pude guardar la tarea: ${e.message}"
+            }
+        }
+
+    /** Creates a calendar event (with location + 10-min reminder). */
+    suspend fun createEvent(
+        title: String,
+        startInMinutes: Int?,
+        durationMinutes: Int?,
+        location: String?
+    ): String = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis() + (startInMinutes?.times(60_000L) ?: 3600_000L)
+        val cal = com.example.data.CalendarSyncManager(context)
+        val uri = cal.addEventToCalendar(
+            title = title.take(80),
+            description = "Creado por el asistente de Mnemosyne",
+            startMillis = start,
+            durationMinutes = durationMinutes ?: 60,
+            location = location
+        )
+        if (uri != null) {
+            val whenText = relativeWhen(start)
+            "Evento \"$title\" creado $whenText${if (location.isNullOrBlank()) "" else " en $location"}."
+        } else {
+            "No pude crear el evento (falta el permiso de calendario)."
+        }
+    }
+
+    /** Reads the next upcoming calendar event, with location if any. */
+    suspend fun describeNextEvent(): String = withContext(Dispatchers.IO) {
+        val cal = com.example.data.CalendarSyncManager(context)
+        if (!cal.hasCalendarPermission()) {
+            return@withContext "Necesito el permiso de calendario para leer tu agenda."
+        }
+        val next = cal.getUpcomingEvents(limit = 1).firstOrNull()
+            ?: return@withContext "No tienes eventos en los próximos 3 días."
+        val whenText = relativeWhen(next.startMillis)
+        val place = next.location?.takeIf { it.isNotBlank() }?.let { " en $it" } ?: ""
+        "Tu próximo evento: \"${next.title}\" $whenText$place."
+    }
+
+    /** Steps today, preferring Health Connect when available. */
+    suspend fun stepsToday(): String = withContext(Dispatchers.IO) {
+        val hc = try {
+            com.example.health.HealthConnectManager.todaySteps(context)
+        } catch (_: Exception) {
+            null
+        }
+        val steps = hc?.toInt() ?: com.example.telemetry.DeviceLifeHubManager.cachedStepsToday(context)
+        if (steps > 0) {
+            "Hoy llevas $steps pasos."
+        } else {
+            "Aún no tengo pasos registrados hoy (camina un poco con el teléfono encima)."
+        }
+    }
+
+    /** Volume / ringer control. */
+    fun setVolume(level: Int?, mode: String?): String {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            ?: return "No pude acceder al audio del dispositivo."
+        return try {
+            when (mode) {
+                "silencio" -> {
+                    audio.ringerMode = AudioManager.RINGER_MODE_SILENT
+                    "Teléfono en silencio."
+                }
+                "vibracion" -> {
+                    audio.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                    "Teléfono en vibración."
+                }
+                "normal" -> {
+                    audio.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    "Sonido normal."
+                }
+                else -> {
+                    val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                    val target = ((level ?: 50) * max / 100).coerceIn(0, max)
+                    audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+                    "Volumen al ${(target * 100 / max)}%."
+                }
+            }
+        } catch (e: Exception) {
+            "No pude cambiar el volumen: ${e.message}"
+        }
+    }
+
+    /** Records [seconds] of audio and attaches it to the journal as a note. */
+    suspend fun recordVoiceNote(seconds: Int, title: String): String =
+        withContext(Dispatchers.IO) {
+            val safeSeconds = seconds.coerceIn(5, 120)
+            if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
+                context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            ) {
+                return@withContext "Necesito el permiso de micrófono para grabar."
+            }
+            val sampleRate = 16_000
+            val total = sampleRate * safeSeconds
+            val minBuf = AudioRecord.getMinBufferSize(
+                sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBuf <= 0) return@withContext "Este dispositivo no permite grabar ahora."
+            val record = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC, sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minBuf, sampleRate * 2)
+                )
+            } catch (e: Exception) {
+                return@withContext "No pude abrir el micrófono: ${e.message}"
+            }
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                record.release()
+                return@withContext "El micrófono está ocupado."
+            }
+            val pcm = ShortArray(total)
+            var filled = 0
+            try {
+                record.startRecording()
+                while (filled < total) {
+                    val n = record.read(pcm, filled, total - filled)
+                    if (n <= 0) break
+                    filled += n
+                }
+            } finally {
+                try { record.stop() } catch (_: Exception) {}
+                record.release()
+            }
+            if (filled < sampleRate) return@withContext "Grabé demasiado poco audio."
+
+            val dir = File(context.filesDir, "voice_notes").apply { mkdirs() }
+            val file = File(dir, "memo_${System.currentTimeMillis()}.wav")
+            writeWav(file, pcm.copyOf(filled), sampleRate)
+
+            val entry = JournalEntry(
+                title = title,
+                body = "Nota de voz grabada por el asistente ($safeSeconds s).",
+                journalDate = System.currentTimeMillis()
+            )
+            val audioItem = AudioRecordItem(
+                entryId = 0,
+                title = title,
+                filePath = file.absolutePath,
+                durationMs = (filled.toLong() * 1000L) / sampleRate,
+                transcriptionStatus = "PENDING"
+            )
+            return@withContext try {
+                JournalRepository(context).saveEntry(entry, audioRecords = listOf(audioItem))
+                "Nota de voz \"$title\" guardada (${safeSeconds} s) en el diario."
+            } catch (e: Exception) {
+                "Grabé el audio pero no pude adjuntarlo: ${e.message}"
+            }
+        }
+
+    /** Saves the current location as a named place (SmartPlaces). */
+    suspend fun saveCurrentPlace(name: String): String = withContext(Dispatchers.IO) {
+        if (!SmartPlaces.hasLocationPermission(context)) {
+            return@withContext "Necesito el permiso de ubicación para guardar lugares."
+        }
+        val loc = SmartPlaces.freshLocation(context)
+            ?: return@withContext "No pude obtener una ubicación ahora."
+        SmartPlaces.addPlace(context, name, loc.latitude, loc.longitude, "Guardado por el asistente")
+        "Lugar \"$name\" guardado en (${"%.4f".format(loc.latitude)}, ${"%.4f".format(loc.longitude)})."
+    }
+
+    /** Minimal WAV writer: 44-byte header + little-endian PCM16. */
+    private fun writeWav(file: File, pcm: ShortArray, sampleRate: Int) {
+        FileOutputStream(file).use { out ->
+            val dataLen = pcm.size * 2
+            val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            header.put("RIFF".toByteArray())
+            header.putInt(36 + dataLen)
+            header.put("WAVE".toByteArray())
+            header.put("fmt ".toByteArray())
+            header.putInt(16)
+            header.putShort(1) // PCM
+            header.putShort(1) // mono
+            header.putInt(sampleRate)
+            header.putInt(sampleRate * 2)
+            header.putShort(2)
+            header.putShort(16)
+            header.put("data".toByteArray())
+            header.putInt(dataLen)
+            out.write(header.array())
+            val bytes = java.nio.ByteBuffer.allocate(dataLen).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            pcm.forEach { bytes.putShort(it) }
+            out.write(bytes.array())
+        }
+    }
+
+    /** "en 25 min" / "hoy a las 18:30" / "mañana a las 9:00". */
+    private fun relativeWhen(target: Long): String {
+        val diffMin = (target - System.currentTimeMillis()) / 60_000L
+        return when {
+            diffMin < 1 -> "ahora"
+            diffMin < 90 -> "en $diffMin min"
+            else -> {
+                val fmt = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+                val cal = java.util.Calendar.getInstance()
+                val targetCal = java.util.Calendar.getInstance().apply { timeInMillis = target }
+                val sameDay = cal.get(java.util.Calendar.DAY_OF_YEAR) ==
+                    targetCal.get(java.util.Calendar.DAY_OF_YEAR)
+                val prefix = if (sameDay) "hoy" else "mañana"
+                "$prefix a las ${fmt.format(java.util.Date(target))}"
+            }
+        }
+    }
 }

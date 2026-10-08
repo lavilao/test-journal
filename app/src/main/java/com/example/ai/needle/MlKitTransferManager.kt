@@ -15,6 +15,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Backup / restore for the DOWNLOADED ML Kit models (translate packs first:

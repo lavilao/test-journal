@@ -51,7 +51,9 @@ object HealthConnectManager {
 
     /** One of HealthConnectClient.SDK_* codes, or -1 when the library can't answer. */
     fun sdkStatus(context: Context): Int = try {
-        HealthConnectClient.sdkStatus(context.applicationContext)
+        // NOTE: in connect-client 1.1.0 the companion functions are literally
+        // named getSdkStatus / getOrCreate (verified against the AAR).
+        HealthConnectClient.getSdkStatus(context.applicationContext)
     } catch (_: Exception) {
         -1
     }
@@ -92,11 +94,13 @@ object HealthConnectManager {
             val end = Instant.now()
             val response = hc.aggregate(
                 AggregateRequest(
-                    metrics = setOf(StepsRecord.COUNT_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(start, end)
+                    setOf(StepsRecord.COUNT_TOTAL),
+                    TimeRangeFilter.between(start, end)
                 )
             )
-            response.result[StepsRecord.COUNT_TOTAL]?.let { it }
+            // AggregationResult exposes get(metric) (returns Any?) — no
+            // .result map in 1.1.0.
+            response.get(StepsRecord.COUNT_TOTAL) as? Long
         } catch (_: Exception) {
             null
         }
@@ -112,8 +116,8 @@ object HealthConnectManager {
             val end = LocalDateTime.now(zone).toInstant()
             val response = hc.readRecords(
                 ReadRecordsRequest(
-                    recordType = SleepSessionRecord::class,
-                    timeRangeFilter = TimeRangeFilter.between(start, end)
+                    SleepSessionRecord::class,
+                    TimeRangeFilter.between(start, end)
                 )
             )
             val total = response.records.sumOf { record ->
@@ -145,11 +149,11 @@ object HealthConnectManager {
             try {
                 val response = hc.aggregate(
                     AggregateRequest(
-                        metrics = setOf(StepsRecord.COUNT_TOTAL),
-                        timeRangeFilter = TimeRangeFilter.between(start, end)
+                        setOf(StepsRecord.COUNT_TOTAL),
+                        TimeRangeFilter.between(start, end)
                     )
                 )
-                out.add(0, day to (response.result[StepsRecord.COUNT_TOTAL] ?: 0L))
+                out.add(0, day to ((response.get(StepsRecord.COUNT_TOTAL) as? Long) ?: 0L))
             } catch (_: Exception) {
                 out.add(0, day to 0L)
             }
@@ -201,7 +205,8 @@ object HealthConnectManager {
     )
 
     suspend fun hasReadStepsPermission(hc: HealthConnectClient): Boolean = try {
-        hc.permissionController().getGrantedPermissions().contains(
+        // permissionController is a PROPERTY (not a function) in 1.1.0.
+        hc.permissionController.getGrantedPermissions().contains(
             "android.permission.health.READ_STEPS"
         )
     } catch (_: Exception) {

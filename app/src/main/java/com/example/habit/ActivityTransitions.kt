@@ -79,7 +79,7 @@ object ActivityTransitionsManager {
             val client = ActivityRecognition.getClient(context.applicationContext)
             // The gms Task reports failures asynchronously; a failed request
             // is visible simply because no events arrive.
-            client.requestTransitions(
+            client.requestActivityTransitionUpdates(
                 ActivityTransitionRequest(transitions),
                 pendingIntent(context)
             )
