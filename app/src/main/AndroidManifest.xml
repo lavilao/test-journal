@@ -16,6 +16,14 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Assistant tool: close background apps (normal permission). -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+
+    <!-- Health Connect (Android 9+ with the provider app; built in on 14+):
+         read-only steps + sleep for the morning brief and weekly report. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+
     <!-- Realtime sync: 5-minute tick + per-reminder wake alarms survive reboots. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -147,6 +155,29 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Activity Recognition Transitions API (Android 10+, includes 11):
+             ENTER/EXIT of vehicle/walking/running feeds the habit store and
+             the spatial engine's travel-time estimates. -->
+        <receiver
+            android:name=".habit.ActivityTransitionsReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.habit.ACTIVITY_TRANSITION" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Morning brief (learned wake time) + weekly report (Sunday 19:00). -->
+        <receiver
+            android:name=".sync.BriefReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.sync.MORNING_BRIEF" />
+                <action android:name="com.example.sync.WEEKLY_REPORT" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

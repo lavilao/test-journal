@@ -18,6 +18,16 @@ import com.example.MainActivity
  * immediately hands off to MainActivity routed to the local assistant
  * screen — no Google Assistant, no network, everything stays on-device.
  *
+ * ANDROID 11 NOTES (verified against the platform requirements):
+ *  - The service must be exported, hold BIND_VOICE_INTERACTION and declare
+ *    the VoiceInteractionService intent-filter (all in the manifest).
+ *  - The meta-data XML must declare the sessionService AND
+ *    supportsAssist="true" — without the latter some ROMs never show the
+ *    service inside "App de asistencia".
+ *  - The assistant picker lives at Ajustes → Apps y notificaciones →
+ *    Avanzado → Apps predeterminadas → App de asistencia (deep-linked from
+ *    the app via ACTION_VOICE_INPUT_SETTINGS).
+ *
  * NOTE ON HOTWORD: becoming the assistant does NOT grant the privileged
  * always-on hotword APIs (those were removed from the public SDK); the
  * in-app hotword is the software listener in HotwordService.
@@ -36,7 +46,7 @@ class MnemosyneSessionService : VoiceInteractionSessionService() {
 
 /**
  * Invisible session that instantly routes the assistant gesture into the
- * app's own assistant screen.
+ * app's own assistant screen (instead of a blank system overlay).
  */
 class MnemosyneVoiceSession(context: Context) : VoiceInteractionSession(context) {
 
@@ -49,6 +59,7 @@ class MnemosyneVoiceSession(context: Context) : VoiceInteractionSession(context)
         // parameter is intentionally not stored to avoid shadowing it.
         val intent = Intent(getContext(), MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(MainActivity.EXTRA_OPEN_ASSISTANT, true)
         try {
             getContext().startActivity(intent)
         } catch (_: Exception) {}

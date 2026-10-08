@@ -460,6 +460,14 @@ class JournalRepository(
             return@withContext
         }
 
+        // 0. Needle embedding index (true vector semantic search / RAG).
+        //    Best effort: without the local model the lexical engine is the
+        //    answer and nothing here fails.
+        try {
+            com.example.semantic.NeedleEmbeddings.upsertEntry(context, entryId, entry.title, fullText)
+        } catch (_: Exception) {
+        }
+
         // 1. Language Detection via MLKit
         val detectedLang = MlKitAnalyzer.identifyLanguage(fullText)
 

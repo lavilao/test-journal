@@ -94,7 +94,8 @@ class CalendarSyncManager(private val context: Context) {
         title: String,
         description: String,
         startMillis: Long,
-        durationMinutes: Int = 60
+        durationMinutes: Int = 60,
+        location: String? = null
     ): Uri? = withContext(Dispatchers.IO) {
         if (!hasCalendarPermission()) return@withContext null
 
@@ -108,6 +109,9 @@ class CalendarSyncManager(private val context: Context) {
                 put(CalendarContract.Events.CALENDAR_ID, primaryCalendarId)
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
                 put(CalendarContract.Events.HAS_ALARM, 1)
+                if (!location.isNullOrBlank()) {
+                    put(CalendarContract.Events.EVENT_LOCATION, location)
+                }
             }
 
             val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)

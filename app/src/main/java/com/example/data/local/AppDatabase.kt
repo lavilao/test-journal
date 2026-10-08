@@ -10,6 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.AudioRecordItem
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityMention
+import com.example.data.model.EntryEmbedding
 import com.example.data.model.EntryEntityCrossRef
 import com.example.data.model.EntryTagCrossRef
 import com.example.data.model.EventItem
@@ -38,9 +39,10 @@ import com.example.habit.HabitEvent
         Relationship::class,
         MediaItem::class,
         com.example.data.model.LocalReminder::class,
-        HabitEvent::class
+        HabitEvent::class,
+        EntryEmbedding::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -49,6 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun journalDao(): JournalDao
     abstract fun localReminderDao(): LocalReminderDao
     abstract fun habitEventDao(): com.example.habit.HabitEventDao
+    abstract fun entryEmbeddingDao(): EntryEmbeddingDao
 
     companion object {
         @Volatile
@@ -192,6 +195,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `entry_embeddings` (
+                        `entryId` INTEGER NOT NULL,
+                        `dim` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `vector` BLOB NOT NULL,
+                        PRIMARY KEY (`entryId`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_entry_embeddings_updatedAt` ON `entry_embeddings` (`updatedAt`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -199,7 +217,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

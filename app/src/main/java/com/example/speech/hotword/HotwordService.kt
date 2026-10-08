@@ -8,7 +8,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
@@ -22,10 +25,15 @@ import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.example.ai.needle.NeedleModelManager
+import com.example.ai.needle.NeedleRuntime
+import com.example.ai.needle.NeedleTools
 import com.example.assistant.AssistantIntent
 import com.example.assistant.AssistantManager
 import com.example.assistant.AssistantParser
 import com.example.MainActivity
+import com.example.data.local.AppDatabase
+import com.example.data.model.EntryWithRelations
 import com.example.speech.SpeechEngineManager
 import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
@@ -37,6 +45,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import java.util.Locale
 
 /**
@@ -53,6 +64,16 @@ import java.util.Locale
  *  - Google's enrolled Voice Match model is also privileged, so Voice Match
  *    here is OUR OWN on-device voice print (MFCC embedding + cosine
  *    similarity) enrolled by the user.
+ *
+ * TWO LISTENING MODES (fixes the old listening↔active error loop):
+ *  - **Whistle mode** (default when whistle.cact is downloaded): a single
+ *    AudioRecord feed goes through needle_stream_transcribe_process — 100%
+ *    local streaming recognition, no Google/Samsung recognizer, no error
+ *    tones cycling. The wake word is matched on the committed words, and the
+ *    command is whatever follows it.
+ *  - **System mode** (fallback without the model): the previous
+ *    SpeechRecognizer session loop, now with an honest bail-out when the
+ *    engine keeps failing.
  */
 class HotwordService : Service(), RecognitionListener {
 
@@ -79,6 +100,9 @@ class HotwordService : Service(), RecognitionListener {
         val lastReply = MutableStateFlow<String?>(null)
         val voiceMatchScore = MutableStateFlow<Float?>(null)
         val consecutiveErrors = MutableStateFlow(0)
+
+        /** Which engine the active listening actually uses, shown in the UI. */
+        val activeEngine = MutableStateFlow("")
 
         /** Set by MainActivity so the service knows if the UI is visible. */
         var appInForeground = false
@@ -158,6 +182,14 @@ class HotwordService : Service(), RecognitionListener {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
+    // ---- Whistle streaming state ----
+    @Volatile private var whistleRunning = false
+    @Volatile private var engineBusy = false // command execution in progress
+    private var whistleThread: Thread? = null
+    private val ring = ShortArray(16_000 * 12) // rolling 12 s for the voice print
+    @Volatile private var ringWrite = 0
+    @Volatile private var ringFilled = 0
+
     override fun onCreate() {
         super.onCreate()
         engineManager = SpeechEngineManager(applicationContext)
@@ -184,7 +216,23 @@ class HotwordService : Service(), RecognitionListener {
         armed = false
         awaitingCommandOneShot = false
         errorStreak = 0
-        restartLoop()
+
+        // Decide the listening mode AFTER making sure the models are loaded:
+        // Whistle streaming when available (100% local), system recognizer
+        // otherwise.
+        serviceScope.launch {
+            try {
+                NeedleModelManager.ensureLoaded(this@HotwordService)
+            } catch (_: Exception) {}
+            if (isRunning.value) {
+                if (NeedleRuntime.isSupported() && NeedleRuntime.isSpeechModelLoaded()) {
+                    startWhistleLoop()
+                } else {
+                    activeEngine.value = "Motor del sistema (sin Whistle)"
+                    restartLoop()
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -193,6 +241,8 @@ class HotwordService : Service(), RecognitionListener {
     override fun onDestroy() {
         isRunning.value = false
         isListening.value = false
+        whistleRunning = false
+        activeEngine.value = ""
         serviceScope.cancel()
         destroyRecognizer()
         try { toneGenerator?.release() } catch (_: Exception) {}
@@ -263,18 +313,271 @@ class HotwordService : Service(), RecognitionListener {
         } catch (_: Exception) {}
     }
 
+    private fun wakeWord(): String = wakeWord(this)
+
     // -----------------------------------------------------------------
-    // Listening loop
+    // MODE 1: Whistle streaming loop (100% local recognition)
     // -----------------------------------------------------------------
 
-    private fun wakeWord(): String = wakeWord(this)
+    private fun startWhistleLoop() {
+        whistleRunning = true
+        engineBusy = false
+        isListening.value = true
+        activeEngine.value = "Whistle (100% local)"
+        status.value = "Escuchando «${wakeWord()}» · Whistle local"
+        updateNotification("Escuchando «${wakeWord()}» — motor local Whistle")
+        whistleThread = Thread {
+            try {
+                whistleLoopBody()
+            } catch (t: Throwable) {
+                android.util.Log.e("HotwordService", "whistle loop crashed", t)
+            } finally {
+                if (whistleRunning) {
+                    // Crashed or mic lost: degrade honestly to the system loop.
+                    whistleRunning = false
+                    mainHandler.post {
+                        if (isRunning.value) {
+                            activeEngine.value = "Motor del sistema (Whistle falló)"
+                            status.value = "Whistle se detuvo; uso el motor del sistema"
+                            restartLoop()
+                        }
+                    }
+                }
+            }
+        }.apply { name = "whistle-hotword"; start() }
+    }
+
+    private fun whistleLoopBody() {
+        val sampleRate = 16_000
+        val minBuffer = AudioRecord.getMinBufferSize(
+            sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+        )
+        if (minBuffer <= 0) {
+            postStatus("Este dispositivo no permite abrir el micrófono ahora")
+            return
+        }
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.MIC, sampleRate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBuffer, 32 * 1024)
+            )
+        } catch (_: Exception) {
+            postStatus("No pude abrir el micrófono para la escucha local")
+            return
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            postStatus("El micrófono está ocupado por otra app")
+            return
+        }
+
+        record.startRecording()
+        val chunk = ShortArray(sampleRate)          // 1 s per stream pass
+        val floatChunk = FloatArray(sampleRate)
+
+        var sessionText = StringBuilder()
+        var armedLocal = false
+        var lastNewWordAt = 0L
+        var commandDeadline = 0L
+        var wakeRingMark = 0
+        var streamAudioMs = 0L
+        var errorStreakLocal = 0
+
+        try {
+            while (whistleRunning && isRunning.value) {
+                // While the engine is busy answering a command, pause feeding.
+                if (engineBusy) {
+                    Thread.sleep(120)
+                    continue
+                }
+
+                var off = 0
+                while (off < chunk.size && whistleRunning && !engineBusy) {
+                    val n = record.read(chunk, off, chunk.size - off)
+                    if (n <= 0) { off = -1; break }
+                    off += n
+                }
+                if (off <= 0) break
+
+                appendRing(chunk, off)
+                for (i in 0 until off) floatChunk[i] = chunk[i] / 32768f
+                val pcm = if (off == chunk.size) floatChunk else floatChunk.copyOf(off)
+                streamAudioMs += (off.toLong() * 1000L) / sampleRate
+
+                val json = try {
+                    runBlocking { NeedleRuntime.streamProcess(pcm, "es") }
+                } catch (_: Throwable) {
+                    null
+                }
+                if (json == null) {
+                    errorStreakLocal++
+                    if (errorStreakLocal > 8) {
+                        postStatus("El motor de voz local falló repetidamente; prueba de nuevo")
+                        break
+                    }
+                    Thread.sleep(500)
+                    continue
+                }
+                errorStreakLocal = 0
+
+                val committed = parseStreamText(json)
+                val pending = parseStreamPending(json)
+                if (committed.isNotBlank()) {
+                    sessionText.append(" ").append(committed.trim())
+                    lastNewWordAt = System.currentTimeMillis()
+                    lastPartial.value = (sessionText.toString().trim() + " … " + pending).trim()
+                } else if (pending.isNotBlank()) {
+                    lastPartial.value = (sessionText.toString().trim() + " … " + pending).trim()
+                }
+
+                val now = System.currentTimeMillis()
+                val session = sessionText.toString().trim()
+
+                if (!armedLocal) {
+                    if (session.isNotEmpty() && WakeWordMatcher.containsWakeWord(session, wakeWord())) {
+                        armedLocal = true
+                        armed = true
+                        lastNewWordAt = now
+                        commandDeadline = now + 9_000
+                        wakeRingMark = ringWrite
+                        beep()
+                        status.value = "Detectado — dime el comando"
+                        updateNotification("Te escucho: dime el comando")
+                    } else if (streamAudioMs > 25_000) {
+                        // Keep the engine's stream buffer short: flush it.
+                        runCatching { runBlocking { NeedleRuntime.streamStop() } }
+                        streamAudioMs = 0
+                    }
+                } else {
+                    val hasCommandWords = session.length > wakeWord().length + 2
+                    val quietFor = now - lastNewWordAt
+                    if ((hasCommandWords && quietFor > 2_600) || now > commandDeadline) {
+                        // Flush the tail as final words.
+                        runCatching {
+                            runBlocking { NeedleRuntime.streamStop() }?.let { tail ->
+                                val t = parseStreamText(tail)
+                                if (t.isNotBlank()) sessionText.append(" ").append(t.trim())
+                            }
+                        }
+                        val full = sessionText.toString().trim()
+                        var command = WakeWordMatcher.stripWakeWord(full, wakeWord())
+
+                        // Voice Match on the audio that followed the wake word.
+                        val useVoiceMatch = voiceMatchEnabled(this) && voicePrintStore.isEnrolled()
+                        if (useVoiceMatch) {
+                            val slice = ringSliceFrom(wakeRingMark)
+                            val embedding = slice?.let { VoicePrintEngine.computeEmbedding(it) }
+                            val score = embedding?.let { voicePrintStore.verify(it) }
+                            voiceMatchScore.value = score
+                            if (score == null || score < voicePrintStore.threshold()) {
+                                status.value = "Voz NO reconocida " +
+                                        "(similitud ${((score ?: 0f) * 100).toInt()}%) — no ejecuto"
+                                resetWhistleSession { sessionText = it; armedLocal = false; armed = false }
+                                continue
+                            }
+                        }
+
+                        if (command.isBlank()) command = full
+                        val cmd = command
+                        // Pause the audio feed while the engine answers.
+                        engineBusy = true
+                        mainHandler.post {
+                            serviceScope.launch {
+                                try {
+                                    lastCommand.value = cmd
+                                    status.value = "Comando: «$cmd»"
+                                    val reply = executeAndReply(cmd)
+                                    lastReply.value = reply
+                                    status.value = reply
+                                    speak(reply)
+                                    notifyExchange(cmd, reply)
+                                    delay(900)
+                                } finally {
+                                    engineBusy = false
+                                }
+                            }
+                        }
+                        // Reset the session for the next round.
+                        sessionText = StringBuilder()
+                        armedLocal = false
+                        armed = false
+                        lastNewWordAt = 0
+                        streamAudioMs = 0
+                    }
+                }
+            }
+        } finally {
+            runCatching { runBlocking { NeedleRuntime.streamStop() } }
+            try { record.stop() } catch (_: Exception) {}
+            record.release()
+            isListening.value = false
+        }
+    }
+
+    private fun resetWhistleSession(reset: (StringBuilder) -> Unit) {
+        runCatching { runBlocking { NeedleRuntime.streamStop() } }
+        reset(StringBuilder())
+    }
+
+    private fun appendRing(chunk: ShortArray, count: Int) {
+        var w = ringWrite
+        for (i in 0 until count) {
+            ring[w % ring.size] = chunk[i]
+            w++
+        }
+        ringWrite = w % ring.size
+        ringFilled = (ringFilled + count).coerceAtMost(ring.size)
+    }
+
+    /** Audio from an absolute ring position to the current head (max 12 s). */
+    private fun ringSliceFrom(absoluteMark: Int): ShortArray? {
+        val totalWritten = ringFilled
+        if (totalWritten < 16_000) return null          // < 1 s of audio
+        // The mark is an index in [0, ring.size); only meaningful within
+        // the last full ring. Take up to the whole buffer after the mark.
+        val start = ((absoluteMark % ring.size) + ring.size) % ring.size
+        val head = ringWrite
+        var count = (head - start + ring.size) % ring.size
+        if (count < 16_000) {
+            // Wrapped or too fresh: use the whole ring instead.
+            count = ringFilled
+            if (count < 16_000) return null
+            return ring.copyOf(count)
+        }
+        val out = ShortArray(count)
+        for (i in 0 until count) {
+            out[i] = ring[(start + i) % ring.size]
+        }
+        return out
+    }
+
+    private fun parseStreamText(json: String): String = try {
+        JSONObject(json).optString("text", "")
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun parseStreamPending(json: String): String = try {
+        JSONObject(json).optString("pending", "")
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun postStatus(text: String) {
+        mainHandler.post { status.value = text }
+    }
+
+    // -----------------------------------------------------------------
+    // MODE 2: system recognizer loop (fallback without Whistle)
+    // -----------------------------------------------------------------
 
     private fun restartLoop() {
         sessionGeneration++
         destroyRecognizer()
         errorStreak = 0
-        status.value = "Escuchando «${wakeWord()}»"
-        updateNotification("Escuchando «${wakeWord()}»")
+        status.value = "Escuchando «${wakeWord()}» · motor del sistema"
+        updateNotification("Escuchando «${wakeWord()}» — motor del sistema")
         startSession()
     }
 
@@ -406,9 +709,11 @@ class HotwordService : Service(), RecognitionListener {
             }
 
             else -> {
-                if (errorStreak > 12) {
-                    status.value = "El motor de voz falló demasiado ($errorStreak errores). " +
-                            "La escucha se detuvo."
+                if (errorStreak > 6) {
+                    // HONEST bail-out instead of the old infinite error loop.
+                    status.value = "El motor de voz del sistema falló $errorStreak veces " +
+                            "seguidas. Detuve la escucha: descarga Whistle (Ajustes → Voz y " +
+                            "asistente) para escuchar 100% en local, o reintenta más tarde."
                     stopSelf()
                 } else {
                     scheduleRestart(generation, 1000L)
@@ -420,7 +725,7 @@ class HotwordService : Service(), RecognitionListener {
     override fun onEvent(eventType: Int, params: Bundle?) {}
 
     // -----------------------------------------------------------------
-    // Wake word → (optional voice match) → command
+    // Wake word → (optional voice match) → command  [system recognizer path]
     // -----------------------------------------------------------------
 
     private fun onWakeWordDetected(utteranceSoFar: String) {
@@ -498,7 +803,13 @@ class HotwordService : Service(), RecognitionListener {
     private fun resumeLoopAfter(delayMs: Long) {
         val generation = sessionGeneration
         mainHandler.postDelayed({
-            if (generation == sessionGeneration || isRunning.value) restartLoop()
+            if (generation == sessionGeneration || isRunning.value) {
+                if (NeedleRuntime.isSpeechModelLoaded() && !whistleRunning) {
+                    startWhistleLoop()
+                } else {
+                    restartLoop()
+                }
+            }
         }, delayMs)
     }
 
@@ -514,7 +825,7 @@ class HotwordService : Service(), RecognitionListener {
     }
 
     // -----------------------------------------------------------------
-    // Command execution (local, no GenAI)
+    // Command execution: RAG → Needle router → rule parser
     // -----------------------------------------------------------------
 
     private fun executeCommand(command: String) {
@@ -528,12 +839,63 @@ class HotwordService : Service(), RecognitionListener {
             speak(reply)
             notifyExchange(command, reply)
             delay(900)
-            if (isRunning.value) restartLoop()
+            if (isRunning.value && !whistleRunning) restartLoop()
+        }
+    }
+
+    /** True for journal-style questions answered by the RAG memory. */
+    private fun isJournalQuestion(text: String): Boolean {
+        val t = text.lowercase(Locale.getDefault())
+        return listOf(
+            "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
+            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "qué recuerdo",
+            "que recuerdo", "recuerda lo que", "qué sé sobre", "que se sobre"
+        ).any { t.contains(it) }
+    }
+
+    /** RAG over the journal: embeddings retrieval + Needle's answer. */
+    private suspend fun tryAnswerFromJournal(command: String): String? {
+        if (!isJournalQuestion(command)) return null
+        if (!com.example.semantic.NeedleEmbeddings.isAvailable(this)) return null
+        return try {
+            val snapshots = AppDatabase.getInstance(this).journalDao().getAllEntriesSnapshot()
+            val entries = snapshots.take(600).map { EntryWithRelations(entry = it) }
+            if (entries.isEmpty()) return null
+            val fragments = com.example.semantic.NeedleEmbeddings.ragFragments(this, command, entries, k = 3)
+            if (fragments.isEmpty()) return null
+            withTimeoutOrNull(25_000) { NeedleTools.answerFromJournal(command, fragments) }
+                ?: "Encontré ${fragments.size} entradas relacionadas en tu diario; abre la app para verlas."
+        } catch (_: Exception) {
+            null
         }
     }
 
     private suspend fun executeAndReply(command: String): String {
-        val intent = AssistantParser.parse(command)
+        // 1) Journal memory (RAG with the local embeddings).
+        tryAnswerFromJournal(command)?.let { return it }
+
+        // 2) Needle router (local AI) with the rule parser as fallback.
+        val intents: List<AssistantIntent> = try {
+            val needleUsable = NeedleRuntime.isReady() ||
+                (NeedleModelManager.isNeedleDownloaded(this) &&
+                    NeedleModelManager.isAssistantEnabled(this))
+            if (needleUsable) {
+                NeedleModelManager.ensureLoaded(this)
+                val routed = withTimeoutOrNull(25_000) { NeedleTools.route(command) }
+                if (!routed.isNullOrEmpty()) routed
+                else listOf(AssistantParser.parse(command))
+            } else {
+                listOf(AssistantParser.parse(command))
+            }
+        } catch (_: Exception) {
+            listOf(AssistantParser.parse(command))
+        }
+
+        val replies = intents.map { replyForIntent(it) }
+        return replies.filter { it.isNotBlank() }.joinToString(" ")
+    }
+
+    private suspend fun replyForIntent(intent: AssistantIntent): String {
         return try {
             when (intent) {
                 is AssistantIntent.OpenApp -> {
@@ -546,6 +908,8 @@ class HotwordService : Service(), RecognitionListener {
                     }
                 }
 
+                is AssistantIntent.CloseApp -> assistantManager.closeApp(intent.appName)
+
                 is AssistantIntent.CallContact -> {
                     val contact = assistantManager.searchContact(intent.contactName)
                     if (contact?.phoneNumber != null) {
@@ -556,6 +920,28 @@ class HotwordService : Service(), RecognitionListener {
                                 "(revisa el permiso de contactos)."
                     }
                 }
+
+                is AssistantIntent.SendMessage -> assistantManager.sendMessage(
+                    intent.contactName, intent.message
+                )
+
+                is AssistantIntent.CreateTask ->
+                    assistantManager.createTask(intent.title, intent.dueInMinutes)
+
+                is AssistantIntent.CreateEvent -> assistantManager.createEvent(
+                    intent.title, intent.startInMinutes, intent.durationMinutes, intent.location
+                )
+
+                AssistantIntent.NextEvent -> assistantManager.describeNextEvent()
+
+                AssistantIntent.Steps -> assistantManager.stepsToday()
+
+                is AssistantIntent.Volume -> assistantManager.setVolume(intent.level, intent.mode)
+
+                is AssistantIntent.RecordVoiceNote ->
+                    assistantManager.recordVoiceNote(intent.seconds, intent.title)
+
+                is AssistantIntent.SaveCurrentPlace -> assistantManager.saveCurrentPlace(intent.name)
 
                 is AssistantIntent.SearchDevice ->
                     "Buscando \"${intent.query}\"… abre la app para ver los resultados."
@@ -570,8 +956,22 @@ class HotwordService : Service(), RecognitionListener {
                     assistantManager.describeWeather(weather)
                 }
 
-                is AssistantIntent.CreateNote ->
-                    "Nota preparada: «${intent.text}». Abre la app para revisarla."
+                is AssistantIntent.CreateNote -> {
+                    // Real note in the journal, straight from the service.
+                    try {
+                        val repo = com.example.repository.JournalRepository(applicationContext)
+                        val id = repo.saveEntry(
+                            com.example.data.model.JournalEntry(
+                                title = intent.text.take(40),
+                                body = intent.text,
+                                journalDate = System.currentTimeMillis()
+                            )
+                        )
+                        if (id > 0) "Nota guardada en tu diario." else "No pude guardar la nota."
+                    } catch (e: Exception) {
+                        "Nota preparada: «${intent.text}». Abre la app para revisarla."
+                    }
+                }
 
                 is AssistantIntent.Calculate -> {
                     val value = AssistantParser.safeEvaluate(intent.expression)

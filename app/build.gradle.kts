@@ -164,7 +164,13 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
+  // Activity Recognition Transitions API (Android 10+, real ENTER/EXIT of
+  // vehicle/walking/running — feeds the habit engine and the spatial
+  // travel-time estimates).
+  implementation(libs.play.services.location)
+  // Health Connect (Android 9+ with the provider app, built in on 14+):
+  // real steps + sleep for the brief, widget and weekly report.
+  implementation(libs.androidx.health.connect)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

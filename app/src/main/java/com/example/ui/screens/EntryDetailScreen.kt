@@ -86,6 +86,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -787,6 +788,83 @@ fun EntryDetailScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // ---- Related entries via Needle embeddings (semantic neighbours) ----
+            val relatedContext = LocalContext.current
+            var semanticNeighbours by remember(entryId) {
+                mutableStateOf<List<Triple<Long, String, Float>>>(emptyList())
+            }
+            LaunchedEffect(entryId) {
+                semanticNeighbours = emptyList()
+                if (com.example.semantic.NeedleEmbeddings.isAvailable(relatedContext)) {
+                    semanticNeighbours = try {
+                        val entries = viewModel.repository.allEntriesWithRelations.first().take(400)
+                        com.example.semantic.NeedleEmbeddings
+                            .relatedEntries(relatedContext, entryId, entries, topK = 3)
+                            .mapNotNull { (id, sim) ->
+                                entries.firstOrNull { it.entry.id == id }?.let { e ->
+                                    Triple(id, e.entry.title.ifBlank { "(sin título)" }, sim)
+                                }
+                            }
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }
+            if (semanticNeighbours.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(18.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = ForestPrimary.copy(alpha = 0.08f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("semantic_related_card")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Relacionados por significado (IA local)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = ForestPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        semanticNeighbours.forEach { (id, title, sim) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onNavigateToEntry(id) }
+                                    .padding(vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = title.take(48),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (sim >= 0.92f) {
+                                    Text(
+                                        text = "posible duplicado",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(
+                                    text = "${(sim * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Similitud por embeddings de Needle sobre el significado, no por palabras exactas.",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

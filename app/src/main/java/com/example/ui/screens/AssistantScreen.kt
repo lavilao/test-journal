@@ -66,6 +66,7 @@ import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -277,6 +278,36 @@ fun AssistantScreen(
                     post(AssistantMessage(false, "Abriendo el Lens para escanear…"))
                     onOpenLens()
                 }
+                is AssistantIntent.CloseApp -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.closeApp(intent.appName)))
+                }
+                is AssistantIntent.SendMessage -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.sendMessage(intent.contactName, intent.message)))
+                }
+                is AssistantIntent.CreateTask -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.createTask(intent.title, intent.dueInMinutes)))
+                }
+                is AssistantIntent.CreateEvent -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.createEvent(
+                        intent.title, intent.startInMinutes, intent.durationMinutes, intent.location
+                    )))
+                }
+                AssistantIntent.NextEvent -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.describeNextEvent()))
+                }
+                AssistantIntent.Steps -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.stepsToday()))
+                }
+                is AssistantIntent.Volume -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.setVolume(intent.level, intent.mode)))
+                }
+                is AssistantIntent.RecordVoiceNote -> {
+                    post(AssistantMessage(false, "Grabando ${intent.seconds} s de audio…"))
+                    post(AssistantMessage(false, viewModel.assistantManager.recordVoiceNote(intent.seconds, intent.title)))
+                }
+                is AssistantIntent.SaveCurrentPlace -> {
+                    post(AssistantMessage(false, viewModel.assistantManager.saveCurrentPlace(intent.name)))
+                }
                 is AssistantIntent.Translate -> {
                     val target = intent.targetLangHint ?: "en"
                     val source = com.example.semantic.MlKitAnalyzer.identifyLanguage(intent.text)
@@ -293,6 +324,34 @@ fun AssistantScreen(
         }
     }
 
+    /**
+     * RAG over the journal: embedding retrieval + Needle's answer, for
+     * questions like «¿qué escribí sobre el proyecto X?».
+     */
+    suspend fun tryAnswerFromJournal(command: String): String? {
+        val text = command.lowercase(java.util.Locale.getDefault())
+        val triggers = listOf(
+            "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
+            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "qué recuerdo",
+            "que recuerdo", "qué sé sobre", "que se sobre"
+        )
+        if (triggers.none { text.contains(it) }) return null
+        if (!com.example.semantic.NeedleEmbeddings.isAvailable(context)) return null
+        return try {
+            val entries = viewModel.repository.allEntriesWithRelations.first().take(600)
+            if (entries.isEmpty()) return null
+            val fragments = com.example.semantic.NeedleEmbeddings.ragFragments(
+                context, command, entries, k = 3
+            )
+            if (fragments.isEmpty()) return null
+            withTimeoutOrNull(25_000) {
+                NeedleTools.answerFromJournal(command, fragments)
+            } ?: "Encontré ${fragments.size} entradas relacionadas en tu diario; ábrelas desde la búsqueda."
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** Routes an utterance and executes whatever it resolves to. */
     fun execute(utterance: String, fromUser: Boolean = true) {
         val clean = utterance.trim()
@@ -300,6 +359,13 @@ fun AssistantScreen(
         if (fromUser) post(AssistantMessage(true, clean))
         thinking = true
         scope.launch {
+            // Journal memory first: RAG over the local embeddings.
+            val memory = tryAnswerFromJournal(clean)
+            if (memory != null) {
+                post(AssistantMessage(false, memory + " · IA local (memoria del diario)"))
+                thinking = false
+                return@launch
+            }
             val (intents, viaNeedle) = resolveIntents(clean)
             val suffix = if (viaNeedle) " · IA local" else ""
             post(AssistantMessage(false, describe(intents.first()) + suffix))
@@ -698,11 +764,20 @@ private fun SuggestionChip(text: String, onClick: (String) -> Unit) {
 
 private fun describe(intent: AssistantIntent): String = when (intent) {
     is AssistantIntent.OpenApp -> "Buscando \"${intent.appName}\"…"
+    is AssistantIntent.CloseApp -> "Cerrando \"${intent.appName}\"…"
     is AssistantIntent.CallContact -> "Buscando a \"${intent.contactName}\"…"
+    is AssistantIntent.SendMessage -> "Preparando el mensaje…"
     is AssistantIntent.SearchDevice -> "Buscando \"${intent.query}\" en tu teléfono…"
     is AssistantIntent.SearchWeb -> "Buscando en la web…"
-    AssistantIntent.Weather -> "Consultando el clima…"
+    is AssistantIntent.Weather -> "Consultando el clima…"
     is AssistantIntent.CreateNote -> "Guardando tu nota…"
+    is AssistantIntent.CreateTask -> "Creando la tarea…"
+    is AssistantIntent.CreateEvent -> "Creando el evento…"
+    AssistantIntent.NextEvent -> "Leyendo tu agenda…"
+    AssistantIntent.Steps -> "Contando tus pasos…"
+    is AssistantIntent.Volume -> "Ajustando el volumen…"
+    is AssistantIntent.RecordVoiceNote -> "Preparando la grabación…"
+    is AssistantIntent.SaveCurrentPlace -> "Guardando este lugar…"
     is AssistantIntent.Calculate -> "Calculando…"
     is AssistantIntent.SetTimer -> "Preparando el temporizador…"
     is AssistantIntent.SetAlarm -> "Preparando la alarma…"

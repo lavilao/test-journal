@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -85,7 +86,6 @@ import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.speech.OfflineSpeechSupport
 import com.example.speech.RecognitionEngineInfo
-import com.example.speech.SpeechEngineManager
 import com.example.speech.hotword.HotwordService
 import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
@@ -136,6 +136,7 @@ fun VoiceAndAssistantScreen(
     val hotwordCommand by HotwordService.lastCommand.collectAsState()
     val hotwordReply by HotwordService.lastReply.collectAsState()
     val matchScore by HotwordService.voiceMatchScore.collectAsState()
+    val hotwordEngine by HotwordService.activeEngine.collectAsState()
     var wakeWordField by remember(refreshTick) { mutableStateOf(HotwordService.wakeWord(context)) }
     var hotwordChecked by remember(refreshTick) {
         mutableStateOf(HotwordService.isEnabled(context) || hotwordRunning)
@@ -278,13 +279,40 @@ fun VoiceAndAssistantScreen(
         }
     }
 
+    /**
+     * The Whistle self-test with REAL feedback at every phase — the whole
+     * point of a test is knowing whether the model loaded, errored or just
+     * ran slowly, instead of an endless spinner.
+     */
+    fun beginWhistleTest() {
+        whistleTestState = "running"
+        whistleTestDetail = "Cargando el modelo de voz desde el almacenamiento…"
+        scope.launch {
+            val speechLoaded = try {
+                NeedleModelManager.ensureLoaded(context)
+                NeedleRuntime.isSpeechModelLoaded()
+            } catch (_: Exception) {
+                false
+            }
+            if (!speechLoaded) {
+                whistleTestDetail = "El modelo NO cargó: " +
+                        (NeedleRuntime.lastErrorMessage ?: "el motor no reportó la causa") +
+                        " · archivo: ${NeedleModelManager.whistleFile(context).length() / (1024 * 1024)} MB"
+                whistleTestState = "fail"
+                needleTick++
+                return@launch
+            }
+            whistleTestDetail = "Modelo cargado ✔ (máscara ${NeedleRuntime.loadedModels()}). " +
+                    "Grabando 3 s — habla ahora…"
+            whistleTestController.start()
+        }
+    }
+
     val whistleTestPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            whistleTestState = "running"
-            whistleTestDetail = null
-            whistleTestController.start()
+            beginWhistleTest()
         } else {
             whistleTestState = "fail"
             whistleTestDetail = "Sin micrófono no puedo probar Whistle."
@@ -305,9 +333,7 @@ fun VoiceAndAssistantScreen(
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
                 ) {
-                    whistleTestState = "running"
-                    whistleTestDetail = null
-                    whistleTestController.start()
+                    beginWhistleTest()
                 } else {
                     whistleTestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -315,25 +341,48 @@ fun VoiceAndAssistantScreen(
         }
     }
 
-    // Auto-stop the Whistle test after 3 seconds and transcribe it.
+    // Auto-stop the Whistle test after 3 seconds and transcribe it, with
+    // LIVE progress: inference on slow phones takes tens of seconds and the
+    // old UI stayed silently spinning.
     LaunchedEffect(whistleTestRecording) {
         if (whistleTestRecording) {
             delay(3000)
             val pcm = whistleTestController.stop()
             val started = System.currentTimeMillis()
-            val text = kotlinx.coroutines.withTimeoutOrNull(30_000) {
+            val ticker = launch {
+                while (true) {
+                    val elapsed = (System.currentTimeMillis() - started) / 1000.0
+                    whistleTestDetail =
+                        "Transcribiendo con Whistle en tu teléfono… ${"%.0f".format(elapsed)} s " +
+                                "(en móviles lentos puede tardar)"
+                    delay(500)
+                }
+            }
+            val raw = kotlinx.coroutines.withTimeoutOrNull(30_000) {
                 NeedleRuntime.transcribe(pcm, "es")
             }
-            whistleTestDetail = when {
-                text == null -> "El motor no respondió (prueba de nuevo)."
-                text.isBlank() -> "Escuchó 3 s pero devolvió silencio — habla más fuerte y repite."
-                else -> "Escuchado: «$text» · ${
-                    "%.1f".format((System.currentTimeMillis() - started) / 1000.0)
-                } s"
+            ticker.cancel()
+            val parsed = raw?.let { r ->
+                try { org.json.JSONObject(r) } catch (_: Exception) { null }
             }
-            // Pass = the engine ran end-to-end on this device; an empty
+            val text = parsed?.optString("text")?.trim() ?: ""
+            val lang = parsed?.optString("language")?.trim() ?: ""
+            val ttft = parsed?.optDouble("ttft_ms", 0.0) ?: 0.0
+            val tps = parsed?.optDouble("decode_tps", 0.0) ?: 0.0
+            val secs = (System.currentTimeMillis() - started) / 1000.0
+            whistleTestDetail = when {
+                raw == null ->
+                    "El motor no respondió en 30 s (móvil muy lento o motor ocupado). " +
+                            "Reintenta con la app recién abierta."
+                text.isBlank() ->
+                    "El motor respondió (${"%.1f".format(secs)} s) pero no detectó voz: " +
+                            "habla más fuerte y repite."
+                else ->
+                    "Escuchado: «$text» · idioma ${lang.ifBlank { "?" }} · 1ª palabra ${"%.2f".format(ttft / 1000.0)} s · ${"%.0f".format(tps)} tok/s · total ${"%.1f".format(secs)} s"
+            }
+            // PASS = the engine ran end-to-end on this device; an empty
             // transcript is reported honestly rather than scored as success.
-            whistleTestState = if (text != null && text.isNotBlank()) "pass" else "fail"
+            whistleTestState = if (raw != null) "pass" else "fail"
             needleTick++
         }
     }
@@ -399,16 +448,50 @@ fun VoiceAndAssistantScreen(
     // Recording flows (enrollment / verification)
     // ------------------------------------------------------------------
 
-    fun runRecordingSample(durationMs: Long, onSample: (ShortArray?) -> Unit) {
-        VoiceSampleRecorder.record(durationMs) { result ->
-            scope.launch(Dispatchers.Main) { onSample(result.samples) }
+    // While recording a sample the hotword loop must release the microphone,
+    // otherwise the enrollment AudioRecord never initializes — THAT was the
+    // "se queda sin inscribir" bug.
+    var hotwordWasRunning by remember { mutableStateOf(false) }
+
+    fun startVoiceRecording(mode: String) {
+        hotwordWasRunning = HotwordService.isRunning.value
+        if (hotwordWasRunning) {
+            HotwordService.stop(context)
+        }
+        enrollMode = mode
+        testScore = null
+        testVerdict = null
+        enrollPhase = "${mode}-countdown"
+    }
+
+    fun finishVoiceRecording() {
+        if (hotwordWasRunning && HotwordService.isEnabled(context)) {
+            HotwordService.start(context)
+        }
+        hotwordWasRunning = false
+    }
+
+    val voiceEnrollPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startVoiceRecording("enroll")
+        } else {
+            voicePrintMessage = "Sin el permiso de micrófono no puedo grabar tu huella de voz."
         }
     }
 
-    fun handleEnrollSample(samples: ShortArray?) {
+    fun runRecordingSample(durationMs: Long, onSample: (ShortArray?, String) -> Unit) {
+        VoiceSampleRecorder.record(durationMs) { result ->
+            scope.launch(Dispatchers.Main) { onSample(result.samples, result.reason) }
+        }
+    }
+
+    fun handleEnrollSample(samples: ShortArray?, reason: String) {
         if (samples == null) {
             enrollPhase = null
-            voicePrintMessage = "No pude grabar la muestra. Intenta de nuevo."
+            voicePrintMessage = "No pude grabar la muestra: $reason. Intenta de nuevo."
+            finishVoiceRecording()
             return
         }
         enrollPhase = "computing"
@@ -418,25 +501,28 @@ fun VoiceAndAssistantScreen(
                 enrollPhase = null
                 if (embedding == null) {
                     voicePrintMessage =
-                        "La muestra salió muy corta o silenciosa: di una frase completa."
+                        "La muestra salió muy corta o silenciosa: di una frase completa " +
+                                "(«hola mnemosyne, buenos días») cerca del micrófono."
                 } else if (!store.isEnrolled()) {
                     store.startEnrollment(embedding)
-                    voicePrintMessage = "Primera muestra guardada. Graba otra para reforzarla."
+                    voicePrintMessage = "¡Huella creada! Graba otra muestra para reforzarla."
                 } else {
                     store.addSample(embedding)
                     voicePrintMessage = "Muestra ${store.sampleCount()} guardada."
                 }
                 testScore = null
                 testVerdict = null
+                finishVoiceRecording()
                 refreshAll()
             }
         }
     }
 
-    fun handleTestSample(samples: ShortArray?) {
+    fun handleTestSample(samples: ShortArray?, reason: String) {
         if (samples == null) {
             enrollPhase = null
-            voicePrintMessage = "No pude grabar la prueba."
+            voicePrintMessage = "No pude grabar la prueba: $reason."
+            finishVoiceRecording()
             return
         }
         enrollPhase = "computing"
@@ -453,6 +539,7 @@ fun VoiceAndAssistantScreen(
                     else -> "NO coincide (similitud ${(verdict.first * 100).toInt()}%): " +
                             "otra voz o condiciones distintas."
                 }
+                finishVoiceRecording()
                 refreshAll()
             }
         }
@@ -482,10 +569,10 @@ fun VoiceAndAssistantScreen(
             }
 
             "recording" -> {
-                runRecordingSample(durationMs = 2600) { samples ->
+                runRecordingSample(durationMs = 3200) { samples, reason ->
                     when {
-                        enrollMode == "enroll" -> handleEnrollSample(samples)
-                        else -> handleTestSample(samples)
+                        enrollMode == "enroll" -> handleEnrollSample(samples, reason)
+                        else -> handleTestSample(samples, reason)
                     }
                 }
             }
@@ -938,6 +1025,88 @@ fun VoiceAndAssistantScreen(
             }
         }
 
+        // ============ 2.55 Assistant tools (per-tool gating) ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.Tune, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Herramientas del asistente",
+            badge = {
+                val active = remember(needleTick) {
+                    NeedleTools.TOOL_CATALOG.count { NeedleTools.isToolEnabled(context, it.id) }
+                }
+                BadgePill("$active / ${NeedleTools.TOOL_CATALOG.size}", ForestPrimary)
+            }
+        ) {
+            Text(
+                text = "Needle es un modelo pequeño y su ventana de contexto es limitada: cada " +
+                        "herramienta activa ocupa tokens de esa ventana (el «context bloat» que " +
+                        "también degrada a los modelos grandes). Las herramientas desactivadas NO " +
+                        "se le declaran: el enrutador gana precisión y velocidad. Enciende lo que " +
+                        "uses, apaga lo que no.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (needleDownloaded) {
+                Text(
+                    text = if (NeedleRuntime.staticPrefixTokens > 0) {
+                        "Prefijo estático medido por el motor: ${NeedleRuntime.staticPrefixTokens} tokens."
+                    } else {
+                        "El motor medirá el prefijo al inicializar."
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            NeedleTools.TOOL_CATALOG.forEach { spec ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(spec.label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            spec.hint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = remember(needleTick) { NeedleTools.isToolEnabled(context, spec.id) },
+                        onCheckedChange = { checked ->
+                            NeedleTools.setToolEnabled(context, spec.id, checked)
+                            scope.launch {
+                                NeedleRuntime.applyToolGating(context)
+                                needleTick++
+                            }
+                        },
+                        enabled = needleDownloaded
+                    )
+                }
+            }
+            needleRuntimeError?.let { err ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Aviso del motor: $err",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            TextButton(onClick = {
+                NeedleTools.resetGating(context)
+                scope.launch {
+                    NeedleRuntime.applyToolGating(context)
+                    needleTick++
+                }
+            }) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Restaurar los valores por defecto")
+            }
+        }
+
         // ============ 2.6 Integrated self-tests ============
         SettingsCard(
             icon = { Icon(Icons.Default.Science, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
@@ -1024,6 +1193,15 @@ fun VoiceAndAssistantScreen(
                 }
             }
         ) {
+            if (hotwordRunning) {
+                Text(
+                    text = "Motor de escucha: ${hotwordEngine.ifBlank { "decidiendo…" }}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ForestPrimary
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
             OutlinedTextField(
                 value = wakeWordField,
                 onValueChange = { wakeWordField = it.take(40) },
@@ -1171,10 +1349,13 @@ fun VoiceAndAssistantScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            enrollMode = "enroll"
-                            testScore = null
-                            testVerdict = null
-                            enrollPhase = "enroll-countdown"
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                startVoiceRecording("enroll")
+                            } else {
+                                voiceEnrollPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                         modifier = Modifier.weight(1f).testTag("voice_enroll_btn")
@@ -1186,8 +1367,13 @@ fun VoiceAndAssistantScreen(
                     }
                     OutlinedButton(
                         onClick = {
-                            enrollMode = "test"
-                            enrollPhase = "test-countdown"
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                startVoiceRecording("test")
+                            } else {
+                                voiceEnrollPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
                         },
                         enabled = enrolled,
                         modifier = Modifier.weight(1f).testTag("voice_test_btn")
@@ -1358,17 +1544,30 @@ fun VoiceAndAssistantScreen(
             Button(
                 onClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val rm = context.getSystemService(RoleManager::class.java)
-                        if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
-                            roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                            return@Button
+                        try {
+                            val rm = context.getSystemService(RoleManager::class.java)
+                            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+                                roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+                                return@Button
+                            }
+                        } catch (_: Exception) {
                         }
                     }
-                    // Fallback (Android 9- or ROMs without the role dialog):
-                    // the "default apps" settings page, where the assistant
-                    // can still be changed by hand. The old fallback opened
-                    // the VOICE INPUT settings, a different screen that never
-                    // lets the user pick the assistant.
+                    // Android 9-11 (the assistant ROLE only exists on newer
+                    // systems): "Assist & voice input" is the screen that
+                    // actually lists VoiceInteractionServices; Default apps
+                    // is the fallback when the ROM hides it.
+                    val voiceInput = android.content.Intent(
+                        android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (tryStart(context, voiceInput)) {
+                        Toast.makeText(
+                            context,
+                            "Toca «App de asistencia» (o «Asistente digital») y elige «Asistente Mnemosyne»",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@Button
+                    }
                     try {
                         val intent = android.content.Intent(
                             android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
@@ -1376,7 +1575,7 @@ fun VoiceAndAssistantScreen(
                         context.startActivity(intent)
                         Toast.makeText(
                             context,
-                            "Abre «Asistente digital» y elige Mnemosyne",
+                            "Abre «Apps predeterminadas → App de asistencia» y elige Mnemosyne",
                             Toast.LENGTH_LONG
                         ).show()
                     } catch (_: Exception) {
@@ -1391,15 +1590,24 @@ fun VoiceAndAssistantScreen(
                 Text(if (roleHeld) "Cambiar / revisar asistente" else "Configurar como asistente")
             }
             Spacer(modifier = Modifier.height(6.dp))
+            val currentAssistant = remember(refreshTick) { currentAssistantComponent(context) }
             Text(
                 text = if (roleHeld) {
-                    "Activo: el gesto de asistente abre Mnemosyne (el hotword de esta " +
-                        "app sigue siendo el de software)."
+                    "✔ Activo: el gesto de asistente (pulsación larga del botón de inicio o el " +
+                        "gesto configurado) abre Mnemosyne. El hotword de bajo consumo «Hey Google» " +
+                        "sigue siendo privilegiado; el de esta app es el de software de la tarjeta " +
+                        "de arriba."
                 } else {
-                    "En el diálogo del sistema marca «Mnemosyne». Si no aparece en la " +
-                        "lista, usa «Apps predeterminadas → Asistente digital». Ser el " +
-                        "asistente NO incluye el hotword DSP (API privilegiada); el hotword " +
-                        "de esta app es el de la tarjeta de arriba."
+                    buildString {
+                        append("En Android 11: mantén pulsado el botón de inicio → icono de ")
+                        append("asistente, o Ajustes → Apps y notificaciones → Avanzado → Apps ")
+                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne». ")
+                        append("Si no aparece en la lista, reinicia el teléfono tras instalar ")
+                        append("(algunas ROMs cachean la lista de asistentes).")
+                        currentAssistant?.let {
+                            append("\nAsistente actual del sistema: ${it.substringAfterLast('.')}.")
+                        }
+                    }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1555,11 +1763,34 @@ private fun RecordingIndicator(phase: String, countdown: Int, label: String) {
 }
 
 private fun isAssistantRoleHeld(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
-    return try {
-        val rm = context.getSystemService(RoleManager::class.java) ?: return false
-        rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-    } catch (_: Exception) {
-        false
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
+            val rm = context.getSystemService(RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) &&
+                rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+            ) {
+                return true
+            }
+        } catch (_: Exception) {
+        }
     }
+    // Android 9-11: the RoleManager may not know the assistant role, but the
+    // system still records the active VoiceInteractionService in
+    // Settings.Secure — read it directly so the status is honest everywhere.
+    return currentAssistantComponent(context)?.contains(context.packageName) == true
+}
+
+/** The active system assistant as "package/class", or null when unset. */
+private fun currentAssistantComponent(context: Context): String? = try {
+    android.provider.Settings.Secure.getString(context.contentResolver, "assistant")
+        ?.takeIf { it.isNotBlank() }
+} catch (_: Exception) {
+    null
+}
+
+private fun tryStart(context: Context, intent: android.content.Intent): Boolean = try {
+    context.startActivity(intent)
+    true
+} catch (_: Exception) {
+    false
 }

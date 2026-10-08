@@ -251,6 +251,105 @@ Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject t
 #endif
 }
 
+/**
+ * TEXT EMBEDDING with the loaded Needle model: returns the embedding vector
+ * for a sentence (used by the semantic search / RAG layer). The first C call
+ * with a null output returns the float count without computing, so the buffer
+ * is sized exactly before the second call computes it.
+ */
+JNIEXPORT jfloatArray JNICALL
+Java_com_example_ai_needle_NeedleRuntime_nativeEmbedText(JNIEnv *env, jobject thiz,
+                                                          jstring input) {
+    (void)thiz;
+#if NEEDLE_AVAILABLE
+    if (input == nullptr) return nullptr;
+    const char *cinput = env->GetStringUTFChars(input, nullptr);
+    if (cinput == nullptr) return nullptr;
+
+    std::lock_guard<std::mutex> lock(g_needle_mutex);
+    int dims = needle_embed(cinput, nullptr, 0, nullptr, 0);
+    if (dims <= 0) {
+        LOGE("needle_embed(size) failed: rc=%d err=%s", dims, needle_last_error());
+        env->ReleaseStringUTFChars(input, cinput);
+        return nullptr;
+    }
+    std::vector<float> vec(static_cast<size_t>(dims));
+    int written = needle_embed(cinput, nullptr, 0, vec.data(), dims);
+    env->ReleaseStringUTFChars(input, cinput);
+    if (written != dims) {
+        LOGE("needle_embed(compute) failed: rc=%d err=%s", written, needle_last_error());
+        return nullptr;
+    }
+    jfloatArray out = env->NewFloatArray(dims);
+    if (out == nullptr) return nullptr;
+    env->SetFloatArrayRegion(out, 0, dims, vec.data());
+    return out;
+#else
+    (void)env;
+    (void)input;
+    return nullptr;
+#endif
+}
+
+/**
+ * LIVE transcription: appends ~1 s of 16 kHz mono float PCM and returns the
+ * JSON of the words this pass committed plus the unconfirmed tail.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_example_ai_needle_NeedleRuntime_nativeStreamProcess(JNIEnv *env, jobject thiz,
+                                                              jfloatArray pcm,
+                                                              jint samples,
+                                                              jstring language) {
+    (void)thiz;
+#if NEEDLE_AVAILABLE
+    if (pcm == nullptr || samples <= 0) return nullptr;
+    std::vector<float> audio(static_cast<size_t>(samples));
+    env->GetFloatArrayRegion(pcm, 0, samples, audio.data());
+
+    const char *lang = language != nullptr ? env->GetStringUTFChars(language, nullptr) : nullptr;
+
+    std::vector<char> out(kOutCapacity);
+    {
+        std::lock_guard<std::mutex> lock(g_needle_mutex);
+        int rc = needle_stream_transcribe_process(audio.data(), samples, lang, nullptr,
+                                                  out.data(), kOutCapacity);
+        if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
+        if (rc < 0) {
+            LOGE("needle_stream_transcribe_process failed: rc=%d err=%s", rc, needle_last_error());
+            return nullptr;
+        }
+    }
+    return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
+#else
+    (void)env;
+    (void)pcm;
+    (void)samples;
+    (void)language;
+    return nullptr;
+#endif
+}
+
+/** Ends the live stream; returns the JSON with the final committed words. */
+JNIEXPORT jbyteArray JNICALL
+Java_com_example_ai_needle_NeedleRuntime_nativeStreamStop(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+#if NEEDLE_AVAILABLE
+    std::vector<char> out(kOutCapacity);
+    {
+        std::lock_guard<std::mutex> lock(g_needle_mutex);
+        int rc = needle_stream_transcribe_stop(out.data(), kOutCapacity);
+        if (rc < 0) {
+            LOGE("needle_stream_transcribe_stop failed: rc=%d err=%s", rc, needle_last_error());
+            return nullptr;
+        }
+    }
+    return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
+#else
+    return nullptr;
+#endif
+}
+
 /** Last engine error, as raw UTF-8 bytes. */
 JNIEXPORT jbyteArray JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeLastError(JNIEnv *env, jobject thiz) {

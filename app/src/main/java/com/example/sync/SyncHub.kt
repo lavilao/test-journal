@@ -150,6 +150,24 @@ object SyncHub {
             } catch (_: Exception) {
             }
             try {
+                // SPATIAL reminders: calendar places × current location →
+                // "time to leave" + arrivals.
+                com.example.location.SpatialContextEngine.evaluate(app)
+            } catch (_: Exception) {
+            }
+            try {
+                // Health Connect (Android 9+ with the provider app, 14+ built
+                // in): real steps overwrite the sensor baseline when available.
+                com.example.health.HealthConnectManager.refreshStepsIntoCache(app)
+            } catch (_: Exception) {
+            }
+            try {
+                // Re-arm the activity-transitions feed (idempotent) so the
+                // habit store keeps learning commute patterns.
+                com.example.habit.ActivityTransitionsManager.register(app)
+            } catch (_: Exception) {
+            }
+            try {
                 // Honors the 20-minute staleness window internally, so this
                 // only touches the network when the cached reading expires.
                 com.example.telemetry.WeatherService(app).refreshWeather()
@@ -159,6 +177,11 @@ object SyncHub {
                 // Habit engine: throttled telemetry harvest (~15 min) — the
                 // collectors survive process death via UsageStats replays.
                 com.example.habit.HabitEngine.collectTick(app)
+            } catch (_: Exception) {
+            }
+            try {
+                // Morning brief + weekly report alarms (learned wake time).
+                com.example.sync.BriefScheduler.rearm(app)
             } catch (_: Exception) {
             }
             SyncScheduler.scheduleNextReminderAlarm(app)

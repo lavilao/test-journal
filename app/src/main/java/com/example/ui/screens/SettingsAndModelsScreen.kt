@@ -6,6 +6,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -505,6 +507,90 @@ fun SettingsAndModelsScreen(
                                 Text("Download", style = MaterialTheme.typography.labelSmall)
                             }
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Copia de seguridad de los modelos ML Kit:",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Exporta los modelos descargados (traducción incluida) a un zip y " +
+                            "reimpórtalos cuando quieras — otro teléfono o una reinstalación sin " +
+                            "volver a bajar ~30 MB por idioma. Lo que Google guarde fuera del " +
+                            "almacenamiento de la app no aparece aquí: se muestra exactamente " +
+                            "lo encontrado.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val mlkitBackupFiles = remember { mutableStateOf<List<com.example.ai.needle.MlKitTransferManager.ModelFile>>(emptyList()) }
+                val mlkitBackupScanned = remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    mlkitBackupFiles.value = com.example.ai.needle.MlKitTransferManager.discover(context)
+                    mlkitBackupScanned.value = true
+                }
+                if (mlkitBackupScanned.value) {
+                    if (mlkitBackupFiles.value.isEmpty()) {
+                        Text(
+                            text = "Encontrados: 0 archivos de modelos en el almacenamiento de la app.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Text(
+                            text = "Encontrados: ${mlkitBackupFiles.value.size} archivos · " +
+                                    com.example.ai.needle.MlKitTransferManager.formatBytes(
+                                        mlkitBackupFiles.value.sumOf { it.sizeBytes }
+                                    ) + " (traducción, visión, digital ink…)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ForestPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                val mlkitExportLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("application/zip")
+                ) { uri ->
+                    if (uri != null) {
+                        scope.launch {
+                            val result = com.example.ai.needle.MlKitTransferManager.exportAll(context, uri)
+                            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                val mlkitImportLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    if (uri != null) {
+                        scope.launch {
+                            val result = com.example.ai.needle.MlKitTransferManager.importAll(context, uri)
+                            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                            mlkitBackupFiles.value = com.example.ai.needle.MlKitTransferManager.discover(context)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { mlkitExportLauncher.launch("mnemosyne-mlkit-models.zip") },
+                        enabled = mlkitBackupFiles.value.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Exportar zip", style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(
+                        onClick = { mlkitImportLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Importar zip", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -1151,6 +1237,65 @@ fun SettingsAndModelsScreen(
                         Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(if (placeSaving) "Buscando tu posición…" else "Guardar mi posición actual como lugar")
+                    }
+                }
+
+                // ---- Spatial reminders: calendar places × current location ----
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(12.dp))
+                var spatialOn by remember(placesTick) {
+                    mutableStateOf(com.example.location.SpatialContextEngine.isEnabled(context))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Recordatorios espaciales del calendario",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Combina los LUGARES de tus eventos del calendario con tu " +
+                                    "ubicación: aviso de «es hora de salir» con el tiempo de viaje " +
+                                    "estimado (a pie o en coche, según tu actividad detectada) y " +
+                                    "notificación de llegada. Dimensión espacial + temporal.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = spatialOn,
+                        onCheckedChange = { checked ->
+                            spatialOn = checked
+                            com.example.location.SpatialContextEngine.setEnabled(context, checked)
+                        },
+                        modifier = Modifier.testTag("spatial_reminders_switch")
+                    )
+                }
+                if (spatialOn) {
+                    var spatialPreview by remember(placesTick) { mutableStateOf<String?>(null) }
+                    LaunchedEffect(placesTick) {
+                        spatialPreview = try {
+                            com.example.location.SpatialContextEngine.nextLocatedEvent(context)?.let { le ->
+                                "Próximo con lugar: «${le.event.title.take(30)}» — " +
+                                        "a ${if (le.distanceMeters >= 1000) "%.1f km".format(le.distanceMeters / 1000.0) else "${le.distanceMeters.toInt()} m"} " +
+                                        "(~${le.travelMinutes} min ${le.travelMode})"
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    spatialPreview?.let {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ForestPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
 

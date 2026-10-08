@@ -34,6 +34,15 @@ object NeedleRuntime {
     @Volatile var lastErrorMessage: String? = null
         private set
 
+    /**
+     * Tokenized length of the static prefix (system prompt + declared
+     * tools), as measured by needle_init. -1 = not initialized. Surfaced in
+     * the tools menu so the user can see how much of the model's context
+     * window the enabled tool catalogue is eating (context bloat).
+     */
+    @Volatile var staticPrefixTokens: Int = -1
+        private set
+
     private val apiMutex = Mutex()
 
     // Single-threaded dispatcher: the engine is not thread-safe and inference
@@ -71,6 +80,9 @@ object NeedleRuntime {
         maxNewTokens: Int
     ): ByteArray?
     private external fun nativeTranscribe(pcm: FloatArray, samples: Int, language: String?): ByteArray?
+    private external fun nativeEmbedText(input: String): FloatArray?
+    private external fun nativeStreamProcess(pcm: FloatArray, samples: Int, language: String?): ByteArray?
+    private external fun nativeStreamStop(): ByteArray?
     private external fun nativeLastError(): ByteArray?
     private external fun nativeReset()
 
@@ -119,20 +131,54 @@ object NeedleRuntime {
                 lastErrorMessage = lastError() ?: "no se pudo cargar ${speechFile.name}"
             }
         }
-        if (isTextModelLoaded()) initialize()
+        if (isTextModelLoaded()) initialize(context)
         loadedModels()
     }
 
     /** Declares the system prompt + tools. Must run after the text model. */
-    private suspend fun initialize(): Boolean = apiMutex.withLock {
+    private suspend fun initialize(context: Context): Boolean = apiMutex.withLock {
         if (initialized) return@withLock true
-        val rc = nativeInit(NeedleTools.buildSystemPrompt(), NeedleTools.buildToolsJson())
-        initialized = rc >= 0
-        if (rc < 0) {
-            lastErrorMessage = lastError() ?: "needle_init devolvió $rc"
-        }
-        initialized
+        declareTools(context)
     }
+
+    /**
+     * (Re)declares the tool catalogue from the CURRENT gating switches —
+     * used by the tools menu. Returns true when needle_init accepted the
+     * prompt. When the enabled set exceeds the context window the engine
+     * reports the measured token count and we fall back to the compact core
+     * set, so the assistant never ends up without tools.
+     */
+    suspend fun applyToolGating(context: Context): Boolean = apiMutex.withLock {
+        initialized = false
+        declareTools(context)
+    }
+
+    private suspend fun declareTools(context: Context): Boolean =
+        withContext(needleDispatcher) {
+            var rc = nativeInit(
+                NeedleTools.buildSystemPrompt(),
+                NeedleTools.buildToolsJson(context)
+            )
+            if (rc < 0) {
+                // Full catalogue too big for the context window (context
+                // bloat): retry with the compact core set, honestly degraded.
+                val fullError = lastError()
+                rc = nativeInit(
+                    NeedleTools.buildSystemPrompt(),
+                    NeedleTools.buildCoreToolsJson()
+                )
+                if (rc >= 0) {
+                    lastErrorMessage = "Conjunto de herramientas reducido (el catálogo " +
+                            "completo no cabía en la ventana de contexto). $fullError"
+                }
+            }
+            staticPrefixTokens = if (rc >= 0) rc else -1
+            initialized = rc >= 0
+            if (rc < 0 && lastErrorMessage == null) {
+                lastErrorMessage = lastError() ?: "needle_init devolvió $rc"
+            }
+            initialized
+        }
 
     // ------------------------------------------------------------------
     // Inference
@@ -177,6 +223,52 @@ object NeedleRuntime {
                 bytes?.toString(Charsets.UTF_8)
             }
         }
+
+    /**
+     * TRUE text embedding with the loaded Needle model: a vector for a
+     * sentence, the basis of the on-device semantic search and RAG.
+     */
+    suspend fun embedText(text: String): FloatArray? = apiMutex.withLock {
+        if (!isTextModelLoaded() || text.isBlank()) return@withLock null
+        withContext(needleDispatcher) {
+            try {
+                nativeEmbedText(text.take(1600))
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+
+    /**
+     * LIVE transcription pass: appends ~1 s of 16 kHz mono float PCM to the
+     * stream and returns the JSON with the words this pass committed plus
+     * the unconfirmed tail. Only for the speech model.
+     */
+    suspend fun streamProcess(pcm: FloatArray, language: String? = null): String? =
+        apiMutex.withLock {
+            if (!isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
+            withContext(needleDispatcher) {
+                try {
+                    val bytes = nativeStreamProcess(pcm, pcm.size, language)
+                    bytes?.toString(Charsets.UTF_8)
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+
+    /** Ends the live stream; JSON with the final committed words. */
+    suspend fun streamStop(): String? = apiMutex.withLock {
+        if (!isSpeechModelLoaded()) return@withLock null
+        withContext(needleDispatcher) {
+            try {
+                val bytes = nativeStreamStop()
+                bytes?.toString(Charsets.UTF_8)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
 
     /** Unloads everything (used when the user deletes the models). */
     suspend fun reset() = apiMutex.withLock {

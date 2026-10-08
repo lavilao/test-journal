@@ -4,14 +4,26 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.BatteryManager
 import android.provider.AlarmClock
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceSearchManager
+import com.example.data.model.AudioRecordItem
+import com.example.data.model.JournalEntry
+import com.example.data.model.LocalReminder
+import com.example.data.local.AppDatabase
+import com.example.location.SmartPlaces
+import com.example.repository.JournalRepository
 import com.example.telemetry.RealWeatherData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 
 /** What the assistant decided to do with an utterance. */
@@ -54,6 +66,38 @@ sealed class AssistantIntent {
 
     /** Translate text: "traduce hola al inglés". */
     data class Translate(val text: String, val targetLangHint: String?) : AssistantIntent()
+
+    /** Close a background app: "cierra whatsapp". */
+    data class CloseApp(val appName: String) : AssistantIntent()
+
+    /** Open a pre-filled SMS: "mensaje a maría: ya voy". */
+    data class SendMessage(val contactName: String, val message: String) : AssistantIntent()
+
+    /** Create a task/reminder: "recuérdame llamar al dentista". */
+    data class CreateTask(val title: String, val dueInMinutes: Int?) : AssistantIntent()
+
+    /** Create a calendar event. */
+    data class CreateEvent(
+        val title: String,
+        val startInMinutes: Int?,
+        val durationMinutes: Int?,
+        val location: String?
+    ) : AssistantIntent()
+
+    /** Read the next calendar event: "qué tengo hoy". */
+    data object NextEvent : AssistantIntent()
+
+    /** Steps today: "cuántos pasos llevo". */
+    data object Steps : AssistantIntent()
+
+    /** Volume control: "volumen al 50", "silencio". */
+    data class Volume(val level: Int?, val mode: String?) : AssistantIntent()
+
+    /** Record a voice memo attached to the journal. */
+    data class RecordVoiceNote(val seconds: Int, val title: String) : AssistantIntent()
+
+    /** Save the current location as a named place. */
+    data class SaveCurrentPlace(val name: String) : AssistantIntent()
 
     /** Not understood — offer help. */
     data object Unknown : AssistantIntent()
@@ -152,6 +196,93 @@ object AssistantParser {
                 val body = text.removePrefix(prefix).trim()
                 if (body.isNotBlank()) return AssistantIntent.CreateNote(body)
             }
+        }
+
+        // --- Close app: "cierra whatsapp" ---
+        Regex("^(?:cierra|cerrar|kill|quita|quitar)\\s+(?:la\\s+|el\\s+)?(.+)$").find(text)?.let { m ->
+            val what = m.groupValues[1].trim()
+            if (what.isNotBlank()) return AssistantIntent.CloseApp(what)
+        }
+
+        // --- Volume: "volumen al 50" / "silencio" / "vibración" ---
+        if (matchesAny(text, listOf("silencio", "silenciar", "modo silencio", "mute"))) {
+            return AssistantIntent.Volume(null, "silencio")
+        }
+        if (matchesAny(text, listOf("vibración", "vibracion", "modo vibración", "modo vibracion"))) {
+            return AssistantIntent.Volume(null, "vibracion")
+        }
+        Regex("(?:volumen|pon el volumen)(?:\\s+al)?\\s+(\\d{1,3})").find(text)?.let { m ->
+            val level = m.groupValues[1].toIntOrNull() ?: return@let
+            if (level in 0..100) return AssistantIntent.Volume(level, null)
+        }
+
+        // --- Steps ---
+        if (containsAny(text, listOf("cuántos pasos", "cuantos pasos", "pasos de hoy", "pasos hoy", "cuánto he caminado", "cuanto he caminado"))) {
+            return AssistantIntent.Steps
+        }
+
+        // --- Next event ---
+        if (containsAny(text, listOf("próximo evento", "proximo evento", "siguiente evento", "qué tengo hoy", "que tengo hoy", "agenda de hoy", "qué tengo mañana", "que tengo mañana"))) {
+            return AssistantIntent.NextEvent
+        }
+
+        // --- SMS: "mensaje a maría: texto" ---
+        Regex("^(?:mensaje|mensajito|manda|mandar|envía|enviar)\\s+(?:un\\s+)?(?:mensaje|sms|mensajito)?\\s*(?:a\\s+)?(.+)$").find(text)?.let { m ->
+            val rest = m.groupValues[1].trim()
+            val parts = rest.split(":", limit = 2)
+            if (parts.size == 2 && parts[0].isNotBlank()) {
+                return AssistantIntent.SendMessage(parts[0].trim(), parts[1].trim())
+            }
+            if (rest.isNotBlank() && (text.startsWith("mensaje a") || text.startsWith("manda un mensaje"))) {
+                return AssistantIntent.SendMessage(rest, "")
+            }
+        }
+
+        // --- Task: "recuérdame X" / "tarea X" ---
+        listOf("recuérdame ", "recuerdame ", "recuérdame que ", "recuerdame que ", "tarea ", "nueva tarea ", "apúntame ").forEach { prefix ->
+            if (text.startsWith(prefix)) {
+                val body = text.removePrefix(prefix).trim()
+                if (body.isNotBlank()) return AssistantIntent.CreateTask(body, null)
+            }
+        }
+
+        // --- Event: "evento X a las HH:MM" / "evento X en N minutos" ---
+        Regex("^evento\\s+(.+)$").find(text)?.let { m ->
+            val rest = m.groupValues[1].trim()
+            val inMin = Regex("(?:en|dentro de)\\s+(\\d+)\\s*(min|minutos|hora|horas)").find(rest)
+            val at = Regex("(?:a las|para las|las)\\s+(\\d{1,2})(?::(\\d{2}))?").find(rest)
+            val title = rest.substringBefore(" en ").substringBefore(" a las ").substringBefore(" para las ").trim()
+            if (title.isNotBlank()) {
+                when {
+                    inMin != null -> {
+                        val amount = inMin.groupValues[1].toIntOrNull() ?: return@let
+                        val unit = inMin.value.substringAfter(amount.toString(), "minuto").trim()
+                        val minutes = if (unit.startsWith("hora")) amount * 60 else amount
+                        return AssistantIntent.CreateEvent(title, minutes, 60, null)
+                    }
+                    at != null -> {
+                        val hour = at.groupValues[1].toIntOrNull() ?: return@let
+                        val minute = at.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+                        if (hour in 0..23 && minute in 0..59) {
+                            val now = java.util.Calendar.getInstance()
+                            val target = (now.clone() as java.util.Calendar).apply {
+                                set(java.util.Calendar.HOUR_OF_DAY, hour)
+                                set(java.util.Calendar.MINUTE, minute)
+                                set(java.util.Calendar.SECOND, 0)
+                                if (before(now)) add(java.util.Calendar.DAY_OF_YEAR, 1)
+                            }
+                            val inMinutes = ((target.timeInMillis - now.timeInMillis) / 60_000L).toInt()
+                            return AssistantIntent.CreateEvent(title, inMinutes, 60, null)
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Save current place: "guarda este lugar como gym" ---
+        Regex("^guarda(?:r)?\\s+(?:este|el|esta)?\\s*lugar(?:\\s+como)?\\s+(.+)$").find(text)?.let { m ->
+            val name = m.groupValues[1].trim()
+            if (name.isNotBlank()) return AssistantIntent.SaveCurrentPlace(name)
         }
 
         // --- Web search: "busca en internet ..." / "busca en google ..." ---

@@ -24,6 +24,8 @@ data class SemanticSearchUiState(
     val hits: List<SemanticHit> = emptyList(),
     /** True when Needle 3 (local AI) re-ranked the results. */
     val viaNeedle: Boolean = false,
+    /** True when the Needle embeddings (local vectors) participated. */
+    val viaEmbeddings: Boolean = false,
     val needleRanking: List<Long> = emptyList(),
     val latencyMs: Long = 0,
     val isSearching: Boolean = false
@@ -170,8 +172,14 @@ object SemanticSearchEngine {
     // ------------------------------------------------------------------
 
     /**
-     * Full semantic search. Always returns a lexical ranking; when the model
-     * is downloaded, enabled and initialized it re-ranks the candidates.
+     * Full semantic search, three local stages:
+     *  1. Lexical candidate scoring (TF-IDF-like, Spanish-aware).
+     *  1b. TRUE vector similarity with the Needle embeddings (when the model
+     *      is downloaded): entries with zero lexical overlap still surface —
+     *      that is the whole point of embeddings.
+     *  2. Optional Needle 3 re-ranking of the merged candidates.
+     *
+     * Without the model the search works exactly as before minus 1b/2.
      */
     suspend fun search(
         query: String,
@@ -183,11 +191,61 @@ object SemanticSearchEngine {
             return SemanticSearchUiState(query = query)
         }
 
-        val lexical = scoreLexically(query, entries).take(CANDIDATE_LIMIT)
-        if (lexical.isEmpty()) {
+        val lexicalAll = scoreLexically(query, entries)
+        val lexical = lexicalAll.take(CANDIDATE_LIMIT)
+
+        // ---- Stage 1b: vector similarity with the Needle embeddings ----
+        var viaEmbeddings = false
+        val embedScores: List<Pair<Long, Float>> =
+            if (NeedleEmbeddings.isAvailable(context) && NeedleModelManager.isAssistantEnabled(context)) {
+                try {
+                    NeedleEmbeddings.ensureIndexed(context, entries, maxNew = 6)
+                    kotlinx.coroutines.withTimeoutOrNull(12_000) {
+                        NeedleEmbeddings.search(context, query, entries, topK = CANDIDATE_LIMIT)
+                    } ?: emptyList()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+        if (embedScores.isNotEmpty()) viaEmbeddings = true
+
+        if (lexical.isEmpty() && !viaEmbeddings) {
             return SemanticSearchUiState(query = query, latencyMs = System.currentTimeMillis() - started)
         }
 
+        // ---- Merge lexical + vector scores into one candidate list ----
+        val maxLex = (lexicalAll.firstOrNull()?.score ?: 0f).coerceAtLeast(1f)
+        val byEntry = entries.associateBy { it.entry.id }
+        val candidates: List<ScoredEntry> = if (viaEmbeddings) {
+            val merged = mutableListOf<ScoredEntry>()
+            val seen = HashSet<Long>()
+            embedScores.forEach { (id, cos) ->
+                val e = byEntry[id] ?: return@forEach
+                if (seen.add(id)) {
+                    val lexScore = lexicalAll.firstOrNull { it.entry.entry.id == id }?.score ?: 0f
+                    val combined = 0.55f * cos.coerceAtLeast(0f) + 0.45f * (lexScore / maxLex)
+                    val hasLex = lexScore > 0f
+                    merged.add(
+                        ScoredEntry(
+                            e, combined,
+                            if (hasLex) "texto + semántica (${(cos * 100).toInt()}%)" else "semántica (${(cos * 100).toInt()}%)"
+                        )
+                    )
+                }
+            }
+            lexical.forEach {
+                if (seen.add(it.entry.entry.id)) {
+                    merged.add(ScoredEntry(it.entry, 0.45f * (it.score / maxLex), it.reason))
+                }
+            }
+            merged.sortedByDescending { it.score }.take(CANDIDATE_LIMIT)
+        } else {
+            lexical
+        }
+
+        // ---- Stage 2: Needle re-ranking of the merged candidates ----
         var viaNeedle = false
         var needleRanking: List<Long> = emptyList()
 
@@ -198,7 +256,7 @@ object SemanticSearchEngine {
         if (modelReady && NeedleModelManager.isAssistantEnabled(context)) {
             try {
                 val ranked = kotlinx.coroutines.withTimeoutOrNull(NEEDLE_TIMEOUT_MS) {
-                    NeedleTools.rankNotes(buildSearchTurn(query, lexical))
+                    NeedleTools.rankNotes(buildSearchTurn(query, candidates))
                 }
                 if (ranked != null) {
                     viaNeedle = true
@@ -209,13 +267,13 @@ object SemanticSearchEngine {
             }
         }
 
-        val byId = lexical.associateBy { it.entry.entry.id }
+        val byId = candidates.associateBy { it.entry.entry.id }
         val ordered = mutableListOf<ScoredEntry>()
         if (viaNeedle) {
             needleRanking.forEach { id -> byId[id]?.let { ordered.add(it) } }
-            lexical.forEach { if (it !in ordered) ordered.add(it) }
+            candidates.forEach { if (it !in ordered) ordered.add(it) }
         } else {
-            ordered.addAll(lexical)
+            ordered.addAll(candidates)
         }
 
         val hits = ordered.take(CANDIDATE_LIMIT).map { c ->
@@ -229,7 +287,7 @@ object SemanticSearchEngine {
                     .take(120),
                 score = c.score,
                 reason = if (viaNeedle && c.entry.entry.id in needleRanking) {
-                    "IA local: responde a la intención"
+                    if (viaEmbeddings) "IA local: responde a la intención (embeddings)" else "IA local: responde a la intención"
                 } else {
                     c.reason.ifBlank { "coincidencia de texto" }
                 }
@@ -240,6 +298,7 @@ object SemanticSearchEngine {
             query = query,
             hits = hits,
             viaNeedle = viaNeedle,
+            viaEmbeddings = viaEmbeddings,
             needleRanking = needleRanking,
             latencyMs = System.currentTimeMillis() - started
         )

@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.habit.HabitEngine
 import com.example.habit.HabitMiners
 import com.example.location.SmartPlaces
@@ -120,6 +121,9 @@ fun RoutinesScreen(
             briefText = stored.second
             briefIsFromNeedle = stored.third
         }
+        if (com.example.habit.ActivityTransitionsManager.hasPermission(context)) {
+            com.example.habit.ActivityTransitionsManager.register(context)
+        }
         loading = false
     }
 
@@ -133,7 +137,14 @@ fun RoutinesScreen(
 
     val activityLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { refreshSensors() }
+    ) {
+        // With the runtime permission granted, start the Transitions API
+        // feed immediately (also re-armed on every sync tick).
+        if (com.example.habit.ActivityTransitionsManager.hasPermission(context)) {
+            com.example.habit.ActivityTransitionsManager.register(context)
+        }
+        refreshSensors()
+    }
 
     Column(
         modifier = Modifier
@@ -664,6 +675,174 @@ fun RoutinesScreen(
                     Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Generar resumen del día")
+                }
+            }
+        }
+
+        // ---------------- Brief notifications (learned wake time) ----------------
+        SectionCard(title = "Notificaciones del brief", testTag = "routines_brief_notify_card") {
+            var morningOn by remember { mutableStateOf(com.example.sync.BriefScheduler.isMorningEnabled(context)) }
+            var weeklyOn by remember { mutableStateOf(com.example.sync.BriefScheduler.isWeeklyEnabled(context)) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Brief matutino", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "A tu hora aprendida de despertar (mineral de sueño) + 15 min: " +
+                                "clima, primer evento con viaje estimado, sueño y batería.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = morningOn,
+                    onCheckedChange = { checked ->
+                        morningOn = checked
+                        scope.launch { com.example.sync.BriefScheduler.setMorningEnabled(context, checked) }
+                    },
+                    modifier = Modifier.testTag("morning_brief_switch")
+                )
+            }
+            val nextMorning = remember(morningOn) { com.example.sync.BriefScheduler.nextMorningAt(context) }
+            if (morningOn && nextMorning > 0) {
+                Text(
+                    text = "Próximo: ${SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(Date(nextMorning))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GoogleGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Informe semanal", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "Domingo 19:00: se guarda COMO NOTA en tu diario (con narrativa " +
+                                "de Needle si está descargado) + notificación resumen.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = weeklyOn,
+                    onCheckedChange = { checked ->
+                        weeklyOn = checked
+                        scope.launch { com.example.sync.BriefScheduler.setWeeklyEnabled(context, checked) }
+                    },
+                    modifier = Modifier.testTag("weekly_report_switch")
+                )
+            }
+            val nextWeekly = remember(weeklyOn) { com.example.sync.BriefScheduler.nextWeeklyAt(context) }
+            if (weeklyOn && nextWeekly > 0) {
+                Text(
+                    text = "Próximo: ${SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(Date(nextWeekly))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GoogleGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // ---------------- Health Connect (real steps + sleep) ----------------
+        SectionCard(title = "Health Connect — pasos y sueño reales", testTag = "routines_hc_card") {
+            val hcLauncher = rememberLauncherForActivityResult(
+                androidx.health.connect.client.PermissionController
+                    .createRequestPermissionResultContract()
+            ) { refreshSensors() }
+            var hcPrefer by remember { mutableStateOf(com.example.health.HealthConnectManager.preferEnabled(context)) }
+            var hcStatus by remember { mutableStateOf(-1) }
+            var hcGranted by remember { mutableStateOf(false) }
+            var hcSteps by remember { mutableStateOf<Long?>(null) }
+            var hcSleep by remember { mutableStateOf<Long?>(null) }
+            LaunchedEffect(refreshTick) {
+                hcStatus = com.example.health.HealthConnectManager.sdkStatus(context)
+                hcSteps = com.example.health.HealthConnectManager.todaySteps(context)
+                hcSleep = com.example.health.HealthConnectManager.lastNightSleepMinutes(context)
+                hcGranted = hcSteps != null
+            }
+            val available = hcStatus == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE
+            Text(
+                text = when {
+                    available -> "Integrado en este sistema: pasos y sueño REALES alimentan el " +
+                            "brief, el widget y el informe semanal (nada se envía fuera)."
+                    hcStatus == androidx.health.connect.client.HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
+                        "Android 11: funciona instalando la app «Health Connect by Android» " +
+                                "desde Play Store (integrado de serie en Android 14+). Sin ella, " +
+                                "sigo usando el sensor de pasos del teléfono."
+                    else -> "No disponible en este dispositivo; el sensor de pasos propio sigue " +
+                            "usándose."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (available) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Permisos de pasos y sueño", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = if (hcGranted) "Concedidos ✔" else "No concedidos todavía",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (hcGranted) GoogleGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(onClick = {
+                        hcLauncher.launch(com.example.health.HealthConnectManager.readPermissions)
+                    }) {
+                        Text("Conceder", fontSize = 12.sp)
+                    }
+                }
+                hcSteps?.let {
+                    Text("Hoy: $it pasos (Health Connect)", style = MaterialTheme.typography.labelMedium)
+                }
+                hcSleep?.let {
+                    Text("Anoche: ${it / 60} h ${it % 60} min de sueño", style = MaterialTheme.typography.labelMedium)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Preferir Health Connect", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Si lo desactivas, vuelvo al sensor de pasos propio",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = hcPrefer,
+                        onCheckedChange = { checked ->
+                            hcPrefer = checked
+                            com.example.health.HealthConnectManager.setPreferEnabled(context, checked)
+                        }
+                    )
+                }
+            } else if (hcStatus == androidx.health.connect.client.HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = {
+                    try {
+                        context.startActivity(
+                            com.example.health.HealthConnectManager.installIntent(context)
+                        )
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Abre Play Store y busca «Health Connect»", Toast.LENGTH_LONG).show()
+                    }
+                }) {
+                    Text("Instalar Health Connect (Play Store)", fontSize = 12.sp)
                 }
             }
         }

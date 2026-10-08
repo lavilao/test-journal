@@ -93,9 +93,15 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_TAB = "open_tab"
         const val TAB_NOTIFICATIONS = "notifications"
 
+        /** The system-assistant gesture opens the local assistant screen. */
+        const val EXTRA_OPEN_ASSISTANT = "open_assistant"
+
         /** Voice commands that must open the assistant screen (from the
          *  hotword notification or the system-assistant session). */
         val voiceCommandRequests = MutableStateFlow<String?>(null)
+
+        /** Assistant-gesture opens (from the VoiceInteractionSession). */
+        val openAssistantRequests = MutableStateFlow(false)
 
         /** Tab deep-links coming from notifications / the widget. */
         val openTabRequests = MutableStateFlow<String?>(null)
@@ -110,6 +116,9 @@ class MainActivity : ComponentActivity() {
             ?: intent?.getStringExtra(HotwordService.EXTRA_VOICE_COMMAND)
         if (!command.isNullOrBlank()) {
             voiceCommandRequests.value = command
+        }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_ASSISTANT, false) == true) {
+            openAssistantRequests.value = true
         }
         intent?.getStringExtra(EXTRA_OPEN_TAB)?.let { tab ->
             openTabRequests.value = tab
@@ -160,6 +169,15 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         if (!command.isNullOrBlank()) {
             screenState = AppScreen.Assistant
             MainActivity.voiceCommandRequests.value = null
+        }
+    }
+
+    // The bare assistant gesture (no utterance) just opens the assistant.
+    val openAssistantRequest by MainActivity.openAssistantRequests.collectAsState()
+    LaunchedEffect(openAssistantRequest) {
+        if (openAssistantRequest) {
+            screenState = AppScreen.Assistant
+            MainActivity.openAssistantRequests.value = false
         }
     }
 
