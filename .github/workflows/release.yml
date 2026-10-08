@@ -143,8 +143,18 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            # Automatically generate tag on push to main/master using workflow run number
-            TAG="v1.0.${{ github.run_number }}"
+            # Real in-app versioning: the tag comes from the VERSION file
+            # (e.g. v1.2.0) instead of the frozen v1.0.<run_number>.
+            VERSION_FILE="$GITHUB_WORKSPACE/VERSION"
+            if [ -f "$VERSION_FILE" ]; then
+              VERSION_NAME="$(sed -n 's/^versionName=//p' "$VERSION_FILE" | tr -d '[:space:]')"
+              if [ -n "$VERSION_NAME" ]; then
+                TAG="v$VERSION_NAME"
+              fi
+            fi
+            if [ -z "${TAG:-}" ]; then
+              TAG="v1.0.${{ github.run_number }}"
+            fi
           fi
 
           if [ -n "${{ github.event.inputs.release_name }}" ]; then
