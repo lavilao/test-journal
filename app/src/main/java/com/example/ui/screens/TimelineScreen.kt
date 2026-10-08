@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -28,8 +29,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Folder
@@ -119,6 +123,7 @@ fun TimelineScreen(
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     val deviceFiles by viewModel.deviceFilesResults.collectAsState()
     val deviceContacts by viewModel.deviceContactsResults.collectAsState()
+    val semanticSearch by viewModel.semanticSearch.collectAsState()
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -128,6 +133,25 @@ fun TimelineScreen(
     var selectedRssArticleForReading by remember { mutableStateOf<RssArticle?>(null) }
     var showPhotoChoiceDialog by remember { mutableStateOf(false) }
     var showCityPicker by remember { mutableStateOf(false) }
+
+    // Multi-select memories: long-press a card to start, tap to toggle,
+    // then delete them all at once.
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedMemoryIds by remember { mutableStateOf(setOf<Long>()) }
+
+    fun exitSelection() {
+        selectionMode = false
+        selectedMemoryIds = emptySet()
+    }
+
+    val deleteSelected: () -> Unit = {
+        val ids = selectedMemoryIds.toList()
+        if (ids.isNotEmpty()) {
+            ids.forEach { viewModel.deleteEntry(it) }
+            Toast.makeText(context, "${ids.size} memorias eliminadas", Toast.LENGTH_SHORT).show()
+            exitSelection()
+        }
+    }
 
     val hasStoragePermission by viewModel.hasStoragePermission.collectAsState()
 
@@ -160,9 +184,11 @@ fun TimelineScreen(
         if (homeSearchQuery.isNotBlank()) viewModel.searchDevice(homeSearchQuery)
     }
 
-    // Device-wide search (files + contacts) while typing
+    // Device-wide search (files + contacts) while typing, plus the
+    // semantic note search (lexical + optional Needle re-ranking).
     LaunchedEffect(homeSearchQuery) {
         viewModel.searchDevice(homeSearchQuery)
+        viewModel.onSemanticSearchChanged(homeSearchQuery)
     }
 
     // Gallery Picker
@@ -207,20 +233,10 @@ fun TimelineScreen(
         }
     }
 
-    // Real-time Search Results for Files and Notes
-    val searchResults = remember(homeSearchQuery, vaultItems, entries) {
-        if (homeSearchQuery.isBlank()) {
-            emptyList()
-        } else {
-            val q = homeSearchQuery.trim().lowercase()
-            vaultItems.filter { item ->
-                item.title.lowercase().contains(q) ||
-                item.fileName.lowercase().contains(q) ||
-                item.previewText.lowercase().contains(q) ||
-                item.tags.any { it.name.lowercase().contains(q) }
-            }
-        }
-    }
+    // Semantic note search results (replaces the old local contains-filter:
+    // now accent-insensitive, tag-boosted and, when Needle 3 is downloaded,
+    // re-ranked by the local AI).
+    val searchResults = semanticSearch.hits
 
     Box(
         modifier = Modifier
@@ -233,9 +249,10 @@ fun TimelineScreen(
             onRefresh = {
                 scope.launch {
                     isRefreshing = true
+                    // Full background-style pass: news, weather, calendar
+                    // (future-only), due-task notifications and the widget.
                     viewModel.refreshRssFeeds()
-                    viewModel.refreshWeather()
-                    viewModel.refreshCalendarEvents()
+                    viewModel.syncNow()
                     delay(500)
                     isRefreshing = false
                 }
@@ -331,8 +348,34 @@ fun TimelineScreen(
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            TextButton(onClick = { homeSearchQuery = "" }) {
-                                Text("Limpiar", fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (semanticSearch.isSearching) {
+                                    CircularProgressIndicator(
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(14.dp),
+                                        color = GoogleBlue
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = (if (semanticSearch.viaNeedle) GoogleGreen else GoogleBlue).copy(alpha = 0.12f)
+                                ) {
+                                    Text(
+                                        text = if (semanticSearch.viaNeedle) {
+                                            "Semántica · IA local"
+                                        } else {
+                                            "Semántica"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = if (semanticSearch.viaNeedle) GoogleGreen else GoogleBlue,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                TextButton(onClick = { homeSearchQuery = "" }) {
+                                    Text("Limpiar", fontSize = 12.sp)
+                                }
                             }
                         }
                     }
@@ -382,14 +425,14 @@ fun TimelineScreen(
                         item {
                             SectionHeader(title = "Tus notas y memorias (${searchResults.size})")
                         }
-                        items(searchResults, key = { "note_${it.id}" }) { fileItem ->
+                        items(searchResults, key = { "note_${it.entryId}" }) { hit ->
                             Card(
                                 shape = RoundedCornerShape(14.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 20.dp)
-                                    .clickable { onNavigateToDetail(fileItem.id) }
+                                    .clickable { onNavigateToDetail(hit.entryId) }
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -397,16 +440,12 @@ fun TimelineScreen(
                                         .padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val viaAi = semanticSearch.viaNeedle && hit.entryId in semanticSearch.needleRanking
                                     val icon = when {
-                                        fileItem.fileExtension == "m4a" -> Icons.Default.AudioFile
-                                        fileItem.fileExtension == "jpg" -> Icons.Default.Image
+                                        viaAi -> Icons.Default.AutoAwesome
                                         else -> Icons.Default.Description
                                     }
-                                    val tint = when {
-                                        fileItem.fileExtension == "m4a" -> GoogleGreen
-                                        fileItem.fileExtension == "jpg" -> GoogleBlue
-                                        else -> ForestPrimary
-                                    }
+                                    val tint = if (viaAi) GoogleGreen else ForestPrimary
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
                                         color = tint.copy(alpha = 0.12f),
@@ -419,15 +458,24 @@ fun TimelineScreen(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = fileItem.title,
+                                            text = hit.title,
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        if (hit.snippet.isNotBlank()) {
+                                            Text(
+                                                text = hit.snippet,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                         Text(
-                                            text = fileItem.previewText.take(60),
+                                            text = hit.reason,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = if (viaAi) GoogleGreen else MaterialTheme.colorScheme.outline,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -631,6 +679,58 @@ fun TimelineScreen(
                             )
                         }
                     } else {
+                        // Multi-select action bar (shown instead of the
+                        // feed toggle while picking memories).
+                        if (selectionMode) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = GoogleBlue.copy(alpha = 0.10f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${selectedMemoryIds.size} seleccionadas",
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = GoogleBlue,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(onClick = {
+                                            // Long-press-free select-all / none
+                                            selectedMemoryIds =
+                                                if (selectedMemoryIds.size == entries.size) emptySet()
+                                                else entries.map { it.entry.id }.toSet()
+                                        }) {
+                                            Text(
+                                                if (selectedMemoryIds.size == entries.size) "Ninguna" else "Todas",
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        Button(
+                                            onClick = deleteSelected,
+                                            enabled = selectedMemoryIds.isNotEmpty(),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.error
+                                            )
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Borrar", fontSize = 12.sp)
+                                        }
+                                        IconButton(onClick = { exitSelection() }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Salir de la selección")
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (entries.isEmpty()) {
                             item {
                                 Card(
@@ -664,7 +764,24 @@ fun TimelineScreen(
                             items(entries, key = { it.entry.id }) { entryWithRel ->
                                 GoogleMemoryCard(
                                     entryWithRelations = entryWithRel,
-                                    onClick = { onNavigateToDetail(entryWithRel.entry.id) },
+                                    selected = selectionMode && entryWithRel.entry.id in selectedMemoryIds,
+                                    onLongClick = {
+                                        selectionMode = true
+                                        selectedMemoryIds = setOf(entryWithRel.entry.id)
+                                    },
+                                    onClick = {
+                                        if (selectionMode) {
+                                            selectedMemoryIds =
+                                                if (entryWithRel.entry.id in selectedMemoryIds) {
+                                                    selectedMemoryIds - entryWithRel.entry.id
+                                                } else {
+                                                    selectedMemoryIds + entryWithRel.entry.id
+                                                }
+                                            if (selectedMemoryIds.isEmpty()) selectionMode = false
+                                        } else {
+                                            onNavigateToDetail(entryWithRel.entry.id)
+                                        }
+                                    },
                                     modifier = Modifier.padding(horizontal = 20.dp)
                                 )
                             }
@@ -693,12 +810,15 @@ fun TimelineScreen(
 
     // Photo / Lens Choice Dialog
     if (showPhotoChoiceDialog) {
+        // Layout fix: the three options now live in the dialog BODY and the
+        // single "Cancelar" sits alone in the button row. Putting tall
+        // full-width buttons in confirmButton made M3 stack the dismiss
+        // label on top of the "Foto rápida" button.
         AlertDialog(
             onDismissRequest = { showPhotoChoiceDialog = false },
             title = { Text("Cámara inteligente") },
-            text = { Text("Elige qué hacer con la cámara:") },
-            confirmButton = {
-                Column {
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
                             showPhotoChoiceDialog = false
@@ -707,11 +827,10 @@ fun TimelineScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Lens: texto, traducir, códigos, escanear")
+                        Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Lens: texto, traducir, códigos", fontSize = 13.sp)
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
                     OutlinedButton(
                         onClick = {
                             showPhotoChoiceDialog = false
@@ -719,11 +838,10 @@ fun TimelineScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Foto rápida para una memoria")
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Foto rápida para una memoria", fontSize = 13.sp)
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
                     OutlinedButton(
                         onClick = {
                             showPhotoChoiceDialog = false
@@ -735,13 +853,13 @@ fun TimelineScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Elegir de la galería")
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Elegir de la galería", fontSize = 13.sp)
                     }
                 }
             },
-            dismissButton = {
+            confirmButton = {
                 TextButton(onClick = { showPhotoChoiceDialog = false }) {
                     Text("Cancelar")
                 }
@@ -797,6 +915,9 @@ fun TimelineScreen(
             onDismiss = { showCityPicker = false }
         )
     }
+
+    // Leaving the memories tab also exits multi-select.
+    BackHandler(enabled = selectionMode) { exitSelection() }
 }
 
 @Composable

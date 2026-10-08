@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLocation
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
@@ -35,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +51,14 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** One rotating contextual line of the At a Glance bar. */
+private data class GlanceChip(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val tint: Color,
+    val text: String,
+    val onClick: (() -> Unit)? = null
+)
 
 @Composable
 fun AtAGlanceBar(
@@ -65,17 +76,6 @@ fun AtAGlanceBar(
     val dateFormat = remember { SimpleDateFormat("EEEE, d 'de' MMMM", Locale.getDefault()) }
     val formattedDate = remember { dateFormat.format(Date()).replaceFirstChar { it.uppercase() } }
 
-    var alertIndex by remember { mutableIntStateOf(0) }
-
-    val activeAlertsCount = 2 + (if (calendarEvent != null) 1 else 0)
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(5000)
-            alertIndex = (alertIndex + 1) % activeAlertsCount
-        }
-    }
-
     val hasWeather = weather.temperature != null
     val weatherIcon: ImageVector = when (weather.weatherCode) {
         0 -> Icons.Default.WbSunny
@@ -83,6 +83,88 @@ fun AtAGlanceBar(
         else -> Icons.Default.Cloud
     }
     val weatherTint: Color = if (weather.weatherCode == 0) GoogleYellow else GoogleBlue
+
+    // ------------------------------------------------------------------
+    // Rotating contextual chips — everything REAL, in the spirit of the
+    // Pixel At a Glance but sourced from THIS device only (calendar,
+    // tasks, next alarm, low battery, steps) — no web data involved.
+    // ------------------------------------------------------------------
+    val context = LocalContext.current
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+
+    val nextAlarmText = remember {
+        try {
+            val am = context.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager
+            val t = am?.nextAlarmClock?.triggerTime
+            if (t != null && t > System.currentTimeMillis()) {
+                val f = SimpleDateFormat("EEE d · HH:mm", Locale.getDefault())
+                "Próxima alarma: ${f.format(Date(t))}"
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    val lowBatteryText = remember {
+        try {
+            val bm = context.getSystemService(android.content.Context.BATTERY_SERVICE) as? android.os.BatteryManager
+            val p = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            if (p in 1..20) "Batería baja: $p% — conecta el cargador" else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    val chips = remember(calendarEvent, nextReminder, nextAlarmText, lowBatteryText, telemetry?.todaySteps, telemetry?.hasActivityRecognitionPermission) {
+        buildList {
+            calendarEvent?.let { ev ->
+                add(
+                    GlanceChip(
+                        Icons.Default.CalendarToday,
+                        GoogleBlue,
+                        "${timeFormat.format(Date(ev.startMillis))} • ${ev.title}",
+                        onCalendarClick
+                    )
+                )
+            }
+            nextReminder?.let { r ->
+                add(GlanceChip(Icons.Default.CheckCircle, GoogleGreen, "Recordatorio: ${r.title}", onReminderClick))
+            }
+            nextAlarmText?.let {
+                add(GlanceChip(Icons.Default.Alarm, GoogleRed, it, null))
+            }
+            lowBatteryText?.let {
+                add(GlanceChip(Icons.Default.BatteryAlert, GoogleRed, it, null))
+            }
+            telemetry?.let { t ->
+                if (t.hasActivityRecognitionPermission) {
+                    add(GlanceChip(Icons.Default.DirectionsWalk, GoogleGreen, "${t.todaySteps} pasos hoy", null))
+                } else {
+                    add(GlanceChip(Icons.Default.DirectionsWalk, GoogleGreen.copy(alpha = 0.6f), "Toca para activar el contador de pasos", onActivateSteps))
+                }
+            }
+            if (isEmpty()) {
+                add(
+                    GlanceChip(
+                        Icons.Default.Cloud,
+                        GoogleBlue,
+                        if (hasWeather) "${weather.conditionText} • ${weather.locationName}" else "Toca para elegir tu ciudad y ver el clima",
+                        if (hasWeather) onWeatherClick else onChooseCityClick
+                    )
+                )
+            }
+        }
+    }
+
+    var alertIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(chips.size) {
+        if (chips.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(5000)
+            alertIndex = (alertIndex + 1) % chips.size
+        }
+    }
 
     // Pixel Style: Borderless, Transparent Background
     Column(
@@ -151,167 +233,35 @@ fun AtAGlanceBar(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Line 2: Contextual Calendar / Reminder / Activity Status
+        // Line 2: rotating contextual chips (calendar / task / alarm /
+        // battery / steps) — the Pixel-style glance, minus the web.
         AnimatedContent(
             targetState = alertIndex,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = "PixelAtAGlanceTransition"
         ) { index ->
-            when (index) {
-                0 -> {
-                    if (calendarEvent != null) {
-                        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                        val timeStr = timeFormat.format(Date(calendarEvent.startMillis))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = onCalendarClick),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CalendarToday,
-                                contentDescription = null,
-                                tint = GoogleBlue,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(7.dp))
-                            Text(
-                                text = "$timeStr • ${calendarEvent.title}",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } else if (nextReminder != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = onReminderClick),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = GoogleGreen,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(7.dp))
-                            Text(
-                                text = "Recordatorio: ${nextReminder.title}",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = if (hasWeather) onWeatherClick else onChooseCityClick),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (hasWeather) {
-                                    "${weather.conditionText} • ${weather.locationName}"
-                                } else {
-                                    "Toca para elegir tu ciudad y ver el clima"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                1 -> {
-                    if (nextReminder != null && calendarEvent != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = onReminderClick),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = GoogleGreen,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(7.dp))
-                            Text(
-                                text = "Recordatorio: ${nextReminder.title}",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = if (hasWeather) onWeatherClick else onChooseCityClick),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (hasWeather) {
-                                    "${weather.conditionText} en ${weather.locationName}"
-                                } else {
-                                    "Toca para elegir tu ciudad y ver el clima"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                else -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (telemetry != null) {
-                            if (telemetry.hasActivityRecognitionPermission) {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsWalk,
-                                    contentDescription = null,
-                                    tint = GoogleGreen,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(7.dp))
-                                Text(
-                                    text = "${telemetry.todaySteps} pasos hoy",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsWalk,
-                                    contentDescription = null,
-                                    tint = GoogleGreen.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(7.dp))
-                                Text(
-                                    text = "Toca para activar el contador de pasos",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = GoogleGreen,
-                                    modifier = Modifier.clickable(onClick = onActivateSteps)
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = if (hasWeather) {
-                                    "${weather.conditionText} • ${weather.locationName}"
-                                } else {
-                                    "Toca para elegir tu ciudad y ver el clima"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+            val chip = chips.getOrNull(index) ?: chips.firstOrNull()
+            if (chip != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (chip.onClick != null) Modifier.clickable(onClick = chip.onClick) else Modifier),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = chip.icon,
+                        contentDescription = null,
+                        tint = chip.tint,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        text = chip.text,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

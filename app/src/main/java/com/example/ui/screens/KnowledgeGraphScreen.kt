@@ -193,7 +193,13 @@ fun KnowledgeGraphScreen(
                             selectedNode = sim.hitTest(graphX, graphY)
                         }
                     }
-                    .pointerInput(currentSim, scale, offset) {
+                    // NOTE: the pointerInput keys are ONLY the simulation.
+                    // Keying on scale/offset restarted the gesture coroutine
+                    // on every pan frame (offset changes each event), which
+                    // cancelled the in-flight drag mid-gesture — that was
+                    // the "pan gets cut off" bug. State is read lazily
+                    // inside the callbacks instead.
+                    .pointerInput(currentSim) {
                         detectDragGestures(
                             onDragStart = { dragStart ->
                                 val sim = currentSim ?: return@detectDragGestures

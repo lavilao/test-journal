@@ -56,6 +56,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.health.HealthInsightsManager
+import com.example.ui.components.AppIconImage
+import com.example.ui.components.FileIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.theme.ForestPrimary
@@ -77,6 +80,17 @@ fun GoogleActivityScreen(
     val recentApps by viewModel.recentDeviceApps.collectAsState()
 
     var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
+
+    // Digital health report (screen time, top apps, steps, sleep hints) —
+    // computed from THIS device's local usage data only.
+    var healthInsights by remember { mutableStateOf<List<com.example.health.HealthInsight>>(emptyList()) }
+    var healthLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(hasUsageAccess) {
+        healthLoading = true
+        healthInsights = HealthInsightsManager.buildTodayReport(context)
+        healthLoading = false
+    }
 
     // Re-check the permission when the user comes back from system settings —
     // this was the cause of the "activate usage access" button reappearing
@@ -139,6 +153,93 @@ fun GoogleActivityScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // SECTION: Digital health report (local data only)
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("health_report_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Informe de salud digital",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "hoy",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (healthLoading) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = GoogleBlue
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Analizando el uso local de hoy…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            healthInsights.forEach { insight ->
+                                val color = when (insight.severity) {
+                                    "good" -> GoogleGreen
+                                    "warn" -> com.example.ui.components.GoogleRed
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 5.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text(
+                                        text = insight.emoji,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = insight.title,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = if (insight.severity == "info") {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else color
+                                        )
+                                        Text(
+                                            text = insight.detail,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "Todo viene del registro de uso del propio " +
+                                    "teléfono (UsageStats local) y del sensor de pasos; " +
+                                    "nada sale del dispositivo.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // SECTION: Screen time today (parity with the Samsung vitals ring)
             item {
                 val telemetry by viewModel.telemetry.collectAsState()
@@ -269,15 +370,12 @@ fun GoogleActivityScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = GoogleBlue.copy(alpha = 0.12f),
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = GoogleBlue, modifier = Modifier.size(18.dp))
-                                }
-                            }
+                            // The app's REAL launcher icon (used to be a
+                            // generic phone glyph — looked unfinished).
+                            AppIconImage(
+                                packageName = app.packageName,
+                                sizeDp = 40
+                            )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(app.appName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
@@ -341,15 +439,9 @@ fun GoogleActivityScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
-                                }
-                            }
+                            // Type-aware icon with image thumbnails (used to
+                            // be the same generic file glyph for everything).
+                            FileIconImage(file = file, sizeDp = 40)
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(file.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)

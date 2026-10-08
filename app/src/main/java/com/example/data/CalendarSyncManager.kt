@@ -77,6 +77,11 @@ class CalendarSyncManager(private val context: Context) {
                     val end = if (endIdx >= 0) cursor.getLong(endIdx) else now + 3600000L
                     val loc = if (locIdx >= 0) cursor.getString(locIdx) else null
 
+                    // FUTURE ONLY: an instance that overlaps the window but
+                    // already finished (e.g. today's all-day event late at
+                    // night) must never surface as "upcoming".
+                    if (end <= now) continue
+
                     events.add(DeviceCalendarEvent(id, title, start, end, loc))
                 }
             }

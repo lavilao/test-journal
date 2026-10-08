@@ -44,4 +44,5 @@
     <string name="category_finance">Finance &amp; Legal</string>
     <string name="category_projects">Home &amp; Projects</string>
     <string name="widget_at_a_glance_desc">Widget At a Glance: fecha, clima real, próximo evento del calendario y batería.</string>
+    <string name="sun_wallpaper_desc">Fondo dinámico: el sol recorre el cielo de tu ubicación y el tono del gradiente cambia con la hora (amanecer, mediodía, atardecer, noche).</string>
 </resources>

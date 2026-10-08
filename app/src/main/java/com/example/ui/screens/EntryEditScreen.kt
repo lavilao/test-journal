@@ -461,9 +461,14 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Single action row: photo / voice / contact / lens / details
+            // Single action row: photo / voice / contact / lens / details.
+            // Horizontally SCROLLABLE: four chips + the details toggle no
+            // longer fit on narrow screens, which squeezed the "Escanear"
+            // chip into a broken-looking sliver.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -517,7 +522,6 @@ fun EntryEditScreen(
                         }
                     }
                 )
-                Spacer(modifier = Modifier.weight(1f))
                 TextButton(onClick = { showDetails = !showDetails }) {
                     Icon(
                         if (showDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,

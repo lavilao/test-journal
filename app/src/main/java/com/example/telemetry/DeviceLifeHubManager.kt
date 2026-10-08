@@ -19,13 +19,17 @@ import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.example.data.model.LocalReminder
+import com.example.widget.AtAGlanceWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 data class CalendarEventInfo(
     val id: Long,
@@ -65,9 +69,14 @@ class DeviceLifeHubManager(
     )
     val telemetry: StateFlow<LifeHubTelemetry> = _telemetry.asStateFlow()
 
-    private var initialSteps = -1
-
     init {
+        // Restore the persisted day-baseline so a process restart does not
+        // reset the day's steps back to 0 (the old in-memory baseline died
+        // with the process).
+        val cached = cachedStepsToday(context)
+        if (cached > 0) {
+            _telemetry.value = _telemetry.value.copy(todaySteps = cached)
+        }
         registerStepSensor()
         refreshTelemetry()
     }
@@ -99,11 +108,50 @@ class DeviceLifeHubManager(
     override fun onSensorChanged(event: SensorEvent?) {
         if (event?.sensor?.type == Sensor.TYPE_STEP_COUNTER) {
             val totalSteps = event.values.firstOrNull()?.toInt() ?: return
-            if (initialSteps < 0) {
-                initialSteps = totalSteps
-            }
-            val stepsToday = (totalSteps - initialSteps).coerceAtLeast(0)
-            _telemetry.value = _telemetry.value.copy(todaySteps = stepsToday)
+            handleStepReading(totalSteps)
+        }
+    }
+
+    /**
+     * TYPE_STEP_COUNTER returns the steps since the last BOOT, as a
+     * monotonically growing total. The day's steps are computed against a
+     * baseline captured at the first reading of each calendar day and
+     * PERSISTED, so restarts and widget reads all agree.
+     */
+    private fun handleStepReading(totalSteps: Int) {
+        val prefs = context.getSharedPreferences(STEP_PREFS, Context.MODE_PRIVATE)
+        val today = todayKey()
+        val storedDay = prefs.getString(KEY_DAY, null)
+        var baseline = prefs.getInt(KEY_BASELINE, Int.MIN_VALUE)
+
+        if (baseline == Int.MIN_VALUE || storedDay != today) {
+            // First reading of the day (or first ever): anchor the baseline.
+            baseline = totalSteps
+            prefs.edit()
+                .putString(KEY_DAY, today)
+                .putInt(KEY_BASELINE, baseline)
+                .putInt(KEY_STEPS, 0)
+                .apply()
+        }
+
+        val stepsToday = (totalSteps - baseline).coerceAtLeast(0)
+        prefs.edit()
+            .putInt(KEY_STEPS, stepsToday)
+            .putInt(KEY_TOTAL_LAST, totalSteps)
+            .apply()
+
+        _telemetry.value = _telemetry.value.copy(todaySteps = stepsToday)
+        maybeRefreshWidget(stepsToday)
+    }
+
+    /** Throttled widget refresh: at most once every 20 s (per step would be wasteful). */
+    private fun maybeRefreshWidget(steps: Int) {
+        val now = System.currentTimeMillis()
+        if (now - lastWidgetStepRefresh < 20_000L && steps % 50 != 0) return
+        lastWidgetStepRefresh = now
+        try {
+            AtAGlanceWidgetProvider.refreshAll(context.applicationContext)
+        } catch (_: Exception) {
         }
     }
 
@@ -249,5 +297,37 @@ class DeviceLifeHubManager(
             }
             context.startActivity(intent)
         } catch (_: Exception) {}
+    }
+
+    companion object {
+        private const val STEP_PREFS = "step_prefs"
+        private const val KEY_DAY = "day_key"
+        private const val KEY_BASELINE = "baseline"
+        private const val KEY_STEPS = "steps_today"
+        private const val KEY_TOTAL_LAST = "total_last"
+
+        @Volatile
+        private var lastWidgetStepRefresh = 0L
+
+        private fun todayKey(): String =
+            SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+
+        /**
+         * The persisted steps for TODAY (0 when the day rolled over or no
+         * reading exists yet). Used by the widget so it can never show a
+         * stale number from a previous session.
+         */
+        fun cachedStepsToday(context: Context): Int {
+            return try {
+                val prefs = context.getSharedPreferences(STEP_PREFS, Context.MODE_PRIVATE)
+                if (prefs.getString(KEY_DAY, null) == todayKey()) {
+                    prefs.getInt(KEY_STEPS, 0)
+                } else {
+                    0
+                }
+            } catch (_: Exception) {
+                0
+            }
+        }
     }
 }

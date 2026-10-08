@@ -2,7 +2,9 @@ package com.example.ui.screens
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -52,6 +54,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,6 +68,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +84,10 @@ import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
+import com.example.BuildConfig
+import com.example.location.SmartPlaces
+import com.example.wallpaper.SunGradientBackground
+import com.example.wallpaper.SunWallpaperService
 
 @Composable
 fun SettingsAndModelsScreen(
@@ -117,6 +125,18 @@ fun SettingsAndModelsScreen(
             downloadedModels[lang.code] = MlKitAnalyzer.isModelDownloaded(lang.code)
         }
     }
+
+    // ---- experimental sun wallpaper + places state ----
+    var sunWallpaperChecked by remember {
+        mutableStateOf(
+            context.getSharedPreferences("sun_wallpaper", Context.MODE_PRIVATE)
+                .getBoolean("enabled", false)
+        )
+    }
+    var placesTick by remember { mutableStateOf(0) }
+    val savedPlaces = remember(placesTick) { SmartPlaces.places(context) }
+    var showAddPlaceDialog by remember { mutableStateOf(false) }
+    var placeSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -886,6 +906,241 @@ fun SettingsAndModelsScreen(
             }
         }
 
+        // =============================================================
+        // EXPERIMENTAL: dynamic sun background (Samsung mode)
+        // =============================================================
+        Spacer(modifier = Modifier.height(22.dp))
+        Text(
+            text = "Experimental",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Pruebas en desarrollo: actívalas, pruébalas y decide si se quedan.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("sun_wallpaper_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Fondo dinámico del sol",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "El sol recorre el cielo de tu ubicación y el tono del gradiente cambia del amanecer a la noche (modo Samsung).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = sunWallpaperChecked,
+                        onCheckedChange = { checked ->
+                            sunWallpaperChecked = checked
+                            context.getSharedPreferences("sun_wallpaper", Context.MODE_PRIVATE)
+                                .edit().putBoolean("enabled", checked).apply()
+                        },
+                        modifier = Modifier.testTag("sun_wallpaper_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Live preview of the same renderer the wallpaper uses.
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    SunGradientBackground()
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                                putExtra(
+                                    android.app.WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                    ComponentName(context, SunWallpaperService::class.java)
+                                )
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            // Fallback: generic wallpaper picker.
+                            try {
+                                context.startActivity(
+                                    Intent(android.app.WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
+                                )
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "No pude abrir el selector de fondos", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Poner como fondo de pantalla del sistema")
+                }
+                Text(
+                    text = "El interruptor cambia el fondo DENTRO de la app (modo Samsung); el botón lo instala como fondo de pantalla del teléfono. Come de la última ubicación que usó el clima.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // =============================================================
+        // Ubicación y recordatorios por lugar
+        // =============================================================
+        Spacer(modifier = Modifier.height(22.dp))
+        Text(
+            text = "Ubicación y lugares",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "App privada: guarda tus lugares y recibe recordatorios al acercarte. Las coordenadas viven solo en este teléfono.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("places_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                if (!SmartPlaces.hasLocationPermission(context)) {
+                    Text(
+                        text = "Concede el permiso de ubicación para guardar lugares.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            try {
+                                context.startActivity(
+                                    Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.fromParts("package", context.packageName, null)
+                                    )
+                                )
+                            } catch (_: Exception) {
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                    ) {
+                        Text("Permitir ubicación")
+                    }
+                } else {
+                    Button(
+                        onClick = { showAddPlaceDialog = true },
+                        enabled = !placeSaving,
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                        modifier = Modifier.fillMaxWidth().testTag("add_place_btn")
+                    ) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (placeSaving) "Buscando tu posición…" else "Guardar mi posición actual como lugar")
+                    }
+                }
+
+                if (savedPlaces.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    savedPlaces.forEach { place ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = ForestPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(place.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                                Text(
+                                    text = if (place.note.isNotBlank()) place.note else "${place.radiusMeters} m de radio",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = {
+                                SmartPlaces.removePlace(context, place.id)
+                                placesTick++
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Quitar", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                    Text(
+                        text = "La sincronización de 5 minutos avisa cuando estás a menos de ${savedPlaces.first().radiusMeters} m de un lugar (máx. un aviso cada 45 min). Para que suceda con la app cerrada, activa «Ubicación en segundo plano» para Mnemosyne en Ajustes del sistema.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // =============================================================
+        // Acerca de (real in-app versioning)
+        // =============================================================
+        Spacer(modifier = Modifier.height(22.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("about_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Mnemosyne · v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Diario semántico 100% en el dispositivo. Las versiones se firmarán con la misma clave para poder actualizarse sin perder datos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/lavilao/test-journal/releases"))
+                        )
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "No pude abrir el navegador", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Text("Buscar actualizaciones (Releases)", color = ForestPrimary)
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(40.dp))
     }
 
@@ -975,6 +1230,75 @@ fun SettingsAndModelsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddRssDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    // Add-place dialog: captures one fresh fix + a name/note.
+    if (showAddPlaceDialog) {
+        var placeName by remember { mutableStateOf("") }
+        var placeNote by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { if (!placeSaving) showAddPlaceDialog = false },
+            title = { Text("Nuevo lugar") },
+            text = {
+                Column {
+                    Text(
+                        text = "Se usará UNA lectura de tu posición actual. Ejemplos: Casa, Trabajo, Mercadona del barrio — con una nota como «comprar pan» o «lleva el paquete».",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = placeName,
+                        onValueChange = { placeName = it },
+                        label = { Text("Nombre del lugar") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = placeNote,
+                        onValueChange = { placeNote = it },
+                        label = { Text("Nota / recordatorio (opcional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (placeName.isNotBlank()) {
+                            placeSaving = true
+                            scope.launch {
+                                val loc = SmartPlaces.freshLocation(context)
+                                if (loc != null) {
+                                    SmartPlaces.addPlace(context, placeName, loc.latitude, loc.longitude, placeNote)
+                                    placesTick++
+                                    Toast.makeText(context, "Lugar «$placeName» guardado", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "No pude obtener tu posición. Activa la ubicación e inténtalo de nuevo.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                                placeSaving = false
+                                showAddPlaceDialog = false
+                            }
+                        }
+                    },
+                    enabled = placeName.isNotBlank() && !placeSaving,
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                ) {
+                    Text(if (placeSaving) "Guardando…" else "Guardar lugar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!placeSaving) showAddPlaceDialog = false }) {
                     Text("Cancelar")
                 }
             }

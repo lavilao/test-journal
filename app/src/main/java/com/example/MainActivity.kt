@@ -87,9 +87,16 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_VOICE_COMMAND = "voice_command"
 
+        /** Reminder notifications deep-link the app to the tasks tab. */
+        const val EXTRA_OPEN_TAB = "open_tab"
+        const val TAB_NOTIFICATIONS = "notifications"
+
         /** Voice commands that must open the assistant screen (from the
          *  hotword notification or the system-assistant session). */
         val voiceCommandRequests = MutableStateFlow<String?>(null)
+
+        /** Tab deep-links coming from notifications / the widget. */
+        val openTabRequests = MutableStateFlow<String?>(null)
 
         /** Whether the app UI is visible — the hotword service uses it to
          *  decide between direct execution and notification hand-off. */
@@ -101,6 +108,9 @@ class MainActivity : ComponentActivity() {
             ?: intent?.getStringExtra(HotwordService.EXTRA_VOICE_COMMAND)
         if (!command.isNullOrBlank()) {
             voiceCommandRequests.value = command
+        }
+        intent?.getStringExtra(EXTRA_OPEN_TAB)?.let { tab ->
+            openTabRequests.value = tab
         }
     }
 
@@ -148,6 +158,18 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         if (!command.isNullOrBlank()) {
             screenState = AppScreen.Assistant
             MainActivity.voiceCommandRequests.value = null
+        }
+    }
+
+    // Notification deep-links (task reminders) jump straight to their tab.
+    val openTabRequest by MainActivity.openTabRequests.collectAsState()
+    LaunchedEffect(openTabRequest) {
+        when (openTabRequest) {
+            MainActivity.TAB_NOTIFICATIONS -> viewModel.selectTab(MainNavTab.NOTIFICACIONES)
+        }
+        if (openTabRequest != null) {
+            screenState = AppScreen.Main(viewModel.currentTab.value)
+            MainActivity.openTabRequests.value = null
         }
     }
 

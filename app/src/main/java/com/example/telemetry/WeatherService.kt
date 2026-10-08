@@ -247,6 +247,12 @@ class WeatherService(private val context: Context) {
                             lastUpdated = System.currentTimeMillis()
                         )
                         persistWeatherToCache(result)
+                        // Last coordinates feed the dynamic sun wallpaper
+                        // (SunCycle computes sunrise/sunset locally).
+                        prefs.edit()
+                            .putFloat("last_lat", lat.toFloat())
+                            .putFloat("last_lon", lon.toFloat())
+                            .apply()
                         _weatherState.value = result
                         return@withContext result
                     }

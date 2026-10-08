@@ -12,12 +12,21 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  // Real in-app versioning: values come from the VERSION file at the repo
+  // root (bumped every release round) instead of the frozen 1.0.
+  val versionProps = java.util.Properties().apply {
+    val f = file("${rootDir}/VERSION")
+    if (f.exists()) f.inputStream().use { load(it) }
+  }
+  val appVersionCode = versionProps.getProperty("versionCode", "1").toInt()
+  val appVersionName = versionProps.getProperty("versionName", "1.0")
+
   defaultConfig {
     applicationId = "com.aistudio.mnemosyne.vjrwk"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = appVersionCode
+    versionName = appVersionName
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -32,11 +41,15 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      // STABLE key committed to the repo (private, single-user app): every
+      // release is signed IDENTICALLY, so Android lets the user UPDATE over
+      // the previous install and the data survives. CI can still override
+      // with KEYSTORE_PATH/STORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD secrets.
+      val ksPath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/mnemosyne-upload.jks"
+      storeFile = file(ksPath)
+      storePassword = System.getenv("STORE_PASSWORD") ?: "mnemosyne2024"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "mnemosyne2024"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")

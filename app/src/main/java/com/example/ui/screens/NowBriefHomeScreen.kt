@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import com.example.telemetry.RealWeatherData
 import com.example.ui.components.AuroraBackground
+import com.example.wallpaper.SunGradientBackground
 import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.GlassRing
@@ -91,6 +92,7 @@ fun NowBriefHomeScreen(
     onOpenLens: () -> Unit = {},
     onOpenAssistant: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val entries by viewModel.entries.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val weather by viewModel.realWeather.collectAsState()
@@ -146,7 +148,18 @@ fun NowBriefHomeScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground(modifier = Modifier.fillMaxSize())
+        // Dynamic sun background (experimental, behind a settings toggle):
+        // gradient + sun position follow the real time of day. Falls back
+        // to the classic aurora when the toggle is off.
+        val sunWallpaperOn = remember {
+            context.getSharedPreferences("sun_wallpaper", android.content.Context.MODE_PRIVATE)
+                .getBoolean("enabled", false)
+        }
+        if (sunWallpaperOn) {
+            SunGradientBackground(modifier = Modifier.fillMaxSize())
+        } else {
+            AuroraBackground(modifier = Modifier.fillMaxSize())
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

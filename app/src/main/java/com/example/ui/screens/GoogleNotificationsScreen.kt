@@ -51,6 +51,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +88,11 @@ fun GoogleNotificationsScreen(
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
+    // The event list is now a live StateFlow shared with the widget and the
+    // 5-minute background sync; on entering the tab we still re-query so a
+    // change made in another calendar app shows up immediately.
+    LaunchedEffect(Unit) { viewModel.refreshCalendarEvents() }
+
     // "Sincronizar" used to silently return nothing because the calendar
     // permission was never requested from this screen. Now it asks first.
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
@@ -122,14 +128,36 @@ fun GoogleNotificationsScreen(
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Button(
-                    onClick = { showAddDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
-                    shape = RoundedCornerShape(20.dp)
+                // Redesigned "new task" trigger: a proper FAB-style pill with
+                // a real touch target (the old 16dp icon + 12sp label in a
+                // text button looked cramped and ugly).
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = GoogleBlue,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { showAddDialog = true }
+                        .testTag("new_task_button")
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Nueva tarea", fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            tint = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "Nueva tarea",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = androidx.compose.ui.graphics.Color.White
+                        )
+                    }
                 }
             }
         }

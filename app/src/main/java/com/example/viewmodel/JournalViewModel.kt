@@ -43,6 +43,13 @@ import com.example.media.RecordingState
 import com.example.media.VoiceJournalManager
 import com.example.repository.JournalRepository
 import com.example.semantic.MlKitAnalyzer
+import com.example.semantic.SemanticSearchEngine
+import com.example.semantic.SemanticSearchUiState
+import com.example.sync.ReminderNotifications
+import com.example.sync.SyncHub
+import com.example.sync.SyncScheduler
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -181,8 +188,11 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     // Calendar Sync Manager (Real Android Device Calendar)
     val calendarSyncManager = CalendarSyncManager(application)
-    private val _upcomingCalendarEvents = MutableStateFlow<List<DeviceCalendarEvent>>(emptyList())
-    val upcomingCalendarEvents: StateFlow<List<DeviceCalendarEvent>> = _upcomingCalendarEvents.asStateFlow()
+
+    // Shared with the widget + the 5-minute background sync, and guaranteed
+    // FUTURE-ONLY: finished events drop off in real time (60s filter tick
+    // while the app is open, 5-minute background refresh otherwise).
+    val upcomingCalendarEvents: StateFlow<List<DeviceCalendarEvent>> = SyncHub.calendarEvents
 
     // Device Search & Recent Usage (Contacts, MediaStore Files, UsageStats)
     val deviceSearchManager = DeviceSearchManager(application)
@@ -249,8 +259,15 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     fun refreshCalendarEvents() {
         viewModelScope.launch {
-            _upcomingCalendarEvents.value = calendarSyncManager.getUpcomingEvents(5)
+            SyncHub.refreshCalendar(getApplication<Application>())
         }
+    }
+
+    /** Full background-style pass, used by pull-to-refresh. */
+    fun syncNow() {
+        SyncHub.syncNow(getApplication<Application>())
+        refreshTelemetry()
+        refreshRecentActivity()
     }
 
     fun refreshRecentActivity() {
@@ -395,6 +412,28 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val searchResults: StateFlow<List<HybridSearchResult>> = _searchResults.asStateFlow()
     val isSearching = MutableStateFlow(false)
 
+    // Semantic note search (lexical + optional Needle 3 re-ranking).
+    private val _semanticSearch = MutableStateFlow(SemanticSearchUiState())
+    val semanticSearch: StateFlow<SemanticSearchUiState> = _semanticSearch.asStateFlow()
+
+    private var semanticSearchJob: Job? = null
+
+    /** Debounced semantic search over the journal (local AI when available). */
+    fun onSemanticSearchChanged(query: String) {
+        semanticSearchJob?.cancel()
+        if (query.isBlank()) {
+            _semanticSearch.value = SemanticSearchUiState()
+            return
+        }
+        semanticSearchJob = viewModelScope.launch {
+            delay(250)
+            _semanticSearch.value = _semanticSearch.value.copy(query = query, isSearching = true)
+            _semanticSearch.value = SemanticSearchEngine.search(
+                query, entries.value, getApplication()
+            )
+        }
+    }
+
     // Translation
     val translationState = MutableStateFlow(TranslationUiState())
 
@@ -424,6 +463,23 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             refreshWeather()
             refreshCalendarEvents()
             refreshRecentActivity()
+        }
+        // Boot the realtime layer: persisted snapshot + 5-minute cadence +
+        // the per-reminder wake-up alarm. Survives reboots via the receiver.
+        SyncHub.ensureInitialized(application)
+        SyncScheduler.schedule(application)
+        SyncScheduler.scheduleNextReminderAlarm(application)
+        viewModelScope.launch {
+            ReminderNotifications.checkAndNotifyDue(application)
+        }
+        // Real-time filter: every minute, past events vanish and the list is
+        // re-queried so a task/event created outside this app shows up fast.
+        viewModelScope.launch {
+            while (true) {
+                delay(60_000)
+                SyncHub.refreshFilter()
+                SyncHub.refreshCalendar(application)
+            }
         }
     }
 
@@ -702,8 +758,9 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     fun removeTagFromEntry(entryId: Long, tagId: Long) {
         viewModelScope.launch {
+            // Room flows re-emit automatically — re-selecting the entry here
+            // stacked duplicate collectors and made the whole screen reload.
             repository.removeTagFromEntry(entryId, tagId)
-            selectEntry(entryId)
         }
     }
 
@@ -724,6 +781,8 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     fun dismissSuggestedTag(suggestedTagId: Long) {
         viewModelScope.launch {
+            // In-place removal: the suggested-tags flow re-emits by itself;
+            // the old full re-select reloaded the entire screen.
             repository.dismissSuggestedTag(suggestedTagId)
         }
     }
@@ -834,6 +893,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.saveReminder(LocalReminder(title = title, category = category, dueTimestamp = dueTimestamp))
             lifeHubManager.refreshTelemetry()
+            SyncScheduler.scheduleNextReminderAlarm(getApplication<Application>())
         }
     }
 
@@ -841,6 +901,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.setReminderCompleted(id, isCompleted)
             lifeHubManager.refreshTelemetry()
+            SyncScheduler.scheduleNextReminderAlarm(getApplication<Application>())
         }
     }
 
@@ -848,6 +909,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.deleteReminder(id)
             lifeHubManager.refreshTelemetry()
+            SyncScheduler.scheduleNextReminderAlarm(getApplication<Application>())
         }
     }
 

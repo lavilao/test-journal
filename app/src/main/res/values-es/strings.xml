@@ -43,4 +43,5 @@
     <string name="category_health">Salud</string>
     <string name="category_finance">Finanzas y Legal</string>
     <string name="category_projects">Hogar y Proyectos</string>
+    <string name="sun_wallpaper_desc">Fondo dinámico: el sol recorre el cielo de tu ubicación y el tono del gradiente cambia con la hora (amanecer, mediodía, atardecer, noche).</string>
 </resources>

@@ -112,29 +112,31 @@ fun GoogleSearchHubHeader(
         Spacer(modifier = Modifier.height(8.dp))
 
         // Signature Google Pill Search Bar — ONE compact line, like the
-        // real Google app: just "buscar".
+        // real Google app: just "buscar". Icons are 36dp touch circles with
+        // 22dp glyphs (the old 22dp glyph + 6dp padding made them look
+        // tiny and hard to tap).
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             shadowElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .height(46.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
                 .testTag("google_pill_search_bar")
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -168,41 +170,65 @@ fun GoogleSearchHubHeader(
                 )
 
                 if (searchQuery.isNotEmpty()) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Limpiar búsqueda",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.10f),
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .clickable { onSearchQueryChange("") }
-                            .padding(4.dp)
-                    )
+                            .testTag("clear_search_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Limpiar búsqueda",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
 
-                Icon(
-                    imageVector = Icons.Default.Mic,
-                    contentDescription = "Asistente de voz",
-                    tint = GoogleBlue,
+                Surface(
+                    shape = CircleShape,
+                    color = GoogleBlue.copy(alpha = 0.12f),
                     modifier = Modifier
-                        .size(22.dp)
+                        .padding(start = 6.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onVoiceClick)
-                        .padding(6.dp)
                         .testTag("google_voice_search_btn")
-                )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Asistente de voz",
+                            tint = GoogleBlue,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
 
-                Icon(
-                    imageVector = Icons.Default.CameraAlt,
-                    contentDescription = "Lens / Cámara",
-                    tint = GoogleRed,
+                Surface(
+                    shape = CircleShape,
+                    color = GoogleRed.copy(alpha = 0.12f),
                     modifier = Modifier
-                        .size(22.dp)
+                        .padding(start = 6.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onCameraClick)
-                        .padding(6.dp)
                         .testTag("google_lens_btn")
-                )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Lens / Cámara",
+                            tint = GoogleRed,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
         }
 

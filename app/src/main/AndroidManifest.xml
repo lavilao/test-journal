@@ -16,6 +16,12 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Realtime sync: 5-minute tick + per-reminder wake alarms survive reboots. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Smart location reminders (private app, data stays on device). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
     <!-- Hotword foreground service (microphone type) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -60,6 +66,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -106,6 +113,34 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/at_a_glance_widget_info" />
         </receiver>
+
+        <!-- Realtime sync: 5-minute inexact tick + per-reminder wake alarms
+             + re-arm after boot / app update. -->
+        <receiver
+            android:name=".sync.RealtimeSyncReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.SYNC_TICK" />
+                <action android:name="com.example.REMINDER_DUE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Dynamic sun live wallpaper (Samsung-mode experiment, opt-in). -->
+        <service
+            android:name=".wallpaper.SunWallpaperService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Sol de Mnemosyne"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/sun_wallpaper" />
+        </service>
     </application>
 
 </manifest>

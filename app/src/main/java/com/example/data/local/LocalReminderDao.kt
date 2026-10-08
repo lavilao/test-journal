@@ -20,6 +20,12 @@ interface LocalReminderDao {
     @Query("SELECT * FROM local_reminders WHERE isCompleted = 0 ORDER BY dueTimestamp ASC LIMIT 1")
     fun getNextActiveReminder(): Flow<LocalReminder?>
 
+    @Query("SELECT * FROM local_reminders WHERE isCompleted = 0 AND dueTimestamp <= :now ORDER BY dueTimestamp ASC LIMIT 5")
+    suspend fun getDueReminders(now: Long): List<LocalReminder>
+
+    @Query("SELECT * FROM local_reminders WHERE isCompleted = 0 AND dueTimestamp > :now ORDER BY dueTimestamp ASC LIMIT 1")
+    suspend fun getNextReminderAfter(now: Long): LocalReminder?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReminder(reminder: LocalReminder): Long
 

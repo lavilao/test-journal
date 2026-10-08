@@ -152,6 +152,19 @@ object NeedleTools {
         )
         tools.put(
             tool(
+                "buscar_en_notas",
+                "Busca en las NOTAS DEL DIARIO del usuario y devuelve las relevantes para una consulta semántica (no literal).",
+                mapOf(
+                    "consulta" to prop("string", "La intención de búsqueda reformulada con claridad"),
+                    "ids_relevantes" to JSONObject()
+                        .put("type", "array")
+                        .put("description", "Ids de los candidatos que de verdad responden a la consulta, del MÁS al MENOS relevante")
+                        .put("items", JSONObject().put("type", "integer"))
+                )
+            )
+        )
+        tools.put(
+            tool(
                 "traducir_texto",
                 "Traduce un texto a otro idioma con el traductor local.",
                 mapOf(
@@ -173,7 +186,10 @@ object NeedleTools {
         return "Eres el enrutador de comandos del asistente local de Mnemosyne en un teléfono " +
             "Android. Hoy es $now. El usuario habla en español. Escucha lo que pide y elige la " +
             "herramienta correcta rellenando todos los argumentos. Si nada encaja con lo pedido, " +
-            "devuelve una lista de llamadas vacía en lugar de adivinar."
+            "devuelve una lista de llamadas vacía en lugar de adivinar. Para buscar en el diario " +
+            "del usuario usa SIEMPRE buscar_en_notas (entendiendo sinónimos e intención, no solo " +
+            "palabras exactas); para buscar en archivos/contactos del teléfono usa " +
+            "buscar_en_telefono."
     }
 
     // ------------------------------------------------------------------
@@ -277,5 +293,25 @@ object NeedleTools {
         if (parsed.confidence < MIN_CONFIDENCE) return null
         val intents = parsed.calls.mapNotNull { callToIntent(it) }
         return intents.ifEmpty { null }
+    }
+
+    /**
+     * Semantic note ranking: given a search turn (query + numbered
+     * candidate excerpts) the model must call buscar_en_notas with the ids
+     * that truly answer the query, best first. Returns null when the model
+     * is unusable or did not cooperate (caller keeps the lexical ranking).
+     */
+    suspend fun rankNotes(searchTurn: String): List<Long>? {
+        val raw = NeedleRuntime.completeText(searchTurn, 220) ?: return null
+        val parsed = parseResponse(raw) ?: return null
+        val call = parsed.calls.firstOrNull { it.name == "buscar_en_notas" } ?: return null
+        if (parsed.confidence < MIN_CONFIDENCE) return null
+        val ids = call.args.optJSONArray("ids_relevantes") ?: return null
+        val ranked = mutableListOf<Long>()
+        for (i in 0 until ids.length()) {
+            val id = ids.optLong(i, -1L)
+            if (id >= 0 && !ranked.contains(id)) ranked.add(id)
+        }
+        return ranked
     }
 }

@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,11 +42,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GoogleMemoryCard(
     entryWithRelations: EntryWithRelations,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Multi-select mode: this card is part of the current selection. */
+    selected: Boolean = false,
+    /** Long-press enters multi-select (set by the parent screen). */
+    onLongClick: (() -> Unit)? = null
 ) {
     val entry = entryWithRelations.entry
     val hasAudio = entryWithRelations.audioRecords.isNotEmpty()
@@ -55,11 +64,21 @@ fun GoogleMemoryCard(
 
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) {
+                GoogleBlue.copy(alpha = 0.08f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        ),
+        border = if (selected) BorderStroke(2.dp, GoogleBlue) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 0.dp else 1.dp),
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { onLongClick?.invoke() }
+            )
             .testTag("google_memory_card_${entry.id}")
     ) {
         Row(
@@ -68,6 +87,13 @@ fun GoogleMemoryCard(
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (selected) {
+                Checkbox(
+                    checked = true,
+                    onCheckedChange = { onClick() },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 // Category & Date Row
                 Row(

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -118,7 +117,10 @@ fun AssistantScreen(
             NeedleModelManager.isWhistleDownloaded(context)
     }
     val needleUsable = needleSupported && needleEnabled && needleReady
-    val whistleUsable = needleUsable && speechReady && whistleDictation
+    // Whistle dictation no longer requires the Needle TEXT model: having
+    // only whistle.cact downloaded used to silently fall back to the system
+    // (Google) recognizer — the exact bug reported with the dictation test.
+    val whistleUsable = needleSupported && whistleDictation && speechReady
 
     // Load the downloaded models (if any) so the router is ready.
     LaunchedEffect(Unit) {
@@ -330,7 +332,9 @@ fun AssistantScreen(
         }
     }
 
-    /** Stops the Whistle capture and runs audio straight to tool calls. */
+    /** Stops the Whistle capture and processes the audio locally:
+     *  tool calls straight from audio when the text model is also present,
+     *  plain local transcription otherwise. */
     fun stopWhistleAndProcess() {
         val pcm = whistleController.stop()
         if (pcm.isEmpty()) {
@@ -339,16 +343,28 @@ fun AssistantScreen(
         }
         thinking = true
         scope.launch {
-            val raw = withTimeoutOrNull(45_000) { NeedleRuntime.completeAudio(pcm, "es") }
-            val parsed = raw?.let { NeedleTools.parseResponse(it) }
-            val transcript = parsed?.audioText.orEmpty()
+            var transcript = ""
+            var calls: List<AssistantIntent> = emptyList()
+
+            if (NeedleRuntime.isReady()) {
+                // Audio → tool calls (both models loaded).
+                val raw = withTimeoutOrNull(45_000) { NeedleRuntime.completeAudio(pcm, "es") }
+                val parsed = raw?.let { NeedleTools.parseResponse(it) }
+                transcript = parsed?.audioText.orEmpty()
+                calls = parsed
+                    ?.takeIf { it.calls.isNotEmpty() && it.confidence >= NeedleTools.MIN_CONFIDENCE }
+                    ?.let { p -> p.calls.mapNotNull { NeedleTools.callToIntent(it) } }
+                    .orEmpty()
+            } else {
+                // Whistle-only install: transcribe locally, then route text.
+                transcript = withTimeoutOrNull(30_000) {
+                    NeedleRuntime.transcribe(pcm, "es")
+                }.orEmpty()
+            }
+
             if (transcript.isNotBlank()) {
                 post(AssistantMessage(true, transcript))
             }
-            val calls = parsed
-                ?.takeIf { it.calls.isNotEmpty() && it.confidence >= NeedleTools.MIN_CONFIDENCE }
-                ?.let { p -> p.calls.mapNotNull { NeedleTools.callToIntent(it) } }
-                    .orEmpty()
             if (calls.isNotEmpty()) {
                 post(AssistantMessage(false, describe(calls.first()) + " · IA local"))
                 for (intent in calls) runIntent(intent)
@@ -513,11 +529,13 @@ fun AssistantScreen(
             SuggestionChip("Escanea esto") { submit(it) }
         }
 
-        // Input row: text field + mic + send
+        // Input row: text field + mic + send.
+        // NOTE: no imePadding() here — the Scaffold's contentWindowInsets
+        // already include the IME (safeDrawing) and the activity now uses
+        // adjustResize; double-insetting used to push the field off-screen.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .imePadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

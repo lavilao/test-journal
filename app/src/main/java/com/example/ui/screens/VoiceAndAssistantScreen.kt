@@ -8,6 +8,9 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.ai.needle.ModelTransferManager
+import com.example.ai.needle.NeedleTools
+import com.example.ai.needle.WhistleDictationController
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +37,7 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
@@ -176,6 +180,158 @@ fun VoiceAndAssistantScreen(
     LaunchedEffect(Unit) {
         NeedleModelManager.ensureLoaded(context)
         needleTick++
+    }
+
+    // ---- integrated self-tests (Needle / Whistle) ----
+    var needleTestState by remember { mutableStateOf<String?>(null) } // running|pass|fail
+    var needleTestDetail by remember { mutableStateOf<String?>(null) }
+    var whistleTestState by remember { mutableStateOf<String?>(null) }
+    var whistleTestDetail by remember { mutableStateOf<String?>(null) }
+    val whistleTestController = remember { WhistleDictationController() }
+    val whistleTestRecording by whistleTestController.isRecording.collectAsState()
+
+    // ---- model backup / restore via SAF ----
+    var transferAction by remember { mutableStateOf<String?>(null) }
+
+    fun handleTransferResult(result: ModelTransferManager.TransferResult) {
+        Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+        if (result.ok) needleTick++
+    }
+
+    val exportModelLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val action = transferAction
+        transferAction = null
+        if (uri != null && action != null) {
+            scope.launch { handleTransferResult(ModelTransferManager.exportModel(context, action, uri)) }
+        }
+    }
+    val exportVoicePrintLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        transferAction = null
+        if (uri != null) {
+            scope.launch { handleTransferResult(ModelTransferManager.exportVoicePrint(context, uri)) }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val action = transferAction
+        transferAction = null
+        if (uri != null && action != null) {
+            scope.launch {
+                val result = when (action) {
+                    "import_voiceprint" -> ModelTransferManager.importVoicePrint(context, uri)
+                    else -> ModelTransferManager.importModel(context, action, uri)
+                }
+                handleTransferResult(result)
+                refreshAll()
+            }
+        }
+    }
+
+    fun runNeedleTest() {
+        when {
+            !needleSupported -> {
+                needleTestState = "fail"
+                needleTestDetail = "Este teléfono no tiene motor nativo para el modelo."
+            }
+            !needleDownloaded -> {
+                needleTestState = "fail"
+                needleTestDetail = "Descarga primero el modelo Needle 3."
+            }
+            else -> {
+                needleTestState = "running"
+                needleTestDetail = null
+                scope.launch {
+                    val started = System.currentTimeMillis()
+                    var pass = false
+                    var detail: String
+                    try {
+                        val raw = kotlinx.coroutines.withTimeoutOrNull(30_000) {
+                            NeedleRuntime.completeText("enciende la linterna")
+                        }
+                        val parsed = raw?.let { NeedleTools.parseResponse(it) }
+                        val call = parsed?.calls?.firstOrNull()
+                        pass = call != null && call.name == "linterna"
+                        detail = if (parsed == null) {
+                            "El motor no devolvió respuesta (¿memoria?)."
+                        } else {
+                            "Herramienta: ${call?.name ?: "(ninguna)"} · confianza " +
+                                "${(parsed.confidence * 100).toInt()}% · " +
+                                "${"%.1f".format((System.currentTimeMillis() - started) / 1000.0)} s"
+                        }
+                    } catch (t: Throwable) {
+                        detail = t.message ?: t.javaClass.simpleName
+                    }
+                    needleTestDetail = detail
+                    needleTestState = if (pass) "pass" else "fail"
+                    needleTick++
+                }
+            }
+        }
+    }
+
+    val whistleTestPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            whistleTestState = "running"
+            whistleTestDetail = null
+            whistleTestController.start()
+        } else {
+            whistleTestState = "fail"
+            whistleTestDetail = "Sin micrófono no puedo probar Whistle."
+        }
+    }
+
+    fun runWhistleTest() {
+        when {
+            !needleSupported -> {
+                whistleTestState = "fail"
+                whistleTestDetail = "Este teléfono no tiene motor nativo para el modelo."
+            }
+            !whistleDownloaded -> {
+                whistleTestState = "fail"
+                whistleTestDetail = "Descarga primero el modelo Whistle."
+            }
+            else -> {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    whistleTestState = "running"
+                    whistleTestDetail = null
+                    whistleTestController.start()
+                } else {
+                    whistleTestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+    }
+
+    // Auto-stop the Whistle test after 3 seconds and transcribe it.
+    LaunchedEffect(whistleTestRecording) {
+        if (whistleTestRecording) {
+            delay(3000)
+            val pcm = whistleTestController.stop()
+            val started = System.currentTimeMillis()
+            val text = kotlinx.coroutines.withTimeoutOrNull(30_000) {
+                NeedleRuntime.transcribe(pcm, "es")
+            }
+            whistleTestDetail = when {
+                text == null -> "El motor no respondió (prueba de nuevo)."
+                text.isBlank() -> "Escuchó 3 s pero devolvió silencio — habla más fuerte y repite."
+                else -> "Escuchado: «$text» · ${
+                    "%.1f".format((System.currentTimeMillis() - started) / 1000.0)
+                } s"
+            }
+            // Pass = the engine ran end-to-end on this device; an empty
+            // transcript is reported honestly rather than scored as success.
+            whistleTestState = if (text != null && text.isNotBlank()) "pass" else "fail"
+            needleTick++
+        }
     }
 
     fun refreshAll() { refreshTick++ }
@@ -725,6 +881,132 @@ fun VoiceAndAssistantScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Borrar los modelos descargados")
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Copia de seguridad local: exporta los archivos del modelo y " +
+                            "reimpórtalos cuando quieras (otro teléfono, o si el servidor " +
+                            "retirara las descargas). Los archivos no caducan.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            transferAction = NeedleModelManager.NEEDLE_FILE
+                            exportModelLauncher.launch("needle3.cact")
+                        },
+                        enabled = needleDownloaded,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Exportar Needle", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            transferAction = NeedleModelManager.NEEDLE_FILE
+                            importLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Importar Needle", fontSize = 11.sp)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            transferAction = NeedleModelManager.WHISTLE_FILE
+                            exportModelLauncher.launch("whistle.cact")
+                        },
+                        enabled = whistleDownloaded,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Exportar Whistle", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            transferAction = NeedleModelManager.WHISTLE_FILE
+                            importLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Importar Whistle", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // ============ 2.6 Integrated self-tests ============
+        SettingsCard(
+            icon = { Icon(Icons.Default.Science, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            title = "Pruebas integradas de la IA local",
+            badge = {
+                val anyFail = needleTestState == "fail" || whistleTestState == "fail"
+                val allPass = needleTestState == "pass" || whistleTestState == "pass"
+                when {
+                    anyFail -> BadgePill("Revisar", MaterialTheme.colorScheme.error)
+                    allPass -> BadgePill("OK", GoogleGreen)
+                    else -> BadgePill("Sin correr", MaterialTheme.colorScheme.outline)
+                }
+            }
+        ) {
+            Text(
+                text = "Comprueba que Needle y Whistle funcionan DE VERDAD en este " +
+                        "teléfono, con una prueba reproducible: el router debe devolver la " +
+                        "herramienta correcta para «enciende la linterna», y Whistle debe " +
+                        "transcribir 3 segundos de tu voz sin pasar por Google ni Gboard.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            @Composable
+            fun TestStateChip(state: String?) {
+                when (state) {
+                    "running" -> {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    }
+                    "pass" -> BadgePill("CORRECTO", GoogleGreen)
+                    "fail" -> BadgePill("FALLÓ", MaterialTheme.colorScheme.error)
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Needle 3 (router de herramientas)", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = needleTestDetail ?: "Envía «enciende la linterna» al modelo local",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TestStateChip(needleTestState)
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { runNeedleTest() },
+                    modifier = Modifier.testTag("needle_selftest_btn")
+                ) {
+                    Text("Probar", fontSize = 12.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Whistle (voz a texto local)", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = whistleTestDetail ?: "Graba 3 s de tu voz y transcribe en local",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TestStateChip(whistleTestState)
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { runWhistleTest() },
+                    modifier = Modifier.testTag("whistle_selftest_btn")
+                ) {
+                    Text("Probar", fontSize = 12.sp)
+                }
             }
         }
 
@@ -1012,6 +1294,31 @@ fun VoiceAndAssistantScreen(
                 )
             }
             if (enrolled) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            exportVoicePrintLauncher.launch("mnemosyne-voiceprint.json")
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Exportar huella", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            transferAction = "import_voiceprint"
+                            importLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Importar huella", fontSize = 11.sp)
+                    }
+                }
+            }
+
+            if (enrolled) {
                 TextButton(onClick = {
                     store.clear()
                     HotwordService.setVoiceMatchEnabled(context, false)
@@ -1055,8 +1362,24 @@ fun VoiceAndAssistantScreen(
                             return@Button
                         }
                     }
-                    // Fallback for old Androids: voice input settings.
-                    engineManager.openOfflineModelsSettings()
+                    // Fallback (Android 9- or ROMs without the role dialog):
+                    // the "default apps" settings page, where the assistant
+                    // can still be changed by hand. The old fallback opened
+                    // the VOICE INPUT settings, a different screen that never
+                    // lets the user pick the assistant.
+                    try {
+                        val intent = android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                        Toast.makeText(
+                            context,
+                            "Abre «Asistente digital» y elige Mnemosyne",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "No pude abrir el ajuste", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                 modifier = Modifier.fillMaxWidth().testTag("request_assistant_role_btn")
@@ -1067,8 +1390,15 @@ fun VoiceAndAssistantScreen(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Ser el asistente del sistema NO incluye el hotword DSP (esa API es " +
-                        "privilegiada); el hotword de esta app es el de la tarjeta de arriba.",
+                text = if (roleHeld) {
+                    "Activo: el gesto de asistente abre Mnemosyne (el hotword de esta " +
+                        "app sigue siendo el de software)."
+                } else {
+                    "En el diálogo del sistema marca «Mnemosyne». Si no aparece en la " +
+                        "lista, usa «Apps predeterminadas → Asistente digital». Ser el " +
+                        "asistente NO incluye el hotword DSP (API privilegiada); el hotword " +
+                        "de esta app es el de la tarjeta de arriba."
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
