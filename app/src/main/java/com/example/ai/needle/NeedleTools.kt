@@ -176,6 +176,18 @@ object NeedleTools {
                 )
             )
         )
+        tools.put(
+            tool(
+                "resumen_habitos",
+                "Redacta el resumen diario de rutinas del usuario a partir de estadísticas ya calculadas por la app.",
+                mapOf(
+                    "texto" to prop(
+                        "string",
+                        "Resumen breve (3-6 frases) en español, útil y concreto, basado SOLO en las estadísticas entregadas"
+                    )
+                )
+            )
+        )
         return tools.toString()
     }
 
@@ -189,7 +201,8 @@ object NeedleTools {
             "devuelve una lista de llamadas vacía en lugar de adivinar. Para buscar en el diario " +
             "del usuario usa SIEMPRE buscar_en_notas (entendiendo sinónimos e intención, no solo " +
             "palabras exactas); para buscar en archivos/contactos del teléfono usa " +
-            "buscar_en_telefono."
+            "buscar_en_telefono. Cuando el mensaje traiga estadísticas de rutinas y pida un " +
+            "resumen, llama a resumen_habitos con el texto redactado."
     }
 
     // ------------------------------------------------------------------

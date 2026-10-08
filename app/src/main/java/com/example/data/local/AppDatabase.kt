@@ -20,6 +20,7 @@ import com.example.data.model.MediaItem
 import com.example.data.model.Relationship
 import com.example.data.model.SuggestedTag
 import com.example.data.model.Tag
+import com.example.habit.HabitEvent
 
 @Database(
     entities = [
@@ -36,9 +37,10 @@ import com.example.data.model.Tag
         FacePersonAssociation::class,
         Relationship::class,
         MediaItem::class,
-        com.example.data.model.LocalReminder::class
+        com.example.data.model.LocalReminder::class,
+        HabitEvent::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -46,6 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun journalDao(): JournalDao
     abstract fun localReminderDao(): LocalReminderDao
+    abstract fun habitEventDao(): com.example.habit.HabitEventDao
 
     companion object {
         @Volatile
@@ -172,6 +175,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `habit_events` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `key` TEXT,
+                        `value` REAL,
+                        `meta` TEXT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_habit_events_timestamp` ON `habit_events` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_habit_events_type` ON `habit_events` (`type`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -179,7 +199,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

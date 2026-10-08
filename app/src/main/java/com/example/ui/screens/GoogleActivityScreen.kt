@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -72,13 +73,15 @@ import java.util.Locale
 fun GoogleActivityScreen(
     viewModel: JournalViewModel,
     onNavigateToGraph: () -> Unit,
-    onNavigateToDetail: (Long) -> Unit = {}
+    onNavigateToDetail: (Long) -> Unit = {},
+    onOpenRoutines: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
     val entries by viewModel.entries.collectAsState()
     val recentFiles by viewModel.recentDeviceFiles.collectAsState()
     val recentApps by viewModel.recentDeviceApps.collectAsState()
+    val habitDigest by viewModel.habitDigest.collectAsState()
 
     var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
 
@@ -236,6 +239,88 @@ fun GoogleActivityScreen(
                                 color = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
+                        }
+                    }
+                }
+            }
+
+            // SECTION: Learned routines (habit engine digest)
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("routines_summary_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Rutinas aprendidas",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${habitDigest?.daysObserved ?: 0} días",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        val routineLines = buildList {
+                            habitDigest?.sleep?.lastNight?.let { n ->
+                                add(
+                                    "Anoche dormiste " + com.example.habit.HabitMiners.formatDuration(
+                                        (n.endMillis - n.startMillis) / 60_000L
+                                    )
+                                )
+                            }
+                            habitDigest?.apps?.predictedNow?.firstOrNull()?.let {
+                                add("A esta hora sueles abrir " + com.example.habit.HabitMiners.appLabel(context, it.pkg))
+                            }
+                            habitDigest?.battery?.projectedBedtimeLevel?.let {
+                                add("Batería a la hora de dormir: ~$it%")
+                            }
+                            habitDigest?.notifications?.topInterruptors?.firstOrNull()?.let { t ->
+                                t.ignoreRate?.let { r ->
+                                    add(
+                                        "Ignoras el " + (r * 100).toInt() + "% de los avisos de " +
+                                            com.example.habit.HabitMiners.appLabel(context, t.pkg)
+                                    )
+                                }
+                            }
+                        }
+                        if (routineLines.isEmpty()) {
+                            Text(
+                                text = "Aprendiendo de tu uso, sueño, lugares y batería — todo local.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            routineLines.take(3).forEach { line ->
+                                Text(
+                                    text = "• $line",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onOpenRoutines,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Ver rutinas y brief del día")
                         }
                     }
                 }

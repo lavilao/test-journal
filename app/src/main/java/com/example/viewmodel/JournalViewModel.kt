@@ -208,6 +208,27 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     private val _recentDeviceApps = MutableStateFlow<List<RecentAppUsageInfo>>(emptyList())
     val recentDeviceApps: StateFlow<List<RecentAppUsageInfo>> = _recentDeviceApps.asStateFlow()
 
+    // ------------------------------------------------------------------
+    // Habit engine: on-device telemetry collectors + learned routines
+    // ------------------------------------------------------------------
+    private val _habitDigest = MutableStateFlow<com.example.habit.HabitMiners.HabitDigest?>(null)
+    val habitDigest: StateFlow<com.example.habit.HabitMiners.HabitDigest?> = _habitDigest.asStateFlow()
+
+    /** Harvest (throttled) + rebuild the learned-routines digest. */
+    fun refreshHabitFacts() {
+        viewModelScope.launch {
+            try {
+                com.example.habit.HabitEngine.collectTick(getApplication<Application>())
+            } catch (_: Exception) {
+            }
+            _habitDigest.value = try {
+                com.example.habit.HabitMiners.buildDigest(getApplication<Application>())
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     // App Interface Mode (Google vs Samsung NowBrief)
     val appModePreferences = AppModePreferences(application)
     val interfaceMode: StateFlow<AppInterfaceMode> = appModePreferences.interfaceMode
@@ -268,6 +289,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         SyncHub.syncNow(getApplication<Application>())
         refreshTelemetry()
         refreshRecentActivity()
+        refreshHabitFacts()
     }
 
     fun refreshRecentActivity() {
@@ -472,6 +494,8 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             ReminderNotifications.checkAndNotifyDue(application)
         }
+        // Habit engine: first harvest (7-day bootstrap on first run) + digest.
+        refreshHabitFacts()
         // Real-time filter: every minute, past events vanish and the list is
         // re-queried so a task/event created outside this app shows up fast.
         viewModelScope.launch {

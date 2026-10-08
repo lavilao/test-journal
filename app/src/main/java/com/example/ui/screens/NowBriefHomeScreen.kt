@@ -90,7 +90,8 @@ fun NowBriefHomeScreen(
     onNavigateToNewEntry: () -> Unit,
     onNavigateToDetail: (Long) -> Unit,
     onOpenLens: () -> Unit = {},
-    onOpenAssistant: () -> Unit = {}
+    onOpenAssistant: () -> Unit = {},
+    onOpenRoutines: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val entries by viewModel.entries.collectAsState()
@@ -101,6 +102,7 @@ fun NowBriefHomeScreen(
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     val nextReminder by viewModel.nextActiveReminder.collectAsState()
     val selectedCity by viewModel.selectedWeatherCity.collectAsState()
+    val habitDigest by viewModel.habitDigest.collectAsState()
 
     var showCityPicker by remember { mutableStateOf(false) }
 
@@ -309,6 +311,15 @@ fun NowBriefHomeScreen(
                     onOpenReminders = {
                         viewModel.selectTab(com.example.viewmodel.MainNavTab.NOTIFICACIONES)
                     }
+                )
+            }
+
+            // Habit engine: learned routines (sleep, apps, battery coach)
+            item {
+                HabitGlassCard(
+                    digest = habitDigest,
+                    context = context,
+                    onOpenRoutines = onOpenRoutines
                 )
             }
 
@@ -951,6 +962,77 @@ private fun MemoriesGlassCard(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Habit engine glass card: 2-3 glanceable learned facts (sleep window,
+ * predicted app, battery projection) with a shortcut to the full Routines
+ * screen. Stays honest — while there is not enough data it shows the
+ * learning state instead of inventing numbers.
+ */
+@Composable
+private fun HabitGlassCard(
+    digest: com.example.habit.HabitMiners.HabitDigest?,
+    context: android.content.Context,
+    onOpenRoutines: () -> Unit
+) {
+    LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
+        GlassLabel(text = "🧠 Tus rutinas", accent = NowBriefNewsBlue)
+        Spacer(modifier = Modifier.height(10.dp))
+        val lines = buildList {
+            digest?.sleep?.let { s ->
+                s.lastNight?.let { n ->
+                    add(
+                        "Anoche dormiste " + com.example.habit.HabitMiners.formatDuration(
+                            (n.endMillis - n.startMillis) / 60_000L
+                        )
+                    )
+                }
+                if (s.typicalBedMinuteOfDay != null && s.typicalWakeMinuteOfDay != null) {
+                    add(
+                        "Te acuestas ~" + com.example.habit.HabitMiners.formatMinuteOfDay(s.typicalBedMinuteOfDay) +
+                            " y despiertas ~" + com.example.habit.HabitMiners.formatMinuteOfDay(s.typicalWakeMinuteOfDay)
+                    )
+                }
+            }
+            digest?.apps?.predictedNow?.firstOrNull()?.let {
+                add("A esta hora sueles abrir " + com.example.habit.HabitMiners.appLabel(context, it.pkg))
+            }
+            digest?.battery?.projectedBedtimeLevel?.let {
+                add("Llegarás a la hora de dormir con ~$it% de batería")
+            }
+        }
+        if (lines.isEmpty()) {
+            Text(
+                text = if (digest == null) {
+                    "Aprendiendo de tu uso, sueño y lugares…"
+                } else {
+                    "Aprendiendo — necesito un par de días más de datos"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            lines.take(3).forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(onClick = onOpenRoutines) {
+            Icon(
+                Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Ver rutinas aprendidas")
         }
     }
 }

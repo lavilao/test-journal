@@ -155,6 +155,12 @@ object SyncHub {
                 com.example.telemetry.WeatherService(app).refreshWeather()
             } catch (_: Exception) {
             }
+            try {
+                // Habit engine: throttled telemetry harvest (~15 min) — the
+                // collectors survive process death via UsageStats replays.
+                com.example.habit.HabitEngine.collectTick(app)
+            } catch (_: Exception) {
+            }
             SyncScheduler.scheduleNextReminderAlarm(app)
             try {
                 com.example.widget.AtAGlanceWidgetProvider.refreshAll(app)

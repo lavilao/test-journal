@@ -85,6 +85,7 @@ import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
 import com.example.BuildConfig
+import com.example.habit.HabitEngine
 import com.example.location.SmartPlaces
 import com.example.wallpaper.SunGradientBackground
 import com.example.wallpaper.SunWallpaperService
@@ -93,7 +94,8 @@ import com.example.wallpaper.SunWallpaperService
 fun SettingsAndModelsScreen(
     viewModel: JournalViewModel,
     onBack: () -> Unit = {},
-    onOpenVoiceSettings: () -> Unit = {}
+    onOpenVoiceSettings: () -> Unit = {},
+    onOpenRoutines: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -137,6 +139,13 @@ fun SettingsAndModelsScreen(
     val savedPlaces = remember(placesTick) { SmartPlaces.places(context) }
     var showAddPlaceDialog by remember { mutableStateOf(false) }
     var placeSaving by remember { mutableStateOf(false) }
+
+    // ---- habit engine toggles ----
+    var habitMaster by remember { mutableStateOf(HabitEngine.isMasterEnabled(context)) }
+    var habitUsage by remember { mutableStateOf(HabitEngine.isUsageCollectorEnabled(context)) }
+    var habitNotifs by remember { mutableStateOf(HabitEngine.isNotificationCollectorEnabled(context)) }
+    var habitLocation by remember { mutableStateOf(HabitEngine.isLocationCollectorEnabled(context)) }
+    var habitBluetooth by remember { mutableStateOf(HabitEngine.isBluetoothCollectorEnabled(context)) }
 
     Column(
         modifier = Modifier
@@ -907,6 +916,88 @@ fun SettingsAndModelsScreen(
         }
 
         // =============================================================
+        // MOTOR DE HÁBITOS: aprende rutinas de la telemetría local
+        // =============================================================
+        Spacer(modifier = Modifier.height(22.dp))
+        Text(
+            text = "Motor de hábitos",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "La app aprende de tu rutina (apps, sueño, lugares, batería, interrupciones) para crear funciones útiles. Todo se queda en tu teléfono.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("habit_engine_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Aprender de mis hábitos",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Registro local de uso, sueño y lugares con retención de ${HabitEngine.retentionDays(context)} días.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = habitMaster,
+                        onCheckedChange = { checked ->
+                            habitMaster = checked
+                            HabitEngine.setMasterEnabled(context, checked)
+                        },
+                        modifier = Modifier.testTag("habit_engine_master_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                HabitCollectorRow("Apps y desbloqueos (acceso de uso)", habitUsage) { checked ->
+                    habitUsage = checked
+                    HabitEngine.setUsageCollectorEnabled(context, checked)
+                }
+                HabitCollectorRow("Notificaciones (solo emisor y hora)", habitNotifs) { checked ->
+                    habitNotifs = checked
+                    HabitEngine.setNotificationCollectorEnabled(context, checked)
+                }
+                HabitCollectorRow("Ubicación y redes Wi-Fi", habitLocation) { checked ->
+                    habitLocation = checked
+                    HabitEngine.setLocationCollectorEnabled(context, checked)
+                }
+                HabitCollectorRow("Dispositivos Bluetooth", habitBluetooth) { checked ->
+                    habitBluetooth = checked
+                    HabitEngine.setBluetoothCollectorEnabled(context, checked)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onOpenRoutines,
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    modifier = Modifier.fillMaxWidth().testTag("open_routines_btn")
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Ver rutinas aprendidas y el brief del día")
+                }
+            }
+        }
+
+        // =============================================================
         // EXPERIMENTAL: dynamic sun background (Samsung mode)
         // =============================================================
         Spacer(modifier = Modifier.height(22.dp))
@@ -1341,5 +1432,32 @@ private fun ModelStatusRow(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             )
         }
+    }
+}
+
+/** One habit-engine telemetry source with its own switch. */
+@Composable
+private fun HabitCollectorRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag("habit_collector_switch")
+        )
     }
 }

@@ -63,6 +63,7 @@ import com.example.ui.screens.GoogleNotificationsScreen
 import com.example.ui.screens.GoogleUniversalSearchScreen
 import com.example.ui.screens.KnowledgeGraphScreen
 import com.example.ui.screens.NowBriefHomeScreen
+import com.example.ui.screens.RoutinesScreen
 import com.example.ui.screens.SettingsAndModelsScreen
 import com.example.ui.screens.TimelineScreen
 import com.example.ui.screens.VaultExplorerScreen
@@ -80,6 +81,7 @@ sealed interface AppScreen {
     data object Assistant : AppScreen
     data object Lens : AppScreen
     data object VoiceSettings : AppScreen
+    data object Routines : AppScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -210,6 +212,11 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     screenState = AppScreen.Main(currentTab)
                 }
             }
+            is AppScreen.Routines -> {
+                BackHandler {
+                    screenState = AppScreen.Main(currentTab)
+                }
+            }
             is AppScreen.Main -> {
                 if (currentTab == MainNavTab.SETTINGS || currentTab == MainNavTab.GRAPH || currentTab == MainNavTab.ENTITIES) {
                     BackHandler {
@@ -253,7 +260,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                             onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
                                             onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
                                             onOpenLens = { screenState = AppScreen.Lens },
-                                            onOpenAssistant = { screenState = AppScreen.Assistant }
+                                            onOpenAssistant = { screenState = AppScreen.Assistant },
+                                            onOpenRoutines = { screenState = AppScreen.Routines }
                                         )
                                     } else {
                                         TimelineScreen(
@@ -279,7 +287,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 )
                                 MainNavTab.ACTIVIDAD -> GoogleActivityScreen(
                                     viewModel = viewModel,
-                                    onNavigateToGraph = { viewModel.selectTab(MainNavTab.GRAPH) }
+                                    onNavigateToGraph = { viewModel.selectTab(MainNavTab.GRAPH) },
+                                    onOpenRoutines = { screenState = AppScreen.Routines }
                                 )
                                 MainNavTab.GRAPH -> KnowledgeGraphScreen(
                                     viewModel = viewModel,
@@ -296,7 +305,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 MainNavTab.SETTINGS -> SettingsAndModelsScreen(
                                     viewModel = viewModel,
                                     onBack = { viewModel.selectTab(MainNavTab.INICIO) },
-                                    onOpenVoiceSettings = { screenState = AppScreen.VoiceSettings }
+                                    onOpenVoiceSettings = { screenState = AppScreen.VoiceSettings },
+                                    onOpenRoutines = { screenState = AppScreen.Routines }
                                 )
                             }
                         }
@@ -331,6 +341,12 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         }
                         is AppScreen.VoiceSettings -> {
                             VoiceAndAssistantScreen(
+                                viewModel = viewModel,
+                                onBack = { screenState = AppScreen.Main(currentTab) }
+                            )
+                        }
+                        is AppScreen.Routines -> {
+                            RoutinesScreen(
                                 viewModel = viewModel,
                                 onBack = { screenState = AppScreen.Main(currentTab) }
                             )

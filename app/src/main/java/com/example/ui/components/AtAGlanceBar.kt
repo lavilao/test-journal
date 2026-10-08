@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLocation
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
@@ -115,7 +116,20 @@ fun AtAGlanceBar(
         }
     }
 
-    val chips = remember(calendarEvent, nextReminder, nextAlarmText, lowBatteryText, telemetry?.todaySteps, telemetry?.hasActivityRecognitionPermission) {
+    // Habit engine: the app the user typically opens around this hour
+    // (self-contained query — no new parameters threaded through callers).
+    var predictedAppLabel by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        predictedAppLabel = try {
+            com.example.habit.HabitMiners.predictedAppsForNow(context, 1)
+                .firstOrNull()
+                ?.let { com.example.habit.HabitMiners.appLabel(context, it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    val chips = remember(calendarEvent, nextReminder, nextAlarmText, lowBatteryText, telemetry?.todaySteps, telemetry?.hasActivityRecognitionPermission, predictedAppLabel) {
         buildList {
             calendarEvent?.let { ev ->
                 add(
@@ -142,6 +156,9 @@ fun AtAGlanceBar(
                 } else {
                     add(GlanceChip(Icons.Default.DirectionsWalk, GoogleGreen.copy(alpha = 0.6f), "Toca para activar el contador de pasos", onActivateSteps))
                 }
+            }
+            predictedAppLabel?.let {
+                add(GlanceChip(Icons.Default.AutoAwesome, GoogleBlue, "Sueles abrir $it a esta hora", null))
             }
             if (isEmpty()) {
                 add(

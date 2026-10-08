@@ -38,6 +38,13 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Habit engine: Bluetooth devices seen repeatedly (headphones, car…).
+         Legacy BLUETOOTH for pre-S, runtime BLUETOOTH_CONNECT on S+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+
     <!-- Android 11+ package visibility: lets the assistant "open <app>"
      * voice command resolve any installed launcher-capable app, and lets
      * SpeechEngineManager enumerate the installed recognition services
@@ -126,6 +133,34 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Habit engine realtime collectors: exempted implicit broadcasts
+             (power/alarm/timezone/boot) fire even when the process is asleep;
+             unlock and screen events arrive via UsageStats replays instead. -->
+        <receiver
+            android:name=".habit.HabitEventReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Habit engine: notification telemetry (opt-in special access).
+             Stores ONLY package + timestamp + category — never content. -->
+        <service
+            android:name=".habit.HabitNotificationListener"
+            android:exported="true"
+            android:label="Telemetría de notificaciones de Mnemosyne"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Dynamic sun live wallpaper (Samsung-mode experiment, opt-in). -->
         <service
