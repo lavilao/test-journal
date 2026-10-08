@@ -27,7 +27,9 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.mnemosyne.vjrwk"
-    minSdk = 24
+    // 26 (Android 8.0): required by androidx.health.connect:connect-client.
+    // The user's device is Android 11, so nothing is lost in practice.
+    minSdk = 26
     targetSdk = 36
     versionCode = appVersionCode
     versionName = appVersionName
