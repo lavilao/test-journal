@@ -182,6 +182,10 @@ fun VoiceAndAssistantScreen(
         needleTick++
     }
 
+    // Declared EARLY because the SAF transfer launchers below call it from
+    // their result callbacks (local functions must precede their first use).
+    fun refreshAll() { refreshTick++ }
+
     // ---- integrated self-tests (Needle / Whistle) ----
     var needleTestState by remember { mutableStateOf<String?>(null) } // running|pass|fail
     var needleTestDetail by remember { mutableStateOf<String?>(null) }
@@ -333,8 +337,6 @@ fun VoiceAndAssistantScreen(
             needleTick++
         }
     }
-
-    fun refreshAll() { refreshTick++ }
 
     // Refresh role state every time the screen resumes (user may have
     // changed the default assistant in system settings).

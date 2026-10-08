@@ -8,6 +8,7 @@ import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
+import kotlin.math.sin
 import android.view.SurfaceHolder
 
 /**

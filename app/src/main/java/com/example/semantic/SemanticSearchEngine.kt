@@ -6,8 +6,8 @@ import com.example.ai.needle.NeedleTools
 import com.example.data.model.EntryWithRelations
 import java.text.Normalizer
 import java.util.Locale
-import kotlin.math.log
 import kotlin.math.max
+import kotlin.math.ln
 
 /** One semantic hit, ready for the UI. */
 data class SemanticHit(
@@ -120,7 +120,7 @@ object SemanticSearchEngine {
                     val docsHaving = entries.count { other ->
                         (docTokens[other.entry.id] ?: emptyList()).any { it == qt }
                     }.coerceAtLeast(1)
-                    val idf = log(totalDocs.toDouble() / docsHaving) + 1.0
+                    val idf = ln(totalDocs.toDouble() / docsHaving) + 1.0
                     val isTag = e.tags.any { normalize(it.name).contains(qt) }
                     score += (tf * idf).toFloat() * if (isTag) 3f else 1f
                     if (matched.size < 3) matched.add(qt)
