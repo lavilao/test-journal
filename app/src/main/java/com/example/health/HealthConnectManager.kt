@@ -113,7 +113,7 @@ object HealthConnectManager {
         try {
             val zone = ZoneId.systemDefault()
             val start = LocalDate.now(zone).minusDays(1).atTime(LocalTime.of(18, 0)).atZone(zone).toInstant()
-            val end = LocalDateTime.now(zone).toInstant()
+            val end = Instant.now()
             val response = hc.readRecords(
                 ReadRecordsRequest(
                     SleepSessionRecord::class,
