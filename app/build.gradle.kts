@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -14,7 +15,10 @@ android {
 
   // Real in-app versioning: values come from the VERSION file at the repo
   // root (bumped every release round) instead of the frozen 1.0.
-  val versionProps = java.util.Properties().apply {
+  // NOTE: `java.util.Properties` cannot be fully qualified here — inside the
+  // android {} block the name `java` resolves to the Java plugin extension —
+  // hence the top-level import.
+  val versionProps = Properties().apply {
     val f = file("${rootDir}/VERSION")
     if (f.exists()) f.inputStream().use { load(it) }
   }
