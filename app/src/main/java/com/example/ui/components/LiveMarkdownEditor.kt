@@ -228,8 +228,8 @@ internal class MarkdownParser(private val palette: MdPalette) {
 
         fun collect(
             regex: Regex,
-            spansBuilder: (String) -> List<SpanStyle>,
-            linkBuilder: ((String) -> String?)? = null
+            linkBuilder: ((String) -> String?)? = null,
+            spansBuilder: (String) -> List<SpanStyle>
         ) {
             regex.findAll(line).forEach { match ->
                 val contentGroup = match.groups[1]
@@ -263,14 +263,14 @@ internal class MarkdownParser(private val palette: MdPalette) {
                 )
             )
         }
-        collect(wikilink, {
+        collect(wikilink, linkBuilder = { it }) {
             listOf(
                 SpanStyle(
                     color = palette.linkColor,
                     fontWeight = FontWeight.Medium
                 )
             )
-        }, linkBuilder = { it })
+        }
         collect(highlight) { listOf(SpanStyle(background = palette.highlightBackground)) }
 
         // Sort and drop overlapping matches (first pattern wins).

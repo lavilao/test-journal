@@ -1982,7 +1982,11 @@ private fun CustomToolEditorDialog(
             if (initial == null) "{{texto}}" else ""
         })
     }
-    var params by remember { mutableStateOf(CustomToolRegistry.parseParams(initial?.paramsJson ?: "[]").toMutableList()) }
+    var params by remember {
+        mutableStateOf<List<CustomToolRegistry.Param>>(
+            CustomToolRegistry.parseParams(initial?.paramsJson ?: "[]")
+        )
+    }
     var nameError by remember { mutableStateOf<String?>(null) }
 
     val typeCycle = listOf("texto" to "string", "número" to "integer", "sí/no" to "boolean")
