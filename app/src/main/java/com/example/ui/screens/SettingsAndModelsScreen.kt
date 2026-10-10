@@ -30,6 +30,8 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Download
 import com.example.data.AppInterfaceMode
@@ -121,6 +123,46 @@ fun SettingsAndModelsScreen(
     val storageBreakdown by viewModel.storageBreakdown.collectAsState()
     val rssSources by viewModel.rssFeedManager.sources.collectAsState()
     var showAddRssDialog by remember { mutableStateOf(false) }
+
+    // ---- OPML export / import launchers (feeds travel between apps) ----
+    val opmlExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/x-opml")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(viewModel.exportRssOpml().toByteArray(Charsets.UTF_8))
+                    }
+                    Toast.makeText(context, "OPML exportado ✔", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No pude exportar: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    val opmlImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val text = context.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(Charsets.UTF_8)
+                    } ?: ""
+                    viewModel.importRssOpml(text) { added ->
+                        Toast.makeText(
+                            context,
+                            if (added > 0) "$added feed(s) importados ✔" else "Nada nuevo que importar (o ya los tenías)",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No pude leer el OPML: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshStorageBreakdown()
@@ -905,13 +947,28 @@ fun SettingsAndModelsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.RssFeed, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(source.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
                                 Text(source.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                             }
+                        }
+                        // Delete ANY feed (defaults included — the storage is
+                        // now a plain editable list).
+                        androidx.compose.material3.IconButton(
+                            onClick = {
+                                viewModel.removeRssFeed(source.url)
+                                Toast.makeText(context, "«${source.name}» eliminado", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Eliminar feed",
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -941,6 +998,142 @@ fun SettingsAndModelsScreen(
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Actualizar")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ---- OPML import / export (feeds travel between apps) ----
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    OutlinedButton(
+                        onClick = { opmlExportLauncher.launch("mnemosyne-feeds.opml") }
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Exportar OPML")
+                    }
+                    OutlinedButton(
+                        onClick = { opmlImportLauncher.launch(arrayOf("text/*", "application/xml", "application/octet-stream")) }
+                    ) {
+                        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Importar OPML")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // ---- OCR & search indexing (with the anti-"petar el móvil" toggles) ----
+        Text(
+            text = "OCR y búsqueda en imágenes",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "El OCR local (ML Kit, en el dispositivo) hace que el texto de tus fotos " +
+                "y documentos compartidos aparezca en la búsqueda. Como puede cargar el " +
+                "teléfono, cada pieza va con su interruptor.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        EditorialCard {
+            Column(modifier = Modifier.padding(16.dp)) {
+                var ocrImages by remember { mutableStateOf(com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) }
+                var ocrDocs by remember { mutableStateOf(com.example.semantic.OcrIndexer.isDocOcrEnabled(context)) }
+                var ocrBackfillRunning by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("OCR de fotos al adjuntar", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Etiquetas + caras + texto de cada foto nueva",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = ocrImages,
+                        onCheckedChange = { checked ->
+                            ocrImages = checked
+                            com.example.semantic.OcrIndexer.setImageOcrEnabled(context, checked)
+                        }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("OCR de documentos (PDF)", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Renderiza y OCR-ea las primeras páginas de los PDF compartidos — más pesado",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = ocrDocs,
+                        onCheckedChange = { checked ->
+                            ocrDocs = checked
+                            com.example.semantic.OcrIndexer.setDocOcrEnabled(context, checked)
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Indexar fotos antiguas", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "OCR en segundo plano de las fotos guardadas sin texto (en lotes de 40)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        enabled = !ocrBackfillRunning && ocrImages,
+                        onClick = {
+                            ocrBackfillRunning = true
+                            scope.launch {
+                                val done = try {
+                                    com.example.semantic.OcrIndexer.backfillImageOcr(context)
+                                } catch (_: Exception) {
+                                    0
+                                }
+                                ocrBackfillRunning = false
+                                Toast.makeText(
+                                    context,
+                                    if (done > 0) "$done foto(s) indexadas — su texto ya es buscable."
+                                    else "Nada nuevo que indexar (o OCR desactivado).",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        if (ocrBackfillRunning) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Indexar", fontSize = 12.sp)
+                        }
                     }
                 }
             }

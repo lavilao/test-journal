@@ -1019,6 +1019,9 @@ class HotwordService : Service(), RecognitionListener {
                     )
                 }
 
+                is AssistantIntent.RunCustomTool ->
+                    assistantManager.runCustomTool(intent.toolId, intent.toolName, intent.args)
+
                 AssistantIntent.Unknown ->
                     "No entendí el comando. Prueba: «abre whatsapp», " +
                             "«llama a maría», «cuánta batería queda», «linterna», «cuánto es 12 por 7»."

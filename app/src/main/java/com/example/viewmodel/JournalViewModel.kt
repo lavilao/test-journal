@@ -49,7 +49,9 @@ import com.example.sync.ReminderNotifications
 import com.example.sync.SyncHub
 import com.example.sync.SyncScheduler
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -168,6 +170,14 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             rssFeedManager.refreshFeeds()
         }
+        // Custom tools for the local assistant (in-memory registry so the
+        // engine's synchronous tool-declaration can include them).
+        viewModelScope.launch {
+            try {
+                com.example.ai.needle.CustomToolRegistry.refresh(application)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun refreshRssFeeds() {
@@ -182,9 +192,28 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun removeRssFeed(url: String) {
+        viewModelScope.launch {
+            rssFeedManager.removeFeed(url)
+        }
+    }
+
+    fun exportRssOpml(): String = rssFeedManager.exportOpml()
+
+    fun importRssOpml(text: String, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val added = rssFeedManager.importOpml(text)
+            if (added > 0) rssFeedManager.refreshFeeds()
+            onDone(added)
+        }
+    }
+
     // Weather Service (Real Live Weather from Open-Meteo & GPS)
     val weatherService = WeatherService(application)
     val realWeather: StateFlow<RealWeatherData> = weatherService.weatherState
+
+    // Today (morning / afternoon / night) + week outlook, cached on disk.
+    val weatherForecast: StateFlow<com.example.telemetry.ForecastData> = weatherService.forecastState
 
     // Calendar Sync Manager (Real Android Device Calendar)
     val calendarSyncManager = CalendarSyncManager(application)
@@ -299,14 +328,33 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private var deviceSearchJob: kotlinx.coroutines.Job? = null
+    private val deviceSearchCache =
+        android.util.LruCache<String, Pair<List<DeviceContactInfo>, List<DeviceFileInfo>>>(24)
+
     fun searchDevice(query: String) {
-        viewModelScope.launch {
-            if (query.isBlank()) {
-                _deviceContactsResults.value = emptyList()
-                _deviceFilesResults.value = emptyList()
-            } else {
-                _deviceContactsResults.value = deviceSearchManager.searchContacts(query)
-                _deviceFilesResults.value = deviceSearchManager.searchFiles(query)
+        // Debounced + cancellable + cached: keystroke storms no longer fire
+        // a full ContentProvider scan each letter.
+        deviceSearchJob?.cancel()
+        if (query.isBlank()) {
+            _deviceContactsResults.value = emptyList()
+            _deviceFilesResults.value = emptyList()
+            return
+        }
+        deviceSearchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(200)
+            val cached = deviceSearchCache.get(query.trim().lowercase())
+            if (cached != null) {
+                _deviceContactsResults.value = cached.first
+                _deviceFilesResults.value = cached.second
+                return@launch
+            }
+            val contacts = deviceSearchManager.searchContacts(query)
+            val files = deviceSearchManager.searchFiles(query)
+            if (currentCoroutineContext().isActive) {
+                deviceSearchCache.put(query.trim().lowercase(), contacts to files)
+                _deviceContactsResults.value = contacts
+                _deviceFilesResults.value = files
             }
         }
     }
@@ -828,16 +876,32 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private var hybridSearchJob: kotlinx.coroutines.Job? = null
+    private val hybridSearchCache =
+        android.util.LruCache<String, List<HybridSearchResult>>(16)
+
     fun onSearchQueryChanged(query: String) {
         searchQuery.value = query
+        hybridSearchJob?.cancel()
         if (query.isBlank()) {
             _searchResults.value = emptyList()
             return
         }
-        viewModelScope.launch {
+        hybridSearchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(250) // debounce keystrokes
+            val key = query.trim().lowercase()
+            val cached = hybridSearchCache.get(key)
+            if (cached != null) {
+                _searchResults.value = cached
+                return@launch
+            }
             isSearching.value = true
-            _searchResults.value = repository.searchHybrid(query)
-            isSearching.value = false
+            val results = repository.searchHybrid(query)
+            if (currentCoroutineContext().isActive) {
+                hybridSearchCache.put(key, results)
+                _searchResults.value = results
+                isSearching.value = false
+            }
         }
     }
 

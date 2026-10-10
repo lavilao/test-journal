@@ -8,6 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.AudioRecordItem
+import com.example.data.model.CustomTool
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityMention
 import com.example.data.model.EntryEmbedding
@@ -40,9 +41,10 @@ import com.example.habit.HabitEvent
         MediaItem::class,
         com.example.data.model.LocalReminder::class,
         HabitEvent::class,
-        EntryEmbedding::class
+        EntryEmbedding::class,
+        CustomTool::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -52,6 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun localReminderDao(): LocalReminderDao
     abstract fun habitEventDao(): com.example.habit.HabitEventDao
     abstract fun entryEmbeddingDao(): EntryEmbeddingDao
+    abstract fun customToolDao(): CustomToolDao
 
     companion object {
         @Volatile
@@ -210,6 +213,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `custom_tools` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `label` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `paramsJson` TEXT NOT NULL,
+                        `action` TEXT NOT NULL,
+                        `actionConfig` TEXT NOT NULL,
+                        `enabled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_custom_tools_name` ON `custom_tools` (`name`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -217,7 +239,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

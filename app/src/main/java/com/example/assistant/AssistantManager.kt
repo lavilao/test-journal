@@ -21,6 +21,7 @@ import com.example.location.SmartPlaces
 import com.example.repository.JournalRepository
 import com.example.telemetry.RealWeatherData
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -98,6 +99,13 @@ sealed class AssistantIntent {
 
     /** Save the current location as a named place. */
     data class SaveCurrentPlace(val name: String) : AssistantIntent()
+
+    /** A user-made tool fired by Needle with the arguments it filled. */
+    data class RunCustomTool(
+        val toolId: Long,
+        val toolName: String,
+        val args: Map<String, String>
+    ) : AssistantIntent()
 
     /** Not understood — offer help. */
     data object Unknown : AssistantIntent()
@@ -627,9 +635,10 @@ class AssistantManager(private val context: Context) {
         } catch (_: Exception) {
             null
         }
+        val viaHc = hc != null
         val steps = hc?.toInt() ?: com.example.telemetry.DeviceLifeHubManager.cachedStepsToday(context)
         if (steps > 0) {
-            "Hoy llevas $steps pasos."
+            "Hoy llevas $steps pasos${if (viaHc) " (según Health Connect)." else " (según el sensor de pasos del teléfono)."}"
         } else {
             "Aún no tengo pasos registrados hoy (camina un poco con el teléfono encima)."
         }
@@ -742,6 +751,86 @@ class AssistantManager(private val context: Context) {
         SmartPlaces.addPlace(context, name, loc.latitude, loc.longitude, "Guardado por el asistente")
         "Lugar \"$name\" guardado en (${"%.4f".format(loc.latitude)}, ${"%.4f".format(loc.longitude)})."
     }
+
+    // ------------------------------------------------------------------
+    // Custom (user-made) tools
+    // ------------------------------------------------------------------
+
+    /**
+     * Executes a user-made tool: renders its {{param}} template with the
+     * arguments Needle filled and performs the action the user picked.
+     */
+    suspend fun runCustomTool(toolId: Long, toolName: String, args: Map<String, String>): String =
+        withContext(Dispatchers.IO) {
+            val tool = com.example.data.local.AppDatabase.getInstance(context)
+                .customToolDao().getById(toolId)
+                ?: return@withContext "La herramienta \"$toolName\" ya no existe (¿la borraste?)."
+            if (!tool.enabled) {
+                return@withContext "La herramienta \"${tool.label}\" está desactivada en el menú de herramientas."
+            }
+            val rendered = com.example.ai.needle.CustomToolRegistry.renderTemplate(
+                tool.actionConfig, args
+            )
+            val title = rendered.substringBefore('\n').take(80).ifBlank { tool.label }
+
+            try {
+                when (tool.action) {
+                    "note" -> {
+                        JournalRepository(context).saveEntry(
+                            JournalEntry(
+                                title = title,
+                                body = rendered,
+                                journalDate = System.currentTimeMillis()
+                            ),
+                            manualTags = listOf("herramienta", tool.name)
+                        )
+                        "Hecho con ${tool.label}: nota «$title» guardada."
+                    }
+                    "task" -> {
+                        AppDatabase.getInstance(context).localReminderDao().insertReminder(
+                            LocalReminder(title = title, dueTimestamp = System.currentTimeMillis() + 24 * 3600_000L)
+                        )
+                        "Hecho con ${tool.label}: tarea «$title» creada."
+                    }
+                    "event" -> {
+                        createEvent(title, startInMinutes = 60, durationMinutes = 60, location = null)
+                            .replace("Evento", "Evento (${tool.label})")
+                    }
+                    "append_note" -> {
+                        val repo = JournalRepository(context)
+                        val target = repo.allEntriesWithRelations.first()
+                            .filter { it.entry.title.contains(tool.actionConfig.substringBefore('\n').trim(), ignoreCase = true) }
+                            .maxByOrNull { it.entry.updatedAt }
+                        if (target == null) {
+                            "No encontré una nota para anexar el resultado de ${tool.label}."
+                        } else {
+                            repo.saveEntry(
+                                target.entry.copy(
+                                    body = target.entry.body + "\n\n" + rendered,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                            "Hecho con ${tool.label}: anexado a «${target.entry.title}»."
+                        }
+                    }
+                    "open_url" -> {
+                        val url = rendered.takeIf { it.startsWith("http") }
+                            ?: return@withContext "La herramienta ${tool.label} no produjo una URL válida."
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                        "Hecho con ${tool.label}: abriendo $url."
+                    }
+                    else -> {
+                        // "reply": the rendered template IS the answer.
+                        rendered.ifBlank { "La herramienta ${tool.label} no produjo texto." }
+                    }
+                }
+            } catch (e: Exception) {
+                "La herramienta ${tool.label} falló: ${e.message}"
+            }
+        }
 
     /** Minimal WAV writer: 44-byte header + little-endian PCM16. */
     private fun writeWav(file: File, pcm: ShortArray, sampleRate: Int) {

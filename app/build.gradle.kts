@@ -173,6 +173,9 @@ dependencies {
   // Health Connect (Android 9+ with the provider app, built in on 14+):
   // real steps + sleep for the brief, widget and weekly report.
   implementation(libs.androidx.health.connect)
+  // ML Kit Subject Segmentation (beta, via Play Services, inference
+  // on-device): "quitar fondo" / "quitar sujeto" photo surgery.
+  implementation(libs.play.services.mlkit.subject.segmentation)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

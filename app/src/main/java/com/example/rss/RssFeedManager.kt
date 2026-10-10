@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -40,6 +41,10 @@ class RssFeedManager(private val context: Context) {
         .build()
 
     private val prefs = context.getSharedPreferences("rss_feeds_prefs", Context.MODE_PRIVATE)
+
+    private companion object {
+        const val KEY_SOURCES_V2 = "rss_sources_v2"
+    }
 
     private val defaultSources = listOf(
         RssFeedSource("BBC News", "https://feeds.bbci.co.uk/news/rss.xml", "General"),
@@ -122,8 +127,8 @@ class RssFeedManager(private val context: Context) {
         val safeName = name.ifBlank { "Canal RSS" }
 
         val newSource = RssFeedSource(safeName, trimmedUrl, category)
-        persistCustomSource(newSource)
-        val updated = _sources.value.toMutableList().apply { add(0, newSource) }
+        persistSource(newSource)
+        val updated = (_sources.value.filter { it.url != trimmedUrl } + newSource)
         _sources.value = updated
 
         try {
@@ -144,21 +149,138 @@ class RssFeedManager(private val context: Context) {
         true
     }
 
-    private fun loadSavedSources(): List<RssFeedSource> {
-        val savedSet = prefs.getStringSet("custom_rss_sources", null) ?: return defaultSources
-        val customList = savedSet.mapNotNull { entry ->
-            val parts = entry.split("|||")
-            if (parts.size >= 2) {
-                RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" })
-            } else null
+    /** Removes a feed (any feed — custom or one of the originals). */
+    suspend fun removeFeed(url: String): Boolean = withContext(Dispatchers.IO) {
+        val trimmed = url.trim()
+        val remaining = readSourceSet().mapNotNull { decodeEntry(it) }
+            .filterNot { it.url == trimmed }
+        writeSourceSet(remaining)
+        _sources.value = remaining
+        // Drop the removed feed's articles from the current list too
+        // (articles carry the source NAME, not its URL).
+        _articles.value = _articles.value.filterNot { article ->
+            remaining.none { it.name == article.sourceTitle }
         }
-        return (customList + defaultSources).distinctBy { it.url }
+        true
     }
 
-    private fun persistCustomSource(source: RssFeedSource) {
-        val currentSet = prefs.getStringSet("custom_rss_sources", emptySet())?.toMutableSet() ?: mutableSetOf()
-        currentSet.add("${source.name}|||${source.url}|||${source.category}")
-        prefs.edit().putStringSet("custom_rss_sources", currentSet).apply()
+    // ------------------------------------------------------------------
+    // OPML import / export
+    // ------------------------------------------------------------------
+
+    /** Serializes the current feeds as OPML 2.0 (RSS & Atom outlines). */
+    fun exportOpml(): String {
+        val sb = StringBuilder()
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        sb.append("<opml version=\"2.0\">\n")
+        sb.append("  <head><title>Mnemosyne feeds</title><dateCreated>")
+            .append(java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
+                .format(java.util.Date()))
+            .append("</dateCreated></head>\n")
+        sb.append("  <body>\n")
+        _sources.value.forEach { s ->
+            sb.append("    <outline type=\"rss\" text=\"")
+                .append(xmlEscape(s.name))
+                .append("\" title=\"")
+                .append(xmlEscape(s.name))
+                .append("\" xmlUrl=\"")
+                .append(xmlEscape(s.url))
+                .append("\" category=\"")
+                .append(xmlEscape(s.category))
+                .append("\"/>\n")
+        }
+        sb.append("  </body>\n</opml>\n")
+        return sb.toString()
+    }
+
+    /**
+     * Imports feeds from OPML text. Accepts nested outlines (folders) and
+     * ignores outlines without an xmlUrl. Returns how many feeds were added.
+     */
+    suspend fun importOpml(opmlText: String): Int = withContext(Dispatchers.IO) {
+        val found = mutableListOf<RssFeedSource>()
+        try {
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+            parser.setInput(StringReader(opmlText))
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG && parser.name?.lowercase() == "outline") {
+                    val xmlUrl = parser.getAttributeValue(null, "xmlUrl")
+                        ?: parser.getAttributeValue(null, "xmlurl")
+                        ?: parser.getAttributeValue(null, "xmlURL")
+                    if (!xmlUrl.isNullOrBlank() && xmlUrl.startsWith("http")) {
+                        val title = parser.getAttributeValue(null, "title")
+                            ?: parser.getAttributeValue(null, "text")
+                            ?: xmlUrl.substringAfter("//").takeBefore('/')
+                        val category = parser.getAttributeValue(null, "category")?.takeIf { it.isNotBlank() } ?: "Importado"
+                        found.add(RssFeedSource(title.trim(), xmlUrl.trim(), category))
+                    }
+                }
+                event = parser.next()
+            }
+        } catch (_: Exception) {
+        }
+
+        val current = _sources.value
+        val toAdd = found.distinctBy { it.url }.filter { f -> current.none { it.url == f.url } }
+        if (toAdd.isNotEmpty()) {
+            writeSourceSet(current + toAdd)
+            _sources.value = current + toAdd
+        }
+        toAdd.size
+    }
+
+    private fun xmlEscape(s: String): String = s
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace("\"", "&quot;").replace("'", "&apos;")
+
+    private fun String.takeBefore(c: Char): String =
+        if (contains(c)) substringBefore(c) else this
+
+    // ------------------------------------------------------------------
+    // Source persistence (v2: one StringSet, defaults deletable)
+    // ------------------------------------------------------------------
+
+    private fun loadSavedSources(): List<RssFeedSource> {
+        // Migration: the old format only stored CUSTOM feeds and re-appended
+        // the 5 defaults forever (they could not be deleted). v2 stores the
+        // complete list, so removals stick.
+        if (!prefs.contains(KEY_SOURCES_V2)) {
+            val oldCustom = prefs.getStringSet("custom_rss_sources", null)
+                ?.mapNotNull { entry ->
+                    val parts = entry.split("|||")
+                    if (parts.size >= 2) RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" }) else null
+                }.orEmpty()
+            val merged = (oldCustom + defaultSources).distinctBy { it.url }
+            writeSourceSet(merged)
+            return merged
+        }
+        return readSourceSet().mapNotNull { decodeEntry(it) }
+    }
+
+    private fun readSourceSet(): Set<String> =
+        prefs.getStringSet(KEY_SOURCES_V2, emptySet())?.toSet() ?: emptySet()
+
+    private fun writeSourceSet(sources: List<RssFeedSource>) {
+        prefs.edit()
+            .putStringSet(KEY_SOURCES_V2, sources.map(::encodeEntry).toSet())
+            .apply()
+    }
+
+    private fun persistSource(source: RssFeedSource) {
+        val current = readSourceSet().mapNotNull { decodeEntry(it) }
+        writeSourceSet((current.filterNot { it.url == source.url } + source))
+    }
+
+    private fun encodeEntry(s: RssFeedSource) = "${s.name}|${s.url}|${s.category}"
+
+    private fun decodeEntry(entry: String): RssFeedSource? {
+        // Tolerates both the v2 "|" format and legacy "|||" entries.
+        val parts = if (entry.contains("|||")) entry.split("|||") else entry.split("|")
+        return if (parts.size >= 2 && parts[1].startsWith("http")) {
+            RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" })
+        } else null
     }
 
     private fun parseRssXml(xmlContent: String, sourceName: String, category: String): List<RssArticle> {

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,6 +57,8 @@ import androidx.core.content.ContextCompat
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.ai.needle.WhistleDictationController
+import com.example.ai.needle.WhistleResult
+import com.example.media.AudioDecode
 import com.example.media.PlaybackState
 import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
@@ -103,6 +106,9 @@ fun VoiceTranscriptionModal(
         aiTick++
     }
 
+    /** Whistle stats of the last transcription (honest telemetry, small). */
+    var whistleStats by remember { mutableStateOf<String?>(null) }
+
     fun transcribeWhistle() {
         val pcm = whistleController.stop()
         if (pcm.isEmpty()) {
@@ -111,19 +117,59 @@ fun VoiceTranscriptionModal(
         }
         whistleTranscribing = true
         scope.launch {
-            val text = kotlinx.coroutines.withTimeoutOrNull(30_000) {
+            val raw = kotlinx.coroutines.withTimeoutOrNull(30_000) {
                 NeedleRuntime.transcribe(pcm, "es")
             }
+            // Parse the engine JSON — the user sees TEXT, not {"text":…}.
+            val parsed = WhistleResult.parse(raw)
             whistleTranscribing = false
             aiTick++
-            if (text.isNullOrBlank()) {
+            whistleStats = parsed?.statsLine()
+            if (parsed == null || parsed.text.isBlank()) {
                 Toast.makeText(
                     context,
                     "Whistle no devolvió texto (¿silencio o ruido?). Intenta de nuevo.",
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
+                val text = parsed.text
                 transcriptText = if (transcriptText.isBlank()) text.trim() else "${transcriptText.trim()} ${text.trim()}"
+            }
+        }
+    }
+
+    /**
+     * ONE-TAP transcription of the ALREADY SAVED recording: decodes the
+     * file to PCM and runs Whistle on it. No re-recording, no extra steps.
+     */
+    fun transcribeSavedFile(path: String?) {
+        if (path.isNullOrBlank()) {
+            Toast.makeText(context, "Esta nota no tiene archivo de audio.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        whistleTranscribing = true
+        scope.launch {
+            try {
+                NeedleModelManager.ensureLoaded(context)
+            } catch (_: Exception) {
+            }
+            val pcm = AudioDecode.decodeToPcm16kMono(path)
+            val raw = if (pcm != null && pcm.isNotEmpty()) {
+                kotlinx.coroutines.withTimeoutOrNull(90_000) { NeedleRuntime.transcribe(pcm, "es") }
+            } else null
+            val parsed = WhistleResult.parse(raw)
+            whistleTranscribing = false
+            aiTick++
+            whistleStats = parsed?.statsLine()
+            if (parsed == null || parsed.text.isBlank()) {
+                Toast.makeText(
+                    context,
+                    "No pude transcribir este audio (¿silencio, ruido o formato?).",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                transcriptText = if (transcriptText.isBlank()) parsed.text.trim()
+                else "${transcriptText.trim()} ${parsed.text.trim()}"
             }
         }
     }
@@ -216,24 +262,36 @@ fun VoiceTranscriptionModal(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { if (isAudioPlaying) viewModel.stopAudio() else viewModel.playAudio(audioFilePath) }) {
-                            Icon(
-                                if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Reproducir",
-                                tint = ForestPrimary
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { if (isAudioPlaying) viewModel.stopAudio() else viewModel.playAudio(audioFilePath) }) {
+                                Icon(
+                                    if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Reproducir",
+                                    tint = ForestPrimary
+                                )
+                            }
+                            val sec = durationMs / 1000
+                            Text(
+                                text = "Grabación · ${sec / 60}:${String.format(Locale.US, "%02d", sec % 60)}",
+                                style = MaterialTheme.typography.bodyMedium
                             )
                         }
-                        val sec = durationMs / 1000
-                        Text(
-                            text = "Grabación · ${sec / 60}:${String.format(Locale.US, "%02d", sec % 60)}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        // The one-tap ask: transcribe THIS file with local AI.
+                        if (whistleUsable && !whistleTranscribing && !whistleRecording) {
+                            Button(
+                                onClick = { transcribeSavedFile(audioFilePath) },
+                                colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
+                                modifier = Modifier.fillMaxWidth().testTag("modal_transcribe_file_btn")
+                            ) {
+                                Icon(Icons.Default.RecordVoiceOver, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Transcribir esta grabación (IA local)", fontSize = 13.sp)
+                            }
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -309,7 +367,7 @@ fun VoiceTranscriptionModal(
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Procesar", fontSize = 12.sp)
+                            Text("Detener y transcribir", fontSize = 12.sp)
                         }
                     } else if (!isDictating && !whistleTranscribing) {
                         Button(
@@ -363,6 +421,15 @@ fun VoiceTranscriptionModal(
                     .fillMaxWidth()
                     .testTag("modal_transcript_text_input")
             )
+
+            if (whistleStats != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Whistle: $whistleStats",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

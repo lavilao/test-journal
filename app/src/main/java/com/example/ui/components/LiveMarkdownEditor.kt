@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,7 +78,9 @@ internal data class MdSegment(
     val origStart: Int,
     val origEnd: Int,
     val output: String,
-    val spans: List<SpanStyle> = emptyList()
+    val spans: List<SpanStyle> = emptyList(),
+    /** Wikilink target (the text inside [[…]]), when this segment is one. */
+    val wikilink: String? = null
 )
 
 /**
@@ -217,12 +220,17 @@ internal class MarkdownParser(private val palette: MdPalette) {
             val end: Int,
             val contentStart: Int,
             val contentEnd: Int,
-            val spans: List<SpanStyle>
+            val spans: List<SpanStyle>,
+            val link: String? = null
         )
 
         val candidates = mutableListOf<MatchInfo>()
 
-        fun collect(regex: Regex, spansBuilder: (String) -> List<SpanStyle>) {
+        fun collect(
+            regex: Regex,
+            spansBuilder: (String) -> List<SpanStyle>,
+            linkBuilder: ((String) -> String?)? = null
+        ) {
             regex.findAll(line).forEach { match ->
                 val contentGroup = match.groups[1]
                 val contentStart = contentGroup?.range?.first ?: match.range.first
@@ -233,7 +241,8 @@ internal class MarkdownParser(private val palette: MdPalette) {
                         end = match.range.last + 1,
                         contentStart = contentStart,
                         contentEnd = contentEnd,
-                        spans = spansBuilder(match.value)
+                        spans = spansBuilder(match.value),
+                        link = linkBuilder?.invoke(line.substring(contentStart, contentEnd))
                     )
                 )
             }
@@ -254,14 +263,14 @@ internal class MarkdownParser(private val palette: MdPalette) {
                 )
             )
         }
-        collect(wikilink) {
+        collect(wikilink, {
             listOf(
                 SpanStyle(
                     color = palette.linkColor,
                     fontWeight = FontWeight.Medium
                 )
             )
-        }
+        }, linkBuilder = { it })
         collect(highlight) { listOf(SpanStyle(background = palette.highlightBackground)) }
 
         // Sort and drop overlapping matches (first pattern wins).
@@ -295,7 +304,8 @@ internal class MarkdownParser(private val palette: MdPalette) {
                     base + match.contentStart,
                     base + match.contentEnd,
                     line.substring(match.contentStart, match.contentEnd),
-                    blockSpans + match.spans
+                    blockSpans + match.spans,
+                    match.link
                 )
             )
             // Hidden trailing marker
@@ -678,7 +688,7 @@ private fun ToolbarText(label: String, onClick: () -> Unit) {
 
 /**
  * Read-only markdown rendering using the same engine as the live editor,
- * with tappable wikilinks.
+ * with TAPPABLE wikilinks ([[nombre]] opens the entity page).
  */
 @Composable
 fun MarkdownText(
@@ -694,7 +704,20 @@ fun MarkdownText(
         val builder = AnnotatedString.Builder()
         segments.forEach { seg ->
             if (seg.output.isEmpty()) return@forEach
-            if (seg.spans.isEmpty()) {
+            val link = if (onWikilinkClick != null) seg.wikilink else null
+            if (link != null) {
+                builder.pushStringAnnotation(tag = "MD_WIKILINK", annotation = link)
+                builder.pushStyle(
+                    SpanStyle(
+                        color = palette.linkColor,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    )
+                )
+                builder.append(seg.output)
+                builder.pop()
+                builder.pop()
+            } else if (seg.spans.isEmpty()) {
                 builder.append(seg.output)
             } else {
                 seg.spans.forEach { builder.pushStyle(it) }
@@ -705,9 +728,23 @@ fun MarkdownText(
         builder.toAnnotatedString()
     }
 
-    Text(
-        text = annotated,
-        style = style.copy(color = style.color.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.onSurface),
-        modifier = modifier
-    )
+    if (onWikilinkClick != null) {
+        ClickableText(
+            text = annotated,
+            style = style.copy(
+                color = style.color.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.onSurface
+            ),
+            modifier = modifier,
+            onClick = { offset ->
+                annotated.getStringAnnotations(tag = "MD_WIKILINK", start = offset, end = offset)
+                    .firstOrNull()?.let { onWikilinkClick(it.item) }
+            }
+        )
+    } else {
+        Text(
+            text = annotated,
+            style = style.copy(color = style.color.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.onSurface),
+            modifier = modifier
+        )
+    }
 }

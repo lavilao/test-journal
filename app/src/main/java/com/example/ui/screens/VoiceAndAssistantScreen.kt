@@ -10,6 +10,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ai.needle.ModelTransferManager
 import com.example.ai.needle.NeedleTools
+import com.example.ai.needle.CustomToolRegistry
+import com.example.data.model.CustomTool
 import com.example.ai.needle.WhistleDictationController
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -40,6 +43,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -179,7 +184,13 @@ fun VoiceAndAssistantScreen(
     }
 
     LaunchedEffect(Unit) {
-        NeedleModelManager.ensureLoaded(context)
+        // PERF (regresión reportada): entrar aquí NO debe cargar los modelos.
+        // ensureLoaded() cargaba needle3+whistle y re-tokenizaba el catálogo
+        // completo — segundos de bloqueo, además encolado detrás del stream
+        // del hotword (1 pasada/s por el mismo hilo del motor). Ahora solo
+        // refrescamos el registro de herramientas personalizadas y leemos el
+        // estado ACTUAL; los self-tests cargan modelos bajo demanda.
+        CustomToolRegistry.refresh(context)
         needleTick++
     }
 
@@ -1059,6 +1070,11 @@ fun VoiceAndAssistantScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
+            // Optimistic overrides: the switch moves INSTANTLY; the engine
+            // re-declares the catalogue in the background (it may queue
+            // behind the hotword stream — that used to make the switches
+            // look dead for seconds).
+            var toolOverrides by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
             NeedleTools.TOOL_CATALOG.forEach { spec ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1074,15 +1090,20 @@ fun VoiceAndAssistantScreen(
                         )
                     }
                     Switch(
-                        checked = remember(needleTick) { NeedleTools.isToolEnabled(context, spec.id) },
+                        checked = toolOverrides[spec.id]
+                            ?: NeedleTools.isToolEnabled(context, spec.id),
                         onCheckedChange = { checked ->
+                            toolOverrides = toolOverrides + (spec.id to checked)
                             NeedleTools.setToolEnabled(context, spec.id, checked)
+                            needleTick++ // instant UI feedback
                             scope.launch {
-                                NeedleRuntime.applyToolGating(context)
+                                try {
+                                    NeedleRuntime.applyToolGating(context)
+                                } catch (_: Exception) {
+                                }
                                 needleTick++
                             }
-                        },
-                        enabled = needleDownloaded
+                        }
                     )
                 }
             }
@@ -1096,8 +1117,13 @@ fun VoiceAndAssistantScreen(
             }
             TextButton(onClick = {
                 NeedleTools.resetGating(context)
+                toolOverrides = emptyMap()
+                needleTick++
                 scope.launch {
-                    NeedleRuntime.applyToolGating(context)
+                    try {
+                        NeedleRuntime.applyToolGating(context)
+                    } catch (_: Exception) {
+                    }
                     needleTick++
                 }
             }) {
@@ -1106,6 +1132,23 @@ fun VoiceAndAssistantScreen(
                 Text("Restaurar los valores por defecto")
             }
         }
+
+        // ============ 2.56 Custom (user-made) tools ============
+        CustomToolsCard(
+            context = context,
+            scope = scope,
+            needleTick = needleTick,
+            onChanged = {
+                scope.launch {
+                    CustomToolRegistry.refresh(context)
+                    try {
+                        NeedleRuntime.applyToolGating(context)
+                    } catch (_: Exception) {
+                    }
+                    needleTick++
+                }
+            }
+        )
 
         // ============ 2.6 Integrated self-tests ============
         SettingsCard(
@@ -1599,11 +1642,13 @@ fun VoiceAndAssistantScreen(
                         "de arriba."
                 } else {
                     buildString {
-                        append("En Android 11: mantén pulsado el botón de inicio → icono de ")
-                        append("asistente, o Ajustes → Apps y notificaciones → Avanzado → Apps ")
-                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne». ")
-                        append("Si no aparece en la lista, reinicia el teléfono tras instalar ")
-                        append("(algunas ROMs cachean la lista de asistentes).")
+                        append("En Android 11: Ajustes → Apps y notificaciones → Avanzado → Apps ")
+                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne» (o «Mnemosyne"). ")
+                        append("Desde esta versión la app aparece por DOS vías: como servicio de ")
+                        append("interacción de voz Y como app de asistencia clásica, así que debe ")
+                        append("salir en la lista aunque la ROM tarde en refrescar. Si aun así no ")
+                        append("aparece: reinicia el teléfono una vez tras instalar (algunas ROMs ")
+                        append("cachear la lista) y vuelve a entrar en ese ajuste.")
                         currentAssistant?.let {
                             append("\nAsistente actual del sistema: ${it.substringAfterLast('.')}.")
                         }
@@ -1793,4 +1838,328 @@ private fun tryStart(context: Context, intent: android.content.Intent): Boolean 
     true
 } catch (_: Exception) {
     false
+}
+
+// ----------------------------------------------------------------------
+// Custom (user-made) tools — build your own Needle tools in-app
+// ----------------------------------------------------------------------
+
+@Composable
+private fun CustomToolsCard(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    needleTick: Int,
+    onChanged: () -> Unit
+) {
+    var tools by remember(needleTick) { mutableStateOf(CustomToolRegistry.all()) }
+    var showEditor by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<CustomTool?>(null) }
+
+    SettingsCard(
+        icon = { Icon(Icons.Default.Build, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+        title = "Tus propias herramientas",
+        badge = {
+            val active = tools.count { it.enabled }
+            BadgePill("$active / ${tools.size} activas", ForestPrimary)
+        }
+    ) {
+        Text(
+            text = "Crea herramientas que el asistente local puede llamar por ti. " +
+                "Reglas de oro (de la guía de diseño de herramientas para Needle): " +
+                "UNA acción por herramienta; describe las ACCIONES que cubre, no una categoría; " +
+                "cada argumento debe describir DÓNDE está el valor en lo que dices (p. ej. «el importe que mencione»); " +
+                "si un valor no siempre se dice, márcalo opcional.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (tools.isEmpty()) {
+            Text(
+                "Aún no tienes herramientas propias. Ejemplo: «registrar gasto» con un " +
+                    "parámetro importe → crea una nota con plantilla «Gasto: {{importe}}».",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        tools.forEach { tool ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tool.label, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "${tool.name} · ${actionLabel(tool.action)} · ${CustomToolRegistry.parseParams(tool.paramsJson).size} parám.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = { editing = tool; showEditor = true }, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.Edit, "Editar", modifier = Modifier.size(16.dp), tint = ForestPrimary)
+                }
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                com.example.data.local.AppDatabase.getInstance(context)
+                                    .customToolDao().deleteById(tool.id)
+                            } catch (_: Exception) {
+                            }
+                            onChanged()
+                        }
+                    },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete, "Eliminar",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                    )
+                }
+                Switch(
+                    checked = tool.enabled,
+                    onCheckedChange = { checked ->
+                        scope.launch {
+                            try {
+                                com.example.data.local.AppDatabase.getInstance(context)
+                                    .customToolDao().update(tool.copy(enabled = checked))
+                                CustomToolRegistry.refresh(context)
+                            } catch (_: Exception) {
+                            }
+                            onChanged()
+                        }
+                    }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { editing = null; showEditor = true },
+            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Crear herramienta", fontSize = 13.sp)
+        }
+    }
+
+    if (showEditor) {
+        CustomToolEditorDialog(
+            context = context,
+            scope = scope,
+            initial = editing,
+            onDismiss = { showEditor = false },
+            onSaved = onChanged
+        )
+    }
+}
+
+private fun actionLabel(action: String): String = when (action) {
+    "note" -> "crea nota"
+    "task" -> "crea tarea"
+    "event" -> "crea evento"
+    "append_note" -> "anexa a nota"
+    "open_url" -> "abre URL"
+    else -> "responde texto"
+}
+
+@Composable
+private fun CustomToolEditorDialog(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    initial: CustomTool?,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit
+) {
+    var labelField by remember { mutableStateOf(initial?.label.orEmpty()) }
+    var nameField by remember { mutableStateOf(initial?.name.orEmpty()) }
+    var descField by remember { mutableStateOf(initial?.description.orEmpty()) }
+    var action by remember { mutableStateOf(initial?.action ?: "note") }
+    var configField by remember {
+        mutableStateOf(initial?.actionConfig.orEmpty().ifBlank {
+            if (initial == null) "{{texto}}" else ""
+        })
+    }
+    var params by remember { mutableStateOf(CustomToolRegistry.parseParams(initial?.paramsJson ?: "[]").toMutableList()) }
+    var nameError by remember { mutableStateOf<String?>(null) }
+
+    val typeCycle = listOf("texto" to "string", "número" to "integer", "sí/no" to "boolean")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "Nueva herramienta" else "Editar herramienta") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = labelField,
+                    onValueChange = { labelField = it },
+                    label = { Text("Nombre visible (p. ej. «Registrar gasto»)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = nameField,
+                    onValueChange = { nameField = it },
+                    label = { Text("Nombre para el modelo (snake_case)") },
+                    supportingText = { Text("Se genera del nombre visible si lo dejas vacío.") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = descField,
+                    onValueChange = { descField = it },
+                    label = { Text("Descripción (las ACCIONES que cubre)") },
+                    supportingText = {
+                        Text("Ej.: «Registra un gasto cuando el usuario diga cuánto gastó y en qué».")
+                    },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Qué hace:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                listOf(
+                    "note" to "Crear una nota",
+                    "task" to "Crear una tarea",
+                    "event" to "Crear un evento",
+                    "append_note" to "Anexar a una nota",
+                    "open_url" to "Abrir una URL",
+                    "reply" to "Solo responder texto"
+                ).forEach { (key, text) ->
+                    TextButton(
+                        onClick = { action = key },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (action == key) "●" else "○", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text, fontSize = 13.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = configField,
+                    onValueChange = { configField = it },
+                    label = {
+                        Text(
+                            when (action) {
+                                "open_url" -> "Plantilla de URL"
+                                "append_note" -> "Título (o parte) de la nota objetivo"
+                                else -> "Plantilla (1.ª línea = título)"
+                            }
+                        )
+                    },
+                    supportingText = {
+                        Text(
+                            when (action) {
+                                "open_url" -> "https://ejemplo.com/buscar?q={{consulta}}"
+                                "append_note" -> "El texto renderizado se anexa a la nota más reciente con ese título."
+                                else -> "Usa {{nombre_param}} donde vaya cada valor. Ej.: «Gasto: {{importe}} en {{lugar}}»"
+                            }
+                        )
+                    },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Parámetros (argumentos que el modelo rellena):", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                params.forEachIndexed { idx, p ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = p.name,
+                            onValueChange = { new -> params = params.toMutableList().also { it[idx] = p.copy(name = new) } },
+                            label = { Text("nombre") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OutlinedTextField(
+                            value = p.description,
+                            onValueChange = { new -> params = params.toMutableList().also { it[idx] = p.copy(description = new) } },
+                            label = { Text("descripción") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1.4f)
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = {
+                            val nextType = typeCycle.map { it.second }
+                                .let { cycle -> cycle[(cycle.indexOf(p.type) + 1) % cycle.size] }
+                            params = params.toMutableList().also { it[idx] = p.copy(type = nextType) }
+                        }) {
+                            Text(
+                                "tipo: ${typeCycle.firstOrNull { it.second == p.type }?.first ?: p.type}",
+                                fontSize = 12.sp
+                            )
+                        }
+                        TextButton(onClick = {
+                            params = params.toMutableList().also { it[idx] = p.copy(required = !p.required) }
+                        }) {
+                            Text(if (p.required) "obligatorio ✓" else "opcional", fontSize = 12.sp)
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = { params = params.filterIndexed { i, _ -> i != idx } }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Default.Delete, "Quitar", modifier = Modifier.size(14.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                TextButton(onClick = {
+                    params = params + CustomToolRegistry.Param(name = "", type = "string", description = "")
+                }) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Añadir parámetro", fontSize = 12.sp)
+                }
+                nameError?.let { err ->
+                    Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalName = CustomToolRegistry.normalizeName(
+                        nameField.ifBlank { labelField },
+                        CustomToolRegistry.all(),
+                        initial?.id ?: 0L
+                    )
+                    if (finalName == null) {
+                        nameError = "Nombre inválido o ya usado (usa letras/números/guion_bajo)."
+                        return@Button
+                    }
+                    if (descField.isBlank()) {
+                        nameError = "La descripción es lo que el modelo lee: sin ella no sabrá cuándo usarla."
+                        return@Button
+                    }
+                    scope.launch {
+                        try {
+                            val dao = com.example.data.local.AppDatabase.getInstance(context).customToolDao()
+                            val tool = CustomTool(
+                                id = initial?.id ?: 0L,
+                                name = finalName,
+                                label = labelField.ifBlank { finalName },
+                                description = descField.trim(),
+                                paramsJson = CustomToolRegistry.encodeParams(params),
+                                action = action,
+                                actionConfig = configField.trim(),
+                                enabled = initial?.enabled ?: true
+                            )
+                            if (initial == null) dao.insert(tool) else dao.update(tool)
+                            CustomToolRegistry.refresh(context)
+                        } catch (_: Exception) {
+                        }
+                        onSaved()
+                        onDismiss()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+            ) { Text("Guardar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
 }

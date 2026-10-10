@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -97,6 +99,7 @@ fun NowBriefHomeScreen(
     val entries by viewModel.entries.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val weather by viewModel.realWeather.collectAsState()
+    val weatherForecast by viewModel.weatherForecast.collectAsState()
     val rssArticles by viewModel.rssArticles.collectAsState()
     val isRssLoading by viewModel.isRssLoading.collectAsState()
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
@@ -275,6 +278,7 @@ fun NowBriefHomeScreen(
             item {
                 WeatherHeroCard(
                     weather = weather,
+                    forecast = weatherForecast,
                     selectedCity = selectedCity,
                     onChooseCity = { showCityPicker = true },
                     onOpenWeatherApp = { viewModel.openSystemWeatherApp() }
@@ -474,6 +478,7 @@ private fun GlassQuickAction(
 @Composable
 private fun WeatherHeroCard(
     weather: RealWeatherData,
+    forecast: com.example.telemetry.ForecastData?,
     selectedCity: com.example.telemetry.WeatherCity?,
     onChooseCity: () -> Unit,
     onOpenWeatherApp: () -> Unit = {}
@@ -586,6 +591,73 @@ private fun WeatherHeroCard(
 
         if (hasWeather) {
             Spacer(modifier = Modifier.height(8.dp))
+
+            // ---- Today in three cached buckets: Mañana / Tarde / Noche ----
+            if (forecast != null && forecast.buckets.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    forecast.buckets.forEach { bucket ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = bucket.period,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${bucket.temperature}°",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (bucket.rainProbable) "🌧 ${bucket.condition}" else bucket.condition,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // ---- Week outlook (cached: one request per refresh cycle) ----
+            if (forecast != null && forecast.daily.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    forecast.daily.drop(1).forEach { day ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val dayName = java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault())
+                                .format(java.util.Date(day.dateEpochMs)).replaceFirstChar { it.uppercase() }
+                            Text(
+                                text = dayName,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${day.maxTemp}° ${day.minTemp}°",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (day.rainProbable) "🌧" else "",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Pronóstico de la semana en caché — se actualiza con el ciclo del clima.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             TextButton(
                 onClick = onOpenWeatherApp,
                 modifier = Modifier.align(Alignment.End)

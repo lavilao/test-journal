@@ -170,6 +170,9 @@ object HealthConnectManager {
      * When Health Connect is available AND preferred AND the permission is
      * granted, overwrites the app's step cache with the real daily count so
      * every surface (widget, At a Glance, habit engine) upgrades at once.
+     * The "steps_source" tag keeps the provenance honest (the user asked
+     * where the number comes from) and makes the hardware sensor listener
+     * stand down instead of stomping the HC value back.
      */
     suspend fun refreshStepsIntoCache(context: Context): Boolean = withContext(Dispatchers.IO) {
         val app = context.applicationContext
@@ -181,8 +184,16 @@ object HealthConnectManager {
         }
         prefs.edit()
             .putInt("steps_today", steps.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            .putString("steps_source", "health_connect")
             .apply()
         true
+    }
+
+    /** Provenance of the current step number: HC / sensor / none. */
+    fun currentStepsSource(context: Context): String {
+        val prefs = context.applicationContext
+            .getSharedPreferences("step_prefs", Context.MODE_PRIVATE)
+        return prefs.getString("steps_source", "sensor") ?: "sensor"
     }
 
     private fun todayKey(): String {

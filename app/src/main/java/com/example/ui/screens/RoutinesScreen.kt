@@ -114,6 +114,20 @@ fun RoutinesScreen(
         refreshTick++
     }
 
+    // Coming back from Play Store (Health Connect install) or from the
+    // permission screen must re-check the REAL sdk status — this is the fix
+    // for «instalé Health Connect pero sigue mostrando el botón de instalar».
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                refreshTick++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.refreshHabitFacts()
         eventCounts = HabitEngine.eventCounts(context)
@@ -582,6 +596,17 @@ fun RoutinesScreen(
         // ---------------- Steps ----------------
         SectionCard(title = "Pasos", icon = { Icon(Icons.Default.DirectionsWalk, null, tint = GoogleGreen) }) {
             val steps = d?.steps
+            // Provenance, the user's «no sé de dónde saca los pasos»:
+            val sourceLabel = when (com.example.health.HealthConnectManager.currentStepsSource(context)) {
+                "health_connect" -> "Fuente: Health Connect"
+                else -> "Fuente: sensor de pasos del teléfono"
+            }
+            Text(
+                sourceLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
             if (steps == null || steps.byDay.size < 2) {
                 LearningText("Activa el reconocimiento de actividad para tu tendencia de pasos.")
             } else {
@@ -843,7 +868,7 @@ fun RoutinesScreen(
                         Toast.makeText(context, "Abre Play Store y busca «Health Connect»", Toast.LENGTH_LONG).show()
                     }
                 }) {
-                    Text("Instalar Health Connect (Play Store)", fontSize = 12.sp)
+                    Text("Instalar / actualizar Health Connect (Play Store)", fontSize = 12.sp)
                 }
             }
         }

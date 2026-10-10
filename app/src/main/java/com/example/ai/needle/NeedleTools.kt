@@ -373,6 +373,14 @@ object NeedleTools {
         enabledIds(context).forEach { id ->
             buildTool(id)?.let { tools.put(it) }
         }
+        // User-made tools (in-memory registry; refreshed from Room before
+        // every applyToolGating). Gated by their own `enabled` column.
+        try {
+            CustomToolRegistry.snapshot().forEach { custom ->
+                tools.put(CustomToolRegistry.buildToolJson(custom))
+            }
+        } catch (_: Exception) {
+        }
         return tools.toString()
     }
 
@@ -535,7 +543,22 @@ object NeedleTools {
                 AssistantIntent.Translate(text, lang)
             }
 
-            else -> null // unknown tool: never guess
+            else -> {
+                // User-made tool? Route it with the arguments the model filled.
+                val custom = CustomToolRegistry.findByName(call.name)
+                    ?: return null // unknown tool: never guess
+                val params = CustomToolRegistry.parseParams(custom.paramsJson)
+                val args = mutableMapOf<String, String>()
+                params.forEach { p ->
+                    val value = when (p.type) {
+                        "integer", "number" -> a.optInt(p.name).toString()
+                        "boolean" -> a.optBoolean(p.name, false).toString()
+                        else -> a.optString(p.name)
+                    }
+                    args[p.name] = if (value.isBlank()) p.default else value
+                }
+                AssistantIntent.RunCustomTool(custom.id, custom.name, args)
+            }
         }
     }
 

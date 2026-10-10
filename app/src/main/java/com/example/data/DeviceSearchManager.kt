@@ -135,11 +135,16 @@ class DeviceSearchManager(private val context: Context) {
     }
 
     /**
-     * Search real contacts on device by name or phone query.
+     * Search real contacts by name or phone. CASE + ACCENT insensitive:
+     * SQLite's LIKE only folds ASCII case, so «maria» would never find
+     * «María». We scan the whole (bounded) contact list and match with a
+     * de-accented, lowercased comparison.
      */
     suspend fun searchContacts(query: String): List<DeviceContactInfo> = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || query.isBlank()) return@withContext emptyList()
 
+        val qNorm = foldForSearch(query.trim())
+        val qDigits = query.filter { it.isDigit() }
         val results = mutableListOf<DeviceContactInfo>()
         val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
         val projection = arrayOf(
@@ -148,11 +153,12 @@ class DeviceSearchManager(private val context: Context) {
             ContactsContract.CommonDataKinds.Phone.NUMBER,
             ContactsContract.CommonDataKinds.Phone.PHOTO_URI
         )
-        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ? OR ${ContactsContract.CommonDataKinds.Phone.NUMBER} LIKE ?"
-        val selectionArgs = arrayOf("%$query%", "%$query%")
 
         try {
-            context.contentResolver.query(uri, projection, selection, selectionArgs, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC")?.use { cursor ->
+            context.contentResolver.query(
+                uri, projection, null, null,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+            )?.use { cursor ->
                 val idIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
                 val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
                 val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
@@ -167,13 +173,23 @@ class DeviceSearchManager(private val context: Context) {
                     val phone = if (numIdx >= 0) cursor.getString(numIdx) else null
                     val photo = if (photoIdx >= 0) cursor.getString(photoIdx) else null
 
-                    results.add(DeviceContactInfo(id = id, displayName = name, phoneNumber = phone, photoUri = photo))
+                    val nameHit = foldForSearch(name).contains(qNorm)
+                    val phoneHit = qDigits.length >= 2 &&
+                        (phone?.filter { it.isDigit() }?.contains(qDigits) == true)
+                    if (nameHit || phoneHit) {
+                        results.add(DeviceContactInfo(id = id, displayName = name, phoneNumber = phone, photoUri = photo))
+                    }
                 }
             }
         } catch (_: Exception) {}
 
         results
     }
+
+    /** lowercase + accent-folded form for insensitive matching. */
+    private fun foldForSearch(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}"), "")
 
     /**
      * Search real device files (MediaStore) by filename. Queries BOTH the
@@ -352,16 +368,25 @@ class DeviceSearchManager(private val context: Context) {
         }
     }
 
+    /** Launchable-app cache: a full PackageManager scan per keystroke was
+     *  pure waste; 30 s of cache keeps «abre whatsapp» instant. */
+    @Volatile
+    private var launchableAppsCache: Pair<List<RecentAppUsageInfo>, Long>? = null
+
     /**
-     * All launchable apps (name + package), for the assistant's "abrir <app>"
+     * All launchable apps (name + package), for the assistant's "abrer <app>"
      * voice command and the app search experience.
      */
-    suspend fun listLaunchableApps(): List<RecentAppUsageInfo> = withContext(Dispatchers.IO) {
+    suspend fun listLaunchableApps(forceRefresh: Boolean = false): List<RecentAppUsageInfo> = withContext(Dispatchers.IO) {
+        val cached = launchableAppsCache
+        if (!forceRefresh && cached != null &&
+            System.currentTimeMillis() - cached.second < 30_000L
+        ) {
+            return@withContext cached.first
+        }
         val pm = context.packageManager
-        try {
-            pm.getLaunchIntentForPackage(context.packageName) // warm-up, ignored
-            val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-            pm.queryIntentActivities(intent, 0)
+        val list = try {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER), 0)
                 .map { resolveInfo ->
                     RecentAppUsageInfo(
                         packageName = resolveInfo.activityInfo.packageName,
@@ -375,15 +400,18 @@ class DeviceSearchManager(private val context: Context) {
         } catch (_: Exception) {
             emptyList()
         }
+        launchableAppsCache = list to System.currentTimeMillis()
+        list
     }
 
-    /** Find an installed app by fuzzy name ("whatsapp" -> com.whatsapp). */
+    /** Find an installed app by fuzzy name ("whatsapp" -> com.whatsapp).
+     *  Case + accent insensitive (foldForSearch on both sides). */
     suspend fun findAppByName(query: String): RecentAppUsageInfo? = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext null
         val apps = listLaunchableApps()
-        val q = query.trim().lowercase().removePrefix("la ").removePrefix("el ")
-        apps.firstOrNull { it.appName.lowercase() == q }
-            ?: apps.firstOrNull { it.appName.lowercase().contains(q) }
+        val q = foldForSearch(query.trim()).removePrefix("la ").removePrefix("el ")
+        apps.firstOrNull { foldForSearch(it.appName) == q }
+            ?: apps.firstOrNull { foldForSearch(it.appName).contains(q) }
             ?: apps.firstOrNull {
                 it.packageName.lowercase().contains(q.replace(" ", ""))
             }

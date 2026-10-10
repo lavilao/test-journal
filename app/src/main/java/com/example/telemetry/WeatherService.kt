@@ -43,6 +43,31 @@ data class RealWeatherData(
     val lastUpdated: Long? = null
 )
 
+/** One of today's buckets: "Mañana" (6-12), "Tarde" (12-18), "Noche" (18-24). */
+data class ForecastBucket(
+    val period: String,
+    val temperature: Int,
+    val condition: String,
+    val rainProbable: Boolean
+)
+
+/** A day of the weekly outlook. */
+data class DailyForecast(
+    val dateEpochMs: Long,
+    val minTemp: Int,
+    val maxTemp: Int,
+    val condition: String,
+    val rainProbable: Boolean
+)
+
+/** Today + week forecast, cached on disk so it survives offline starts. */
+data class ForecastData(
+    val buckets: List<ForecastBucket> = emptyList(),
+    val daily: List<DailyForecast> = emptyList(),
+    val locationName: String? = null,
+    val updatedAt: Long? = null
+)
+
 /**
  * Real weather powered by the free Open-Meteo API.
  *
@@ -66,6 +91,9 @@ class WeatherService(private val context: Context) {
 
     private val _weatherState = MutableStateFlow(loadCachedWeather())
     val weatherState: StateFlow<RealWeatherData> = _weatherState.asStateFlow()
+
+    private val _forecastState = MutableStateFlow(loadCachedForecast())
+    val forecastState: StateFlow<ForecastData> = _forecastState.asStateFlow()
 
     private val _selectedCity = MutableStateFlow(loadSavedCity())
     val selectedCity: StateFlow<WeatherCity?> = _selectedCity.asStateFlow()
@@ -143,6 +171,100 @@ class WeatherService(private val context: Context) {
     fun clearSelectedCity() {
         prefs.edit().remove(KEY_CITY_NAME).remove(KEY_CITY_LAT).remove(KEY_CITY_LON).apply()
         _selectedCity.value = null
+    }
+
+    // ------------------------------------------------------------------
+    // Today + week forecast (cached: morning / afternoon / night + 7 days)
+    // ------------------------------------------------------------------
+
+    private fun loadCachedForecast(): ForecastData {
+        val json = prefs.getString(KEY_FORECAST_JSON, null) ?: return ForecastData()
+        return try {
+            val root = JSONObject(json)
+            ForecastData(
+                buckets = parseBuckets(root),
+                daily = parseDaily(root),
+                locationName = root.optString("location"),
+                updatedAt = root.optLong("fetched_at", 0L).takeIf { it > 0 }
+            )
+        } catch (_: Exception) {
+            ForecastData()
+        }
+    }
+
+    private fun persistForecast(json: JSONObject, locationName: String) {
+        json.put("location", locationName)
+        json.put("fetched_at", System.currentTimeMillis())
+        prefs.edit().putString(KEY_FORECAST_JSON, json.toString()).apply()
+    }
+
+    private fun parseBuckets(root: JSONObject): List<ForecastBucket> {
+        val out = mutableListOf<ForecastBucket>()
+        val hourly = root.optJSONObject("hourly") ?: return out
+        val times = hourly.optJSONArray("time") ?: return out
+        val temps = hourly.optJSONArray("temperature_2m") ?: return out
+        val codes = hourly.optJSONArray("weather_code") ?: return out
+        val today = java.time.LocalDate.now()
+        val windows = listOf(
+            "Mañana" to 6..11,
+            "Tarde" to 12..17,
+            "Noche" to 18..23
+        )
+        windows.forEach { (label, hours) ->
+            var acc = 0.0; var n = 0
+            var worstCode = 0
+            for (i in 0 until times.length()) {
+                val stamp = times.optString(i)
+                val hour = try {
+                    java.time.LocalDateTime.parse(stamp)
+                } catch (_: Exception) {
+                    continue
+                }
+                if (hour.toLocalDate() != today) continue
+                if (hour.hour !in hours) continue
+                val t = temps.optDouble(i, Double.NaN)
+                if (!t.isNaN()) { acc += t; n++ }
+                val c = codes.optInt(i, 0)
+                if (c > worstCode) worstCode = c
+            }
+            if (n > 0) {
+                out.add(
+                    ForecastBucket(
+                        period = label,
+                        temperature = (acc / n).toInt(),
+                        condition = weatherCodeToSpanish(worstCode),
+                        rainProbable = worstCode >= 51
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    private fun parseDaily(root: JSONObject): List<DailyForecast> {
+        val out = mutableListOf<DailyForecast>()
+        val daily = root.optJSONObject("daily") ?: return out
+        val times = daily.optJSONArray("time") ?: return out
+        val maxT = daily.optJSONArray("temperature_2m_max") ?: return out
+        val minT = daily.optJSONArray("temperature_2m_min") ?: return out
+        val codes = daily.optJSONArray("weather_code") ?: return out
+        for (i in 0 until times.length()) {
+            val day = try {
+                java.time.LocalDate.parse(times.optString(i))
+            } catch (_: Exception) {
+                continue
+            }
+            out.add(
+                DailyForecast(
+                    dateEpochMs = day.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                    minTemp = minT.optInt(i, 0),
+                    maxTemp = maxT.optInt(i, 0),
+                    condition = weatherCodeToSpanish(codes.optInt(i, 0)),
+                    rainProbable = codes.optInt(i, 0) >= 51
+                )
+            )
+        }
+        return out.take(7)
     }
 
     /**
@@ -227,8 +349,14 @@ class WeatherService(private val context: Context) {
         }
 
         try {
+            // One request for everything: current + hourly (today buckets) +
+            // daily (week outlook). timezone=auto gives local hours, so the
+            // morning/afternoon/night split matches the user's clock.
             val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                    "&current=temperature_2m,weather_code"
+                    "&current=temperature_2m,weather_code" +
+                    "&hourly=temperature_2m,weather_code" +
+                    "&daily=weather_code,temperature_2m_max,temperature_2m_min" +
+                    "&timezone=auto&forecast_days=7"
             val request = Request.Builder().url(url).build()
             httpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
@@ -247,6 +375,17 @@ class WeatherService(private val context: Context) {
                             lastUpdated = System.currentTimeMillis()
                         )
                         persistWeatherToCache(result)
+                        // Cache the today+week forecast JSON (offline reads).
+                        try {
+                            persistForecast(json, locationName)
+                            _forecastState.value = ForecastData(
+                                buckets = parseBuckets(json),
+                                daily = parseDaily(json),
+                                locationName = locationName,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        } catch (_: Exception) {
+                        }
                         // Last coordinates feed the dynamic sun wallpaper
                         // (SunCycle computes sunrise/sunset locally).
                         prefs.edit()
@@ -355,7 +494,10 @@ class WeatherService(private val context: Context) {
         private const val KEY_CACHE_IS_GPS = "cache_is_gps"
         private const val KEY_CACHE_TIMESTAMP = "cache_timestamp"
 
-        /** A cached reading younger than this is served without touching the network. */
+        // A cached reading younger than this is served without touching the network.
         private const val STALE_AFTER_MINUTES = 20
+
+        /** Raw forecast JSON (today buckets + week) for offline starts. */
+        private const val KEY_FORECAST_JSON = "forecast_json"
     }
 }

@@ -234,18 +234,28 @@ class JournalRepository(
         // Process Attached Image asynchronously
         attachedImageUri?.let { uri ->
             semanticScope.launch {
-                val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
-                val labelsJson = JSONArray(analysis.labels).toString()
-                dao.insertMediaItem(
-                    MediaItem(
-                        entryId = entryId,
-                        uri = uri.toString(),
-                        labelsJson = labelsJson,
-                        faceCount = analysis.faceCount,
-                        ocrText = analysis.ocrText,
-                        caption = ""
+                if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
+                    val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
+                    val labelsJson = JSONArray(analysis.labels).toString()
+                    dao.insertMediaItem(
+                        MediaItem(
+                            entryId = entryId,
+                            uri = uri.toString(),
+                            labelsJson = labelsJson,
+                            faceCount = analysis.faceCount,
+                            ocrText = analysis.ocrText,
+                            caption = ""
+                        )
                     )
-                )
+                } else {
+                    dao.insertMediaItem(
+                        MediaItem(
+                            entryId = entryId,
+                            uri = uri.toString(),
+                            caption = ""
+                        )
+                    )
+                }
             }
         }
 
@@ -290,21 +300,34 @@ class JournalRepository(
             )
         )
         semanticScope.launch {
-            val analysis = MlKitAnalyzer.analyzeImageFromUri(context, persistentUri)
-            val labelsJson = JSONArray(analysis.labels).toString()
-            val existing = dao.getMediaById(mediaId)
-            if (existing != null) {
-                dao.updateMediaItem(
-                    existing.copy(
-                        labelsJson = labelsJson,
-                        faceCount = analysis.faceCount,
-                        ocrText = analysis.ocrText
+            // OCR/vision toggle (OcrIndexer): when off, skip the whole
+            // vision pass — the user's "puede petar el dispositivo" switch.
+            if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
+                val analysis = MlKitAnalyzer.analyzeImageFromUri(context, persistentUri)
+                val labelsJson = JSONArray(analysis.labels).toString()
+                val existing = dao.getMediaById(mediaId)
+                if (existing != null) {
+                    dao.updateMediaItem(
+                        existing.copy(
+                            labelsJson = labelsJson,
+                            faceCount = analysis.faceCount,
+                            ocrText = analysis.ocrText
+                        )
                     )
-                )
+                }
+                processSemanticIntelligence(entryId)
             }
-            processSemanticIntelligence(entryId)
         }
         mediaId
+    }
+
+    /** Attaches an already-materialized audio file to an existing entry. */
+    suspend fun attachAudioRecord(record: AudioRecordItem): Long = withContext(Dispatchers.IO) {
+        val id = dao.insertAudioRecord(record)
+        semanticScope.launch {
+            processSemanticIntelligence(record.entryId)
+        }
+        id
     }
 
     suspend fun updatePhotoCaption(mediaId: Long, caption: String) = withContext(Dispatchers.IO) {

@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
 import com.example.ui.components.VoiceTranscriptionModal
+import com.example.ui.components.MarkdownText
 import com.example.data.model.AudioRecordItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -88,6 +89,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -111,6 +113,11 @@ import com.example.data.model.JournalPage
 import com.example.data.model.SuggestedTag
 import com.example.media.PlaybackState
 import com.example.media.RecordingState
+import com.example.media.SubjectSegmentationManager
+import com.example.media.AudioDecode
+import com.example.ai.needle.NeedleModelManager
+import com.example.ai.needle.NeedleRuntime
+import com.example.ai.needle.WhistleResult
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
@@ -161,6 +168,68 @@ fun EntryDetailScreen(
     var showAddSectionDialog by remember { mutableStateOf(false) }
     var newSectionTitle by remember { mutableStateOf("") }
     var newSectionBody by remember { mutableStateOf("") }
+
+    // ---- One-tap Whistle transcription of saved voice notes ----
+    var transcribingIds by remember(entryId) { mutableStateOf(setOf<Long>()) }
+    val whistleUsable = remember {
+        com.example.ai.needle.NeedleModelManager.isWhistleDictationEnabled(context) &&
+            com.example.ai.needle.NeedleModelManager.isWhistleDownloaded(context)
+    }
+
+    fun oneTapTranscribe(record: AudioRecordItem) {
+        if (record.filePath.isBlank()) {
+            Toast.makeText(context, "Esta nota no tiene archivo de audio.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            transcribingIds = transcribingIds + record.id
+            try { com.example.ai.needle.NeedleModelManager.ensureLoaded(context) } catch (_: Exception) {}
+            val pcm = com.example.media.AudioDecode.decodeToPcm16kMono(record.filePath)
+            val raw = if (pcm != null && pcm.isNotEmpty()) {
+                withTimeoutOrNull(90_000) { NeedleRuntime.transcribe(pcm, "es") }
+            } else null
+            val parsed = WhistleResult.parse(raw)
+            transcribingIds = transcribingIds - record.id
+            if (parsed != null && parsed.text.isNotBlank()) {
+                viewModel.updateAudioTranscript(record.id, entryId, parsed.text)
+                val stats = parsed.statsLine()
+                Toast.makeText(
+                    context,
+                    if (stats != null) "Transcrito con IA local ✓ ($stats)" else "Transcrito con IA local ✓",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(context, "No pude transcribir este audio (¿silencio o formato?).", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // ---- On-device photo surgery (subject segmentation) ----
+    var photoProcessing by remember(entryId) { mutableStateOf<String?>(null) }
+    var photoResultUri by remember(entryId) { mutableStateOf<android.net.Uri?>(null) }
+
+    fun runPhotoOp(sourceUri: String?, op: SubjectSegmentationManager.Op) {
+        if (sourceUri.isNullOrBlank()) {
+            Toast.makeText(context, "No hay foto que procesar.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
+            val out = try {
+                SubjectSegmentationManager.process(context, android.net.Uri.parse(sourceUri), op)
+            } catch (_: Exception) {
+                null
+            }
+            photoProcessing = null
+            if (out != null) {
+                photoResultUri = android.net.Uri.fromFile(out)
+                viewModel.addPhoto(entryId, photoResultUri!!)
+                Toast.makeText(context, "Foto procesada y adjuntada (IA local).", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "La segmentación falló (¿sin Play Services o modelo no descargado aún?).", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -400,6 +469,51 @@ fun EntryDetailScreen(
                 )
 
                 val media = itemWithRelations?.mediaItems?.firstOrNull()
+                Spacer(modifier = Modifier.height(8.dp))
+                // ---- On-device photo surgery: quitar fondo / quitar sujeto ----
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { runPhotoOp(entry.imageUri, SubjectSegmentationManager.Op.REMOVE_BACKGROUND) },
+                        enabled = photoProcessing == null,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f).testTag("photo_remove_bg_btn")
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            if (photoProcessing == "quitando el fondo") "Procesando…" else "Quitar fondo",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { runPhotoOp(entry.imageUri, SubjectSegmentationManager.Op.REMOVE_SUBJECT) },
+                        enabled = photoProcessing == null,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f).testTag("photo_remove_subject_btn")
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            if (photoProcessing == "quitando el sujeto") "Procesando…" else "Quitar sujeto",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+                if (photoResultUri != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    AsyncImage(
+                        model = photoResultUri,
+                        contentDescription = "Foto procesada con IA local",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                }
                 if (media != null && (media.labelsJson.isNotBlank() || media.faceCount > 0 || media.ocrText.isNotBlank())) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
@@ -471,42 +585,23 @@ fun EntryDetailScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Body with Autolinking Annotations (MindForger style)
-            if (autolinkSpans.isEmpty()) {
-                Text(
-                    text = entry.body,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 17.sp,
-                        lineHeight = 28.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            } else {
-                AutolinkedText(
-                    fullText = entry.body,
-                    spans = autolinkSpans,
-                    onEntityClick = onNavigateToEntity
-                )
-            }
-
-            // Autolinks Summary Row if discovered
-            if (autolinkSpans.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Default.Link, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(12.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Autolink active: tap highlighted terms in text to explore knowledge pages",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            // Body rendered as MARKDOWN — the same engine as the WYSIWYG
+            // editor, so «lo que escribiste es lo que ves» también al volver.
+            // Wikilinks [[así]] abren la página de esa entidad.
+            MarkdownText(
+                text = entry.body,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 17.sp,
+                    lineHeight = 28.sp
+                ),
+                onWikilinkClick = { name ->
+                    allEntities.firstOrNull { e ->
+                        e.displayName.equals(name, ignoreCase = true) ||
+                            e.canonicalName.equals(name, ignoreCase = true) ||
+                            e.aliases.split(',').any { it.trim().equals(name, ignoreCase = true) }
+                    }?.let { found -> onNavigateToEntity(found.id) }
                 }
-            }
+            )
 
             // Multi-Page Sections
             val pages = itemWithRelations?.pages.orEmpty()
@@ -560,10 +655,9 @@ fun EntryDetailScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
-                            Text(
+                            MarkdownText(
                                 text = p.body,
-                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                                color = MaterialTheme.colorScheme.onSurface
+                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp)
                             )
                         }
                     }
@@ -777,14 +871,45 @@ fun EntryDetailScreen(
                                 }
                             } else {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedButton(
-                                    onClick = { transcribingRecord = record },
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                    modifier = Modifier.fillMaxWidth().testTag("transcribe_audio_action_btn_${record.id}")
-                                ) {
-                                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
+                                if (whistleUsable) {
+                                    // ONE-TAP local transcription of the saved file.
+                                    Button(
+                                        onClick = { oneTapTranscribe(record) },
+                                        enabled = record.id !in transcribingIds,
+                                        colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        modifier = Modifier.fillMaxWidth().testTag("one_tap_transcribe_btn_${record.id}")
+                                    ) {
+                                        if (record.id in transcribingIds) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Transcribiendo con IA local…", style = MaterialTheme.typography.labelSmall)
+                                        } else {
+                                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Transcribir con IA local (1 toque)", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "O toca el icono para dictar encima / editar a mano.",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { transcribingRecord = record },
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        modifier = Modifier.fillMaxWidth().testTag("transcribe_audio_action_btn_${record.id}")
+                                    ) {
+                                        Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             }
                         }
@@ -793,20 +918,48 @@ fun EntryDetailScreen(
             }
 
             // ---- Related entries via Needle embeddings (semantic neighbours) ----
+            // Duplicate flagging needs LEXICAL corroboration: the small
+            // model's raw embeddings are anisotropic (everything scores
+            // 0.90-0.95 cosine), so similitud alone cried "duplicado" on every
+            // note. Now: embedding sim >= 0.95 AND >=60% of the same words.
             val relatedContext = LocalContext.current
+            data class RelatedRow(val id: Long, val title: String, val sim: Float, val lexical: Float)
             var semanticNeighbours by remember(entryId) {
-                mutableStateOf<List<Triple<Long, String, Float>>>(emptyList())
+                mutableStateOf<List<RelatedRow>>(emptyList())
             }
+            fun normalizeForDupes(s: String): Set<String> =
+                java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{Mn}"), "")
+                    .split(Regex("[^a-z0-9ñà-ÿ]+"))
+                    .filter { it.length > 2 && it !in SPANISH_STOPWORDS }
+                    .toSet()
             LaunchedEffect(entryId) {
                 semanticNeighbours = emptyList()
                 if (com.example.semantic.NeedleEmbeddings.isAvailable(relatedContext)) {
                     semanticNeighbours = try {
                         val entries = viewModel.repository.allEntriesWithRelations.first().take(400)
+                        val current = entries.firstOrNull { it.entry.id == entryId }
+                        val currentTokens = normalizeForDupes(
+                            (current?.entry?.title.orEmpty() + " " + current?.entry?.body.orEmpty())
+                        )
                         com.example.semantic.NeedleEmbeddings
                             .relatedEntries(relatedContext, entryId, entries, topK = 3)
                             .mapNotNull { (id, sim) ->
                                 entries.firstOrNull { it.entry.id == id }?.let { e ->
-                                    Triple(id, e.entry.title.ifBlank { "(sin título)" }, sim)
+                                    val otherTokens = normalizeForDupes(
+                                        e.entry.title + " " + e.entry.body
+                                    )
+                                    val overlap = (
+                                        if (currentTokens.isEmpty() || otherTokens.isEmpty()) 0f
+                                        else currentTokens.intersect(otherTokens).size.toFloat() /
+                                            maxOf(currentTokens.size, otherTokens.size)
+                                        )
+                                    RelatedRow(
+                                        id = id,
+                                        title = e.entry.title.ifBlank { "(sin título)" },
+                                        sim = sim,
+                                        lexical = overlap
+                                    )
                                 }
                             }
                     } catch (_: Exception) {
@@ -832,20 +985,20 @@ fun EntryDetailScreen(
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        semanticNeighbours.forEach { (id, title, sim) ->
+                        semanticNeighbours.forEach { row ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onNavigateToEntry(id) }
+                                    .clickable { onNavigateToEntry(row.id) }
                                     .padding(vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = title.take(48),
+                                    text = row.title.take(48),
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f)
                                 )
-                                if (sim >= 0.92f) {
+                                if (row.sim >= 0.95f && row.lexical >= 0.6f) {
                                     Text(
                                         text = "posible duplicado",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
@@ -854,14 +1007,14 @@ fun EntryDetailScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                 }
                                 Text(
-                                    text = "${(sim * 100).toInt()}%",
+                                    text = "${(row.sim * 100).toInt()}%",
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                         Text(
-                            text = "Similitud por embeddings de Needle sobre el significado, no por palabras exactas.",
+                            text = "Similitud por embeddings de Needle (el aviso de duplicado exige también ≥60% de vocabulario común, porque el modelo pequeño inflaba la similitud de notas no relacionadas).",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1397,3 +1550,13 @@ private fun AutolinkedText(
         }
     )
 }
+
+/** Stopwords for the duplicate-detection lexical overlap (3+ letters only). */
+private val SPANISH_STOPWORDS = setOf(
+    "que", "los", "las", "una", "uno", "por", "para", "como", "pero", "cuando",
+    "con", "sin", "sobre", "entre", "este", "esta", "estos", "estas", "eso",
+    "esa", "esos", "esas", "más", "muy", "todo", "toda", "todos", "todas",
+    "fue", "son", "está", "estan", "están", "han", "hay", "ser", "estar",
+    "también", "tambien", "the", "and", "for", "with", "this", "that", "have",
+    "from", "are", "was", "were", "not", "you", "your"
+)

@@ -308,6 +308,15 @@ fun AssistantScreen(
                 is AssistantIntent.SaveCurrentPlace -> {
                     post(AssistantMessage(false, viewModel.assistantManager.saveCurrentPlace(intent.name)))
                 }
+                is AssistantIntent.RunCustomTool -> {
+                    post(AssistantMessage(false, "Ejecutando tu herramienta «${intent.toolName}»…"))
+                    post(
+                        AssistantMessage(
+                            false,
+                            viewModel.assistantManager.runCustomTool(intent.toolId, intent.toolName, intent.args)
+                        )
+                    )
+                }
                 is AssistantIntent.Translate -> {
                     val target = intent.targetLangHint ?: "en"
                     val source = com.example.semantic.MlKitAnalyzer.identifyLanguage(intent.text)
@@ -423,9 +432,11 @@ fun AssistantScreen(
                     .orEmpty()
             } else {
                 // Whistle-only install: transcribe locally, then route text.
-                transcript = withTimeoutOrNull(30_000) {
+                val raw = withTimeoutOrNull(30_000) {
                     NeedleRuntime.transcribe(pcm, "es")
-                }.orEmpty()
+                }
+                // Parse the engine JSON — never show {"text":…} to the user.
+                transcript = com.example.ai.needle.WhistleResult.parse(raw)?.text.orEmpty()
             }
 
             if (transcript.isNotBlank()) {
@@ -785,6 +796,7 @@ private fun describe(intent: AssistantIntent): String = when (intent) {
     AssistantIntent.Battery -> "Leyendo la batería…"
     AssistantIntent.Lens -> "Abriendo el Lens…"
     is AssistantIntent.Translate -> "Traduciendo…"
+    is AssistantIntent.RunCustomTool -> "Ejecutando tu herramienta «${intent.toolName}»…"
     AssistantIntent.Unknown -> "Perdona, no entendí."
 }
 

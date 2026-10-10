@@ -106,6 +106,9 @@ class MainActivity : ComponentActivity() {
         /** Tab deep-links coming from notifications / the widget. */
         val openTabRequests = MutableStateFlow<String?>(null)
 
+        /** Shares from other apps (ACTION_SEND), consumed by the UI layer. */
+        val shareRequests = MutableStateFlow<android.content.Intent?>(null)
+
         /** Whether the app UI is visible — the hotword service uses it to
          *  decide between direct execution and notification hand-off. */
         var isResumed = false
@@ -125,10 +128,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Routes system intents: the ASSIST gesture opens the local assistant;
+     * shares (text / links / photos / audio / PDF) land in the journal.
+     */
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        when (intent.action) {
+            Intent.ACTION_ASSIST -> openAssistantRequests.value = true
+            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
+                if (shareRequests.value == null) shareRequests.value = intent
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleVoiceCommandIntent(intent)
+        handleIncomingIntent(intent)
         setContent {
             val viewModel: JournalViewModel = viewModel()
             MnemosyneApp(viewModel = viewModel)
@@ -139,6 +157,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleVoiceCommandIntent(intent)
+        handleIncomingIntent(intent)
     }
 
     override fun onResume() {
@@ -160,6 +179,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
     val currentTab by viewModel.currentTab.collectAsState()
     val interfaceMode by viewModel.interfaceMode.collectAsState()
     val darkTheme = isSystemInDarkTheme()
+    val appContext = androidx.compose.ui.platform.LocalContext.current
 
     // Voice commands arriving from the hotword notification or the
     // system-assistant gesture open the local assistant with the utterance.
@@ -190,6 +210,24 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         if (openTabRequest != null) {
             screenState = AppScreen.Main(viewModel.currentTab.value)
             MainActivity.openTabRequests.value = null
+        }
+    }
+
+    // Shares from OTHER apps: links, photos, audio, PDFs → journal notes.
+    val shareRequest by com.example.MainActivity.shareRequests.collectAsState()
+    LaunchedEffect(shareRequest) {
+        val intent = shareRequest
+        if (intent != null) {
+            com.example.MainActivity.shareRequests.value = null
+            val summary = try {
+                com.example.share.ShareIntakeManager.handle(appContext, intent)
+            } catch (_: Exception) {
+                null
+            }
+            if (summary != null) {
+                android.widget.Toast.makeText(appContext, summary, android.widget.Toast.LENGTH_LONG).show()
+                // Room flows re-emit automatically; no manual refresh needed.
+            }
         }
     }
 

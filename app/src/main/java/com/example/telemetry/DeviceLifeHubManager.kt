@@ -122,6 +122,17 @@ class DeviceLifeHubManager(
         val prefs = context.getSharedPreferences(STEP_PREFS, Context.MODE_PRIVATE)
         val today = todayKey()
         val storedDay = prefs.getString(KEY_DAY, null)
+
+        // Health Connect is the preferred source when the user says so: the
+        // hardware sensor stands down for the day instead of stomping the
+        // HC number back with its own baseline math.
+        if (storedDay == today &&
+            prefs.getString(KEY_SOURCE, "sensor") == "health_connect"
+        ) {
+            prefs.edit().putInt(KEY_TOTAL_LAST, totalSteps).apply()
+            return
+        }
+
         var baseline = prefs.getInt(KEY_BASELINE, Int.MIN_VALUE)
 
         if (baseline == Int.MIN_VALUE || storedDay != today) {
@@ -131,6 +142,7 @@ class DeviceLifeHubManager(
                 .putString(KEY_DAY, today)
                 .putInt(KEY_BASELINE, baseline)
                 .putInt(KEY_STEPS, 0)
+                .putString(KEY_SOURCE, "sensor")
                 .apply()
         }
 
@@ -138,6 +150,7 @@ class DeviceLifeHubManager(
         prefs.edit()
             .putInt(KEY_STEPS, stepsToday)
             .putInt(KEY_TOTAL_LAST, totalSteps)
+            .putString(KEY_SOURCE, "sensor")
             .apply()
 
         _telemetry.value = _telemetry.value.copy(todaySteps = stepsToday)
@@ -305,6 +318,7 @@ class DeviceLifeHubManager(
         private const val KEY_BASELINE = "baseline"
         private const val KEY_STEPS = "steps_today"
         private const val KEY_TOTAL_LAST = "total_last"
+        private const val KEY_SOURCE = "steps_source"
 
         @Volatile
         private var lastWidgetStepRefresh = 0L
