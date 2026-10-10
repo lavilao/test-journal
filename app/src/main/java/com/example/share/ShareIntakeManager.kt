@@ -16,14 +16,14 @@ import java.io.File
  * Receives what the user SHARES to Mnemosyne from any other app — the
  * "No puedo compartir nada a Mnemosyne" fix. Handles:
  *
- *  - text/plain: shared text or links → note (title from EXTRA_SUBJECT or
+ *  - plain text: shared text or links → note (title from EXTRA_SUBJECT or
  *    the first line; links are listed explicitly so they survive as links)
- *  - image/* (single or multiple): photos → journal entry with attachments,
+ *  - images (single or multiple): photos → journal entry with attachments,
  *    OCR-indexed when the toggle allows
- *  - audio/*: voice notes → entry with an audio record ready for the
+ *  - audio: voice notes → entry with an audio record ready for the
  *    one-tap Whistle transcription
- *  - application/pdf: document → note; with document-OCR enabled the first
- *    pages are OCR'd so the PDF is searchable
+ *  - PDF documents: → note; with document-OCR enabled the first pages are
+ *    OCR'd so the document becomes searchable
  */
 object ShareIntakeManager {
 

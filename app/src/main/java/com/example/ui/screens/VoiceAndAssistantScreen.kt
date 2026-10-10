@@ -1643,7 +1643,7 @@ fun VoiceAndAssistantScreen(
                 } else {
                     buildString {
                         append("En Android 11: Ajustes → Apps y notificaciones → Avanzado → Apps ")
-                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne» (o «Mnemosyne"). ")
+                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne» (o «Mnemosyne»). ")
                         append("Desde esta versión la app aparece por DOS vías: como servicio de ")
                         append("interacción de voz Y como app de asistencia clásica, así que debe ")
                         append("salir en la lista aunque la ROM tarde en refrescar. Si aun así no ")
