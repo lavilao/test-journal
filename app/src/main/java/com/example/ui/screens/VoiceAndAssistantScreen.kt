@@ -444,17 +444,6 @@ fun VoiceAndAssistantScreen(
         }
     }
 
-    val roleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        roleHeld = isAssistantRoleHeld(context)
-        Toast.makeText(
-            context,
-            if (roleHeld) "Mnemosyne es ahora tu asistente" else "No se cambió el asistente",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
     // ------------------------------------------------------------------
     // Recording flows (enrollment / verification)
     // ------------------------------------------------------------------
@@ -1578,35 +1567,29 @@ fun VoiceAndAssistantScreen(
             Text(
                 text = "Haz de Mnemosyne tu asistente predeterminado: el gesto de asistente " +
                         "(pulsación larga del inicio / deslizamiento) abrirá el asistente local " +
-                        "en vez de Google Assistant o Bixby. Selecciona «Mnemosyne» en el " +
-                        "diálogo del sistema. Puedes volver atrás cuando quieras.",
+                        "en vez de Google Assistant o Bixby. Selecciona «Mnemosyne» dentro de " +
+                        "«App de asistencia» en los ajustes del sistema. Puedes volver atrás " +
+                        "cuando quieras.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(10.dp))
             Button(
                 onClick = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        try {
-                            val rm = context.getSystemService(RoleManager::class.java)
-                            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
-                                roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                                return@Button
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-                    // Android 9-11 (the assistant ROLE only exists on newer
-                    // systems): "Assist & voice input" is the screen that
-                    // actually lists VoiceInteractionServices; Default apps
-                    // is the fallback when the ROM hides it.
+                    // ⚠️ v1.5.1: the RoleManager ROLE_ASSISTANT grant dialog was
+                    // REMOVED — granting that role made Android bind our (now
+                    // deleted) VoiceInteractionService and crashed the system
+                    // into a reboot loop on Android 11. The SAFE path is the
+                    // classic "assist app" selection: the system records our
+                    // package and simply launches MainActivity (ACTION_ASSIST)
+                    // on the gesture — no system-side binding, no services.
                     val voiceInput = android.content.Intent(
                         android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS
                     ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                     if (tryStart(context, voiceInput)) {
                         Toast.makeText(
                             context,
-                            "Toca «App de asistencia» (o «Asistente digital») y elige «Asistente Mnemosyne»",
+                            "Toca «App de asistencia» (o «Asistente digital») y elige «Mnemosyne»",
                             Toast.LENGTH_LONG
                         ).show()
                         return@Button
@@ -1643,12 +1626,11 @@ fun VoiceAndAssistantScreen(
                 } else {
                     buildString {
                         append("En Android 11: Ajustes → Apps y notificaciones → Avanzado → Apps ")
-                        append("predeterminadas → App de asistencia → «Asistente Mnemosyne» (o «Mnemosyne»). ")
-                        append("Desde esta versión la app aparece por DOS vías: como servicio de ")
-                        append("interacción de voz Y como app de asistencia clásica, así que debe ")
-                        append("salir en la lista aunque la ROM tarde en refrescar. Si aun así no ")
-                        append("aparece: reinicia el teléfono una vez tras instalar (algunas ROMs ")
-                        append("cachear la lista) y vuelve a entrar en ese ajuste.")
+                        append("predeterminadas → App de asistencia → «Mnemosyne». La app se " +
+                        "registra como app de asistencia clásica (vía segura: el sistema solo ")
+                        append("abre la actividad con el gesto, sin vincular servicios). Si no ")
+                        append("aparece en la lista: reinicia el teléfono una vez tras instalar ")
+                        append("(algunas ROMs cachean la lista) y vuelve a entrar en ese ajuste.")
                         currentAssistant?.let {
                             append("\nAsistente actual del sistema: ${it.substringAfterLast('.')}.")
                         }
