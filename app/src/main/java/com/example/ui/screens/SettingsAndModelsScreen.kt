@@ -1657,7 +1657,11 @@ fun SettingsAndModelsScreen(
                     onClick = {
                         if (rssUrlInput.isNotBlank()) {
                             viewModel.addCustomRssFeed(rssUrlInput, rssNameInput)
-                            Toast.makeText(context, "Feed RSS añadido", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "«${rssNameInput.ifBlank { "Canal RSS" }}» añadido — persistirá al reiniciar la app",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             showAddRssDialog = false
                         }
                     },

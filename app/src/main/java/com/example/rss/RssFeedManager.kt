@@ -9,7 +9,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
+import java.io.File
 import java.io.StringReader
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -43,7 +46,10 @@ class RssFeedManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("rss_feeds_prefs", Context.MODE_PRIVATE)
 
     private companion object {
-        const val KEY_SOURCES_V2 = "rss_sources_v2"
+        const val KEY_SOURCES_V2 = "rss_sources_v2" // legacy StringSet, migration only
+        const val KEY_SOURCES_V3 = "rss_sources_v3" // JSON array: survives any character
+        const val ARTICLES_CACHE_FILE = "rss_articles_cache.json"
+        const val MAX_CACHED_ARTICLES = 120
     }
 
     private val defaultSources = listOf(
@@ -57,7 +63,10 @@ class RssFeedManager(private val context: Context) {
     private val _sources = MutableStateFlow<List<RssFeedSource>>(loadSavedSources())
     val sources: StateFlow<List<RssFeedSource>> = _sources.asStateFlow()
 
-    private val _articles = MutableStateFlow<List<RssArticle>>(getInitialCuratedArticles())
+    // v1.6: the last successful fetch is cached on disk, so reopening the
+    // app shows YOUR feeds' news immediately instead of resetting to a
+    // default list. The curated fake articles are gone for good.
+    private val _articles = MutableStateFlow<List<RssArticle>>(loadCachedArticles())
     val articles: StateFlow<List<RssArticle>> = _articles.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -65,33 +74,47 @@ class RssFeedManager(private val context: Context) {
 
     suspend fun refreshFeeds() = withContext(Dispatchers.IO) {
         _isLoading.value = true
-        val fetchedList = mutableListOf<RssArticle>()
-
-        for (source in _sources.value) {
-            try {
-                val request = Request.Builder()
-                    .url(source.url)
-                    .header("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:100.0)")
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val bodyString = response.body?.string()
-                        if (!bodyString.isNullOrBlank()) {
-                            val parsed = parseRssXml(bodyString, source.name, source.category)
-                            fetchedList.addAll(parsed)
-                        }
+        try {
+            // Feeds are fetched in parallel (bounded by OkHttp's own pool):
+            // 15 sources no longer take 15 × timeouts sequentially.
+            val fetched = kotlinx.coroutines.coroutineScope {
+                _sources.value.map { source ->
+                    kotlinx.coroutines.async(Dispatchers.IO) {
+                        fetchSource(source)
                     }
+                }.map { it.await() }.flatten()
+            }
+            if (fetched.isNotEmpty()) {
+                val merged = (fetched + _articles.value)
+                    .distinctBy { it.title }
+                    .sortedByDescending { parsePubDateMillis(it.pubDate) ?: it.id.hashCode().toLong() }
+                _articles.value = merged.take(MAX_CACHED_ARTICLES)
+                persistArticlesCache(_articles.value)
+            }
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private fun fetchSource(source: RssFeedSource): List<RssArticle> = try {
+        val request = Request.Builder()
+            .url(source.url)
+            .header("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:100.0)")
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                val bodyString = response.body?.string()
+                if (!bodyString.isNullOrBlank()) {
+                    parseRssXml(bodyString, source.name, source.category)
+                } else {
+                    emptyList()
                 }
-            } catch (_: Exception) {
-                // Ignore individual feed failures; fallback continues
+            } else {
+                emptyList()
             }
         }
-
-        if (fetchedList.isNotEmpty()) {
-            _articles.value = fetchedList.shuffled().distinctBy { it.title }
-        }
-        _isLoading.value = false
+    } catch (_: Exception) {
+        emptyList()
     }
 
     suspend fun fetchFullArticleText(article: RssArticle): String = withContext(Dispatchers.IO) {
@@ -127,8 +150,8 @@ class RssFeedManager(private val context: Context) {
         val safeName = name.ifBlank { "Canal RSS" }
 
         val newSource = RssFeedSource(safeName, trimmedUrl, category)
-        persistSource(newSource)
         val updated = (_sources.value.filter { it.url != trimmedUrl } + newSource)
+        writeSourceSet(updated)
         _sources.value = updated
 
         try {
@@ -152,15 +175,14 @@ class RssFeedManager(private val context: Context) {
     /** Removes a feed (any feed — custom or one of the originals). */
     suspend fun removeFeed(url: String): Boolean = withContext(Dispatchers.IO) {
         val trimmed = url.trim()
-        val remaining = readSourceSet().mapNotNull { decodeEntry(it) }
-            .filterNot { it.url == trimmed }
+        val remaining = _sources.value.filterNot { it.url == trimmed }
         writeSourceSet(remaining)
         _sources.value = remaining
         // Drop the removed feed's articles from the current list too
         // (articles carry the source NAME, not its URL).
-        _articles.value = _articles.value.filterNot { article ->
-            remaining.none { it.name == article.sourceTitle }
-        }
+        val keptNames = remaining.map { it.name }.toSet()
+        _articles.value = _articles.value.filter { it.sourceTitle in keptNames }
+        persistArticlesCache(_articles.value)
         true
     }
 
@@ -239,44 +261,66 @@ class RssFeedManager(private val context: Context) {
         if (contains(c)) substringBefore(c) else this
 
     // ------------------------------------------------------------------
-    // Source persistence (v2: one StringSet, defaults deletable)
+    // Source persistence (v3: one JSON array string; commit() so the write
+    // is on disk before the app can be killed. v2's "|"-delimited entries
+    // broke whenever a name/category contained a pipe.)
     // ------------------------------------------------------------------
 
     private fun loadSavedSources(): List<RssFeedSource> {
-        // Migration: the old format only stored CUSTOM feeds and re-appended
-        // the 5 defaults forever (they could not be deleted). v2 stores the
-        // complete list, so removals stick.
-        if (!prefs.contains(KEY_SOURCES_V2)) {
-            val oldCustom = prefs.getStringSet("custom_rss_sources", null)
-                ?.mapNotNull { entry ->
-                    val parts = entry.split("|||")
-                    if (parts.size >= 2) RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" }) else null
-                }.orEmpty()
-            val merged = (oldCustom + defaultSources).distinctBy { it.url }
-            writeSourceSet(merged)
-            return merged
+        if (prefs.contains(KEY_SOURCES_V3)) {
+            // The key exists: an EMPTY list is a deliberate user choice —
+            // never fall back to defaults over it.
+            return try {
+                parseSourcesJson(prefs.getString(KEY_SOURCES_V3, "[]") ?: "[]")
+            } catch (_: Exception) {
+                defaultSources
+            }
         }
-        return readSourceSet().mapNotNull { decodeEntry(it) }
+
+        // --- Migration from v2 (or first run) ---
+        val migrated: List<RssFeedSource> = if (prefs.contains(KEY_SOURCES_V2)) {
+            prefs.getStringSet(KEY_SOURCES_V2, emptySet())
+                ?.mapNotNull { decodeLegacyEntry(it) }
+                .orEmpty()
+                .ifEmpty { defaultSources }
+        } else {
+            val oldCustom = prefs.getStringSet("custom_rss_sources", null)
+                ?.mapNotNull { decodeLegacyEntry(it) }
+                .orEmpty()
+            (oldCustom + defaultSources).distinctBy { it.url }
+        }
+        writeSourceSet(migrated)
+        return migrated
     }
 
-    private fun readSourceSet(): Set<String> =
-        prefs.getStringSet(KEY_SOURCES_V2, emptySet())?.toSet() ?: emptySet()
+    private fun parseSourcesJson(json: String): List<RssFeedSource> {
+        val arr = JSONArray(json)
+        val out = mutableListOf<RssFeedSource>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val name = o.optString("name").trim()
+            val url = o.optString("url").trim()
+            if (url.startsWith("http")) {
+                out.add(RssFeedSource(name.ifBlank { url.substringAfter("//").takeBefore('/') }, url, o.optString("category").ifBlank { "Noticias" }))
+            }
+        }
+        return out
+    }
 
     private fun writeSourceSet(sources: List<RssFeedSource>) {
+        val arr = JSONArray()
+        sources.forEach { s ->
+            arr.put(JSONObject().put("name", s.name).put("url", s.url).put("category", s.category))
+        }
         prefs.edit()
-            .putStringSet(KEY_SOURCES_V2, sources.map(::encodeEntry).toSet())
-            .apply()
+            .putString(KEY_SOURCES_V3, arr.toString())
+            // commit(): synchronous — the list survives even if the process
+            // dies the instant the user closes the app.
+            .commit()
     }
 
-    private fun persistSource(source: RssFeedSource) {
-        val current = readSourceSet().mapNotNull { decodeEntry(it) }
-        writeSourceSet((current.filterNot { it.url == source.url } + source))
-    }
-
-    private fun encodeEntry(s: RssFeedSource) = "${s.name}|${s.url}|${s.category}"
-
-    private fun decodeEntry(entry: String): RssFeedSource? {
-        // Tolerates both the v2 "|" format and legacy "|||" entries.
+    /** Tolerates the old v2 "|" and pre-v2 "|||" entries. */
+    private fun decodeLegacyEntry(entry: String): RssFeedSource? {
         val parts = if (entry.contains("|||")) entry.split("|||") else entry.split("|")
         return if (parts.size >= 2 && parts[1].startsWith("http")) {
             RssFeedSource(parts[0], parts[1], parts.getOrElse(2) { "Noticias" })
@@ -381,41 +425,94 @@ class RssFeedManager(private val context: Context) {
         return list.take(15)
     }
 
-    private fun getInitialCuratedArticles(): List<RssArticle> {
-        return listOf(
-            RssArticle(
-                id = "init_1",
-                title = "La revolución del procesamiento en dispositivo: Privacidad y eficiencia",
-                link = "https://www.theverge.com",
-                description = "Cómo las bases de datos locales, el procesamiento offline y el cifrado en el dispositivo están transformando las aplicaciones móviles modernas.",
-                pubDate = "Hace 2h",
-                sourceTitle = "Tecnología",
-                imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80",
-                category = "Tecnología",
-                fullContent = "Cómo las bases de datos locales, el procesamiento offline y el cifrado en el dispositivo están transformando las aplicaciones móviles modernas.\n\nLos usuarios hoy en día demandan interfaces instantáneas y soberanía de datos sin depender de servidores remotos para cada interacción básica."
-            ),
-            RssArticle(
-                id = "init_2",
-                title = "Diseño minimalista y enfoque diario en el espacio de trabajo",
-                link = "https://www.wired.com",
-                description = "La ergonomía, los materiales cálidos y la reducción del ruido visual mejoran la concentración en las tareas cotidianas.",
-                pubDate = "Hace 4h",
-                sourceTitle = "Wired",
-                imageUrl = "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=800&q=80",
-                category = "Diseño",
-                fullContent = "La ergonomía, los materiales cálidos y la reducción del ruido visual mejoran la concentración en las tareas cotidianas.\n\nDiseñar entornos sin distracciones permite mantener la calma mental y una mayor atención a los proyectos importantes."
-            ),
-            RssArticle(
-                id = "init_3",
-                title = "Hábitos matutinos para potenciar la claridad mental y el bienestar",
-                link = "https://www.bbc.com/news",
-                description = "Investigadores analizan el impacto de caminar a paso constante, la luz natural y planificar los objetivos antes de iniciar la jornada.",
-                pubDate = "Hace 5h",
-                sourceTitle = "Salud",
-                imageUrl = "https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=800&q=80",
-                category = "Salud",
-                fullContent = "Investigadores analizan el impacto de caminar a paso constante, la luz natural y planificar los objetivos antes de iniciar la jornada.\n\nUn paseo matutino y unos minutos de escritura reflexiva bastan para estructurar el día con serenidad."
+    // ------------------------------------------------------------------
+    // Article disk cache (v1.6): the news list survives app restarts. No
+    // more resetting to fabricated "curated" articles — if there is no
+    // cache and no network, the list is honestly empty until a refresh.
+    // ------------------------------------------------------------------
+
+    private fun cacheFile(): File = File(context.filesDir, ARTICLES_CACHE_FILE)
+
+    private fun loadCachedArticles(): List<RssArticle> = try {
+        val f = cacheFile()
+        if (f.exists()) parseArticlesJson(f.readText()) else emptyList()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun persistArticlesCache(articles: List<RssArticle>) {
+        try {
+            val f = cacheFile()
+            val tmp = File(f.parentFile, "$ARTICLES_CACHE_FILE.tmp")
+            tmp.writeText(buildArticlesJson(articles.take(MAX_CACHED_ARTICLES)))
+            if (!tmp.renameTo(f)) {
+                f.writeText(tmp.readText())
+                tmp.delete()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun buildArticlesJson(articles: List<RssArticle>): String {
+        val arr = JSONArray()
+        articles.forEach { a ->
+            arr.put(
+                JSONObject()
+                    .put("id", a.id)
+                    .put("title", a.title)
+                    .put("link", a.link)
+                    .put("description", a.description)
+                    .put("pubDate", a.pubDate)
+                    .put("sourceTitle", a.sourceTitle)
+                    .put("imageUrl", a.imageUrl ?: "")
+                    .put("category", a.category)
+                    .put("fullContent", a.fullContent)
             )
+        }
+        return arr.toString()
+    }
+
+    private fun parseArticlesJson(json: String): List<RssArticle> {
+        val arr = JSONArray(json)
+        val out = mutableListOf<RssArticle>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val title = o.optString("title")
+            if (title.isBlank()) continue
+            out.add(
+                RssArticle(
+                    id = o.optString("id", "cache_$i"),
+                    title = title,
+                    link = o.optString("link"),
+                    description = o.optString("description"),
+                    pubDate = o.optString("pubDate", "Reciente"),
+                    sourceTitle = o.optString("sourceTitle"),
+                    imageUrl = o.optString("imageUrl").takeIf { it.isNotBlank() },
+                    category = o.optString("category", "Noticias"),
+                    fullContent = o.optString("fullContent")
+                )
+            )
+        }
+        return out
+    }
+
+    /** Best-effort pubDate parse (RFC-822 or ISO-8601) for newest-first order. */
+    private fun parsePubDateMillis(raw: String): Long? {
+        val s = raw.trim()
+        if (s.isBlank() || s.equals("Reciente", ignoreCase = true)) return null
+        val patterns = listOf(
+            "EEE, dd MMM yyyy HH:mm:ss z", "EEE, dd MMM yyyy HH:mm:ss Z",
+            "dd MMM yyyy HH:mm:ss z", "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd"
         )
+        for (p in patterns) {
+            try {
+                val fmt = java.text.SimpleDateFormat(p, Locale.US)
+                fmt.isLenient = true
+                return fmt.parse(s)?.time
+            } catch (_: Exception) {
+            }
+        }
+        return null
     }
 }

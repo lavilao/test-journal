@@ -43,7 +43,10 @@ object HabitMiners {
         val typicalBedMinuteOfDay: Int?,
         val typicalWakeMinuteOfDay: Int?,
         val medianDurationMinutes: Int?,
-        val regularity: Float?
+        val regularity: Float?,
+        // v1.6 predictions:
+        val sleepDebtMinutes: Int? = null,          // 7d median − last 3 nights mean
+        val bedtimeDriftMinutesPerNight: Float? = null // Theil–Sen trend, >0 = later
     )
 
     data class AppUsage(val pkg: String, val opens: Int, val minutes: Long)
@@ -53,7 +56,9 @@ object HabitMiners {
     data class AppFacts(
         val signature: List<AppUsage>,
         val predictedNow: List<AppPrediction>,
-        val medianDailyOpens: Int
+        val medianDailyOpens: Int,
+        // v1.6: how much evidence backs predictedNow (0..1)
+        val predictedNowConfidence: Float? = null
     )
 
     data class PlaceFacts(
@@ -73,7 +78,9 @@ object HabitMiners {
         val typicalChargeMinuteOfDay: Int?,
         val chargesPerWeek: Float,
         val overnightCharges: Int,
-        val windowDays: Int
+        val windowDays: Int,
+        // v1.6: days with a valid drain estimate behind drainPerHour
+        val drainConfidenceDays: Int = 0
     )
 
     data class DailyValue(val dayKey: String, val value: Float)
@@ -241,13 +248,45 @@ object HabitMiners {
             null
         }
 
+        // ---------------- v1.6 predictions ----------------
+        // Sleep debt: recent 3 nights vs the user's own 7d median — a
+        // honest "you've been sleeping less than usual" signal.
+        val sleepDebt = if (nights.size >= 5) {
+            val recent = nights.takeLast(3)
+            val recentAvg = recent.map { (it.end - it.start) / 60_000L }.average()
+            val base = medianLong(durations.takeLast(7).map { it.toLong() })
+            base?.let { (it - recentAvg).toInt() }
+        } else {
+            null
+        }
+
+        // Bedtime drift: Theil–Sen (median of pairwise slopes) over the
+        // last 14 nights — robust to one wild night. |drift| ≥ 8 min/night
+        // over ≥ 6 nights is reported, else null (noise).
+        val recentNights = nights.takeLast(14)
+        val drift = if (recentNights.size >= 6) {
+            val ys = recentNights.map { shiftedBed(it.start).toDouble() }
+            val slopes = mutableListOf<Double>()
+            for (a in ys.indices) {
+                for (b in a + 1 until ys.size) {
+                    slopes.add((ys[b] - ys[a]) / (b - a))
+                }
+            }
+            val med = slopes.sorted().let { it[it.size / 2] }
+            if (kotlin.math.abs(med) >= 8.0) med.toFloat() else null
+        } else {
+            null
+        }
+
         return SleepFacts(
             lastNight = SleepNight(lastNight.wakeDayKey, lastNight.start, lastNight.end),
             nightsWithData = nights.size,
             typicalBedMinuteOfDay = typicalBed,
             typicalWakeMinuteOfDay = typicalWake,
             medianDurationMinutes = medianDuration,
-            regularity = regularity
+            regularity = regularity,
+            sleepDebtMinutes = sleepDebt,
+            bedtimeDriftMinutesPerNight = drift
         )
     }
 
@@ -275,7 +314,7 @@ object HabitMiners {
                     if (openTs == null) openTs = e.timestamp
                 } else {
                     val o = openTs ?: continue
-                    val dur = (e.timestamp - o).coerceIn(0L, 30 * 60_000L)
+                    val dur = (e.timestamp - o).coerceIn(0L, 45 * 60_000L)
                     minutesByPkg[pkg] = (minutesByPkg[pkg] ?: 0L) + dur
                     openTs = null
                 }
@@ -289,36 +328,62 @@ object HabitMiners {
             .sortedByDescending { it.opens }
             .take(6)
 
-        val predicted = scoreByHour(appOpen, now).filter { it.score >= 2f }.take(3)
+        val predictedRaw = scoreByHour(appOpen, now)
+        val predicted = predictedRaw.filter { it.score >= 1.5f }.take(3)
+
+        // v1.6 confidence: how much evidence is behind the top prediction —
+        // shown next to it instead of pretending every guess is solid.
+        val confidence = predictedRaw.firstOrNull()?.let { top ->
+            val rawCount = appOpen.count { e ->
+                (e.key ?: "") == top.pkg && kotlin.math.abs(
+                    (Calendar.getInstance().apply { timeInMillis = e.timestamp }.get(Calendar.HOUR_OF_DAY) -
+                        Calendar.getInstance().apply { timeInMillis = now }.get(Calendar.HOUR_OF_DAY) + 36) % 24 - 12
+                ) <= 2
+            }
+            (kotlin.math.sqrt(rawCount.toFloat()) / 3f).coerceIn(0f, 1f)
+        }
 
         return AppFacts(
             signature = signature,
             predictedNow = predicted,
-            medianDailyOpens = appOpen.size / days
+            medianDailyOpens = appOpen.size / days,
+            predictedNowConfidence = if (predicted.isEmpty()) null else confidence
         )
     }
 
-    /** Score = opens in the ±1 h window with matching day type (week/weekend). */
+    /**
+     * v1.6 — "what does the user open around now":
+     *  - time decay: events older than 28d ignored; weekly half-life, so
+     *    LAST week's routine matters far more than last month's;
+     *  - triangular kernel over the hour distance (±2h, peak at 0) instead
+     *    of a flat ±1h bucket;
+     *  - weekday/weekend similarity weighting (0.3 for the other type);
+     *  - score stays a weighted open-count (≥ 1.5 ≈ "almost surely
+     *    opened around now").
+     */
     private fun scoreByHour(appOpen: List<HabitEvent>, now: Long): List<AppPrediction> {
         if (appOpen.isEmpty()) return emptyList()
         val nowCal = Calendar.getInstance().apply { timeInMillis = now }
         val hourNow = nowCal.get(Calendar.HOUR_OF_DAY)
         val weekendNow = nowCal.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY ||
             nowCal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
-        val window = setOf((hourNow + 23) % 24, hourNow, (hourNow + 1) % 24)
 
-        val counts = HashMap<String, Int>()
+        val scores = HashMap<String, Double>()
         for (e in appOpen) {
+            val ageDays = (now - e.timestamp) / DAY_MS.toDouble()
+            if (ageDays > 28) continue
             val c = Calendar.getInstance().apply { timeInMillis = e.timestamp }
-            val h = c.get(Calendar.HOUR_OF_DAY)
-            if (h !in window) continue
+            val dh = ((c.get(Calendar.HOUR_OF_DAY) - hourNow + 36) % 24) - 12 // -12..12
+            if (kotlin.math.abs(dh) > 2) continue
+            val kernel = 1.0 - kotlin.math.abs(dh) / 2.0
             val weekend = c.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY ||
                 c.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
-            if (weekend != weekendNow) continue
+            val dayWeight = if (weekend == weekendNow) 1.0 else 0.3
+            val decay = Math.pow(2.0, -ageDays / 7.0)
             val pkg = e.key ?: continue
-            counts[pkg] = (counts[pkg] ?: 0) + 1
+            scores[pkg] = (scores[pkg] ?: 0.0) + decay * kernel * dayWeight
         }
-        return counts.map { (pkg, count) -> AppPrediction(pkg, count.toFloat()) }
+        return scores.map { (pkg, s) -> AppPrediction(pkg, s.toFloat()) }
             .sortedByDescending { it.score }
     }
 
@@ -393,12 +458,35 @@ object HabitMiners {
         val todayDischarging = batt.filter {
             dayKey(it.timestamp) == todayKey && it.meta == "discharging"
         }
-        var drainPerHour: Float? = null
-        if (todayDischarging.size >= 3) {
+
+        // ---------------- v1.6: multi-day robust drain ----------------
+        // Per-day drain estimate (first→last discharging sample, valid when
+        // the span covers ≥ 3h and the drop is positive), then the MEDIAN
+        // across days. Today's estimate, when valid, counts double (it is
+        // the most recent behaviour). One weird day can no longer skew the
+        // projection.
+        val byDay = batt.filter { it.meta == "discharging" }.groupBy { dayKey(it.timestamp) }
+        val dailyDrains = byDay.mapNotNull { (_, list) ->
+            val sorted = list.sortedBy { it.timestamp }
+            if (sorted.size < 3) return@mapNotNull null
+            val spanH = (sorted.last().timestamp - sorted.first().timestamp) / 3_600_000.0
+            val drop = sorted.first().value!! - sorted.last().value!!
+            if (spanH >= 3.0 && drop > 0) (drop / spanH).toFloat() else null
+        }
+        val todayDrain: Float? = if (todayDischarging.size >= 3) {
             val spanH = (todayDischarging.last().timestamp - todayDischarging.first().timestamp) / 3_600_000.0
             val drop = todayDischarging.first().value!! - todayDischarging.last().value!!
-            if (spanH >= 1.5 && drop > 0) drainPerHour = (drop / spanH).toFloat()
+            if (spanH >= 1.5 && drop > 0) (drop / spanH).toFloat() else null
+        } else {
+            null
         }
+        val drainPerHour: Float? = when {
+            dailyDrains.isNotEmpty() && todayDrain != null ->
+                ((dailyDrains.sorted()[dailyDrains.size / 2] + 2f * todayDrain) / 3f)
+            dailyDrains.isNotEmpty() -> dailyDrains.sorted()[dailyDrains.size / 2]
+            else -> todayDrain
+        }
+        val drainConfidenceDays = dailyDrains.size + (if (todayDrain != null) 1 else 0)
 
         // Project to the typical bedtime (from sleep facts, else 23:30).
         val bedMinuteOfDay = sleep?.typicalBedMinuteOfDay ?: (23 * 60 + 30)
@@ -433,7 +521,8 @@ object HabitMiners {
             typicalChargeMinuteOfDay = typicalChargeMinute,
             chargesPerWeek = startsPerWeek,
             overnightCharges = overnight,
-            windowDays = windowDays
+            windowDays = windowDays,
+            drainConfidenceDays = drainConfidenceDays
         )
     }
 
@@ -461,7 +550,7 @@ object HabitMiners {
                     if (openTs == null) openTs = e.timestamp
                 } else {
                     val o = openTs ?: continue
-                    val dur = (e.timestamp - o).coerceIn(0L, 30 * 60_000L)
+                    val dur = (e.timestamp - o).coerceIn(0L, 45 * 60_000L)
                     val day = dayKey(o)
                     minutesByDay[day] = (minutesByDay[day] ?: 0L) + dur
                     openTs = null
@@ -697,15 +786,25 @@ object HabitMiners {
                 lines.add("- Sueño típico: se acuesta ~${formatMinuteOfDay(s.typicalBedMinuteOfDay)}, despierta ~${formatMinuteOfDay(s.typicalWakeMinuteOfDay)}")
             }
             s.regularity?.let { lines.add("- Regularidad del sueño: ${(it * 100).roundToInt()}%") }
+            s.sleepDebtMinutes?.takeIf { it > 15 }?.let {
+                lines.add("- Deuda de sueño: ${formatDuration(it.toLong())} menos que su mediana en las 3 últimas noches")
+            }
+            s.bedtimeDriftMinutesPerNight?.let {
+                val dir = if (it > 0) "más tarde" else "más pronto"
+                lines.add("- Tendencia: se acuesta ~${kotlin.math.abs(it).roundToInt()} min $dir cada noche")
+            }
         }
         digest.apps?.let { a ->
             a.signature.take(3).forEachIndexed { i, u ->
                 lines.add("- App #${i + 1}: ${u.pkg} (${u.opens} aperturas/semana, ${formatDuration(u.minutes / 60_000L)})")
             }
-            a.predictedNow.firstOrNull()?.let { lines.add("- A esta hora suele abrir ${it.pkg}") }
+            a.predictedNow.firstOrNull()?.let { p ->
+                val conf = a.predictedNowConfidence?.let { c -> " (confianza ${(c * 100).roundToInt()}%)" } ?: ""
+                lines.add("- A esta hora suele abrir ${p.pkg}$conf")
+            }
         }
         digest.battery?.let { b ->
-            b.drainPerHour?.let { lines.add("- Batería: pierde ~${"%.1f".format(it)}%/h hoy") }
+            b.drainPerHour?.let { lines.add("- Batería: pierde ~${"%.1f".format(it)}%/h (mediana de ${b.drainConfidenceDays} días con datos)") }
             b.projectedBedtimeLevel?.let { lines.add("- Proyección: llegará a la hora de dormir con ~$it%") }
         }
         digest.attention?.let { at ->
@@ -740,13 +839,29 @@ object HabitMiners {
             s.lastNight?.let { n ->
                 parts.add("Anoche dormiste ${formatDuration((n.endMillis - n.startMillis) / 60_000L)}.")
             }
+            // v1.6 predictions, surfaced honestly
+            s.sleepDebtMinutes?.takeIf { it > 15 }?.let {
+                parts.add("Llevas 3 noches durmiendo ${formatDuration(it.toLong())} menos que tu mediana: hoy conviene bajar el ritmo.")
+            }
+            s.bedtimeDriftMinutesPerNight?.let {
+                val dir = if (it > 0) "más tarde" else "más pronto"
+                parts.add("Tu hora de dormir se está moviendo ~${kotlin.math.abs(it).roundToInt()} min $dir cada noche.")
+            }
         }
-        digest.apps?.predictedNow?.firstOrNull()?.let {
-            parts.add("A esta hora sueles abrir ${it.pkg}.")
+        digest.apps?.let { a ->
+            a.predictedNow.firstOrNull()?.let { p ->
+                val conf = a.predictedNowConfidence
+                if (conf != null && conf >= 0.55f) {
+                    parts.add("A esta hora sueles abrir ${p.pkg} (${(conf * 100).roundToInt()}% de confianza).")
+                } else {
+                    parts.add("A esta hora sueles abrir ${p.pkg}.")
+                }
+            }
         }
         digest.battery?.let { b ->
             b.projectedBedtimeLevel?.let { lvl ->
-                parts.add("Con el ritmo de hoy, llegarás a la hora de dormir con ~$lvl% de batería.")
+                val basis = if (b.drainConfidenceDays >= 3) "según tu ritmo de los últimos días" else "con el ritmo de hoy"
+                parts.add("$basis, llegarás a la hora de dormir con ~$lvl% de batería.")
             }
         }
         digest.attention?.let { at ->
@@ -802,6 +917,12 @@ object HabitMiners {
     }
 
     private fun medianInt(values: List<Int>): Int? {
+        if (values.isEmpty()) return null
+        val sorted = values.sorted()
+        return sorted[sorted.size / 2]
+    }
+
+    private fun medianLong(values: List<Long>): Long? {
         if (values.isEmpty()) return null
         val sorted = values.sorted()
         return sorted[sorted.size / 2]

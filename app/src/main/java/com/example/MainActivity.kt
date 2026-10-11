@@ -68,6 +68,7 @@ import com.example.ui.screens.SettingsAndModelsScreen
 import com.example.ui.screens.TimelineScreen
 import com.example.ui.screens.VaultExplorerScreen
 import com.example.ui.screens.VoiceAndAssistantScreen
+import com.example.ui.screens.NewsBrowserScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NowBriefTheme
 import com.example.viewmodel.JournalViewModel
@@ -82,6 +83,7 @@ sealed interface AppScreen {
     data object Lens : AppScreen
     data object VoiceSettings : AppScreen
     data object Routines : AppScreen
+    data object News : AppScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -256,6 +258,11 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     screenState = AppScreen.Main(currentTab)
                 }
             }
+            is AppScreen.News -> {
+                BackHandler {
+                    screenState = AppScreen.Main(currentTab)
+                }
+            }
             is AppScreen.Main -> {
                 if (currentTab == MainNavTab.SETTINGS || currentTab == MainNavTab.GRAPH || currentTab == MainNavTab.ENTITIES) {
                     BackHandler {
@@ -300,7 +307,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                             onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
                                             onOpenLens = { screenState = AppScreen.Lens },
                                             onOpenAssistant = { screenState = AppScreen.Assistant },
-                                            onOpenRoutines = { screenState = AppScreen.Routines }
+                                            onOpenRoutines = { screenState = AppScreen.Routines },
+                                            onOpenNews = { screenState = AppScreen.News }
                                         )
                                     } else {
                                         TimelineScreen(
@@ -312,7 +320,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                                 viewModel.selectTab(MainNavTab.GRAPH)
                                             },
                                             onOpenLens = { screenState = AppScreen.Lens },
-                                            onOpenAssistant = { screenState = AppScreen.Assistant }
+                                            onOpenAssistant = { screenState = AppScreen.Assistant },
+                                            onOpenNews = { screenState = AppScreen.News }
                                         )
                                     }
                                 }
@@ -388,6 +397,14 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                             RoutinesScreen(
                                 viewModel = viewModel,
                                 onBack = { screenState = AppScreen.Main(currentTab) }
+                            )
+                        }
+                        is AppScreen.News -> {
+                            NewsBrowserScreen(
+                                viewModel = viewModel,
+                                isSamsungMode = isSamsungMode,
+                                onBack = { screenState = AppScreen.Main(currentTab) },
+                                onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
                             )
                         }
                         is AppScreen.Lens -> {

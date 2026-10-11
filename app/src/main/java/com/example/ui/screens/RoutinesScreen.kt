@@ -73,8 +73,10 @@ import com.example.ui.components.AppIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
+import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -346,6 +348,21 @@ fun RoutinesScreen(
                 sleep.regularity?.let { r ->
                     FactRow("Regularidad", "${(r * 100).toInt()}%", progress = r)
                 }
+                // v1.6 predictions
+                sleep.sleepDebtMinutes?.takeIf { it > 15 }?.let {
+                    FactRow(
+                        "Deuda de sueño",
+                        "${HabitMiners.formatDuration(it.toLong())} menos que tu mediana (3 últimas noches)",
+                        valueColor = if (it > 90) GoogleRed else TerracottaAccent
+                    )
+                }
+                sleep.bedtimeDriftMinutesPerNight?.let {
+                    val dir = if (it > 0) "más tarde" else "más pronto"
+                    FactRow(
+                        "Tendencia de acostarse",
+                        "~${kotlin.math.abs(it).roundToInt()} min $dir cada noche"
+                    )
+                }
                 Text(
                     text = "${sleep.nightsWithData} noches analizadas · silencio nocturno = sueño (heurística local)",
                     style = MaterialTheme.typography.labelSmall,
@@ -380,11 +397,19 @@ fun RoutinesScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
-                                text = "${p.score.toInt()} veces",
+                                text = if (p.score >= 1.5f) "seguro" else "posible",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                    apps.predictedNowConfidence?.let { c ->
+                        Text(
+                            text = "Confianza de la predicción: ${(c * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
@@ -510,7 +535,10 @@ fun RoutinesScreen(
                 LearningText("Necesito unas horas de uso para estimar tu consumo real.")
             } else {
                 FactRow("Ahora", "${battery.levelNow}%")
-                FactRow("Consumo hoy", "~${"%.1f".format(battery.drainPerHour)}%/h")
+                FactRow(
+                    "Consumo",
+                    "~${"%.1f".format(battery.drainPerHour)}%/h · mediana de ${battery.drainConfidenceDays} día(s)"
+                )
                 battery.projectedBedtimeLevel?.let {
                     FactRow(
                         "Llegada a la hora de dormir",

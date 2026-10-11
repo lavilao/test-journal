@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Mic
@@ -77,6 +78,8 @@ import com.example.ui.theme.NowBriefPrimaryLight
 import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -93,7 +96,8 @@ fun NowBriefHomeScreen(
     onNavigateToDetail: (Long) -> Unit,
     onOpenLens: () -> Unit = {},
     onOpenAssistant: () -> Unit = {},
-    onOpenRoutines: () -> Unit = {}
+    onOpenRoutines: () -> Unit = {},
+    onOpenNews: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val entries by viewModel.entries.collectAsState()
@@ -327,13 +331,17 @@ fun NowBriefHomeScreen(
                 )
             }
 
-            // News digest (each headline opens the full offline reader)
+            // News digest (each headline opens the full offline reader);
+            // "Ver todas" opens the SAME full news browser the Google mode
+            // has — parity: read, filter by source, save and share.
             if (rssArticles.isNotEmpty()) {
                 item {
                     NewsGlassCard(
-                        articles = rssArticles.take(3),
+                        articles = rssArticles.take(4),
                         accent = NowBriefNewsBlue,
-                        onOpenArticle = { article -> readerArticle = article }
+                        totalCount = rssArticles.size,
+                        onOpenArticle = { article -> readerArticle = article },
+                        onOpenAll = onOpenNews
                     )
                 }
             }
@@ -913,11 +921,24 @@ private fun TodayGlassCard(
 private fun NewsGlassCard(
     articles: List<com.example.rss.RssArticle>,
     accent: Color,
-    onOpenArticle: (com.example.rss.RssArticle) -> Unit = {}
+    totalCount: Int = 0,
+    onOpenArticle: (com.example.rss.RssArticle) -> Unit = {},
+    onOpenAll: () -> Unit = {}
 ) {
     LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GlassLabel(text = "📰 Digest de noticias", accent = accent, modifier = Modifier.weight(1f))
+            if (totalCount > articles.size) {
+                Text(
+                    text = "$totalCount",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = accent,
+                    modifier = Modifier
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                        .clickable(onClick = onOpenAll)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
             Icon(
                 Icons.Default.RssFeed,
                 contentDescription = null,
@@ -934,23 +955,62 @@ private fun NewsGlassCard(
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                 )
             }
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = { onOpenArticle(article) })
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!article.imageUrl.isNullOrBlank()) {
+                    coil.compose.AsyncImage(
+                        model = article.imageUrl,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .size(width = 64.dp, height = 44.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = article.title,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = article.sourceTitle + " · toca para leer",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (totalCount > articles.size) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenAll)
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = article.title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    text = "Ver todas las noticias",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = accent
                 )
-                Text(
-                    text = article.sourceTitle + " · toca para leer",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -1068,12 +1128,31 @@ private fun HabitGlassCard(
                             " y despiertas ~" + com.example.habit.HabitMiners.formatMinuteOfDay(s.typicalWakeMinuteOfDay)
                     )
                 }
+                // v1.6 predictions
+                s.sleepDebtMinutes?.takeIf { it > 15 }?.let {
+                    add("Deuda de sueño: " + com.example.habit.HabitMiners.formatDuration(it.toLong()) + " vs tu mediana")
+                }
+                s.bedtimeDriftMinutesPerNight?.let {
+                    val dir = if (it > 0) "más tarde" else "más pronto"
+                    add("Tu hora de dormir se mueve ~${kotlin.math.abs(it).roundToInt()} min $dir cada noche")
+                }
             }
-            digest?.apps?.predictedNow?.firstOrNull()?.let {
-                add("A esta hora sueles abrir " + com.example.habit.HabitMiners.appLabel(context, it.pkg))
+            digest?.apps?.let { a ->
+                a.predictedNow.firstOrNull()?.let { p ->
+                    val conf = a.predictedNowConfidence
+                    val label = com.example.habit.HabitMiners.appLabel(context, p.pkg)
+                    if (conf != null && conf >= 0.55f) {
+                        add("A esta hora sueles abrir $label (${(conf * 100).roundToInt()}% de confianza)")
+                    } else {
+                        add("A esta hora sueles abrir $label")
+                    }
+                }
             }
-            digest?.battery?.projectedBedtimeLevel?.let {
-                add("Llegarás a la hora de dormir con ~$it% de batería")
+            digest?.battery?.let { b ->
+                b.projectedBedtimeLevel?.let {
+                    val basis = if (b.drainConfidenceDays >= 3) "por tu ritmo reciente" else "por el ritmo de hoy"
+                    add("Llegarás a dormir con ~$it% de batería ($basis)")
+                }
             }
         }
         if (lines.isEmpty()) {
@@ -1087,7 +1166,7 @@ private fun HabitGlassCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            lines.take(3).forEach { line ->
+            lines.take(4).forEach { line ->
                 Text(
                     text = line,
                     style = MaterialTheme.typography.bodyMedium,

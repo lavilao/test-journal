@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -143,17 +145,21 @@ fun EntryEditScreen(
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
     var selectedMood by remember { mutableStateOf<String?>(null) }
-    var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    // v1.6: multi-photo support — the note's photo gallery is a LIST now.
+    val attachedImages = remember { mutableStateListOf<Uri>() }
+
     val tagsList = remember { mutableStateListOf<String>() }
     var newTagInput by remember { mutableStateOf("") }
     var showDetails by remember { mutableStateOf(false) }
     var showTemplateMenu by remember { mutableStateOf(false) }
 
-    // Multi-page sections
+    // Multi-page sections (v1.6: editable after creation + reorder)
     val pages = remember { mutableStateListOf<JournalPage>() }
     var showAddPageDialog by remember { mutableStateOf(false) }
     var newPageTitle by remember { mutableStateOf("") }
     var newPageBody by remember { mutableStateOf("") }
+    var editingPageIndex by remember { mutableStateOf<Int?>(null) }
 
     // Linked contacts
     val linkedContacts = remember { mutableStateListOf<DeviceContactInfo>() }
@@ -185,11 +191,15 @@ fun EntryEditScreen(
     }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            val permanentUriString = viewModel.repository.persistImageToLocalStorage(uri)
-            attachedImageUri = Uri.parse(permanentUriString)
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                val permanentUriString = viewModel.repository.persistImageToLocalStorage(uri)
+                if (attachedImages.none { it.toString() == permanentUriString }) {
+                    attachedImages.add(Uri.parse(permanentUriString))
+                }
+            }
         }
     }
 
@@ -219,7 +229,16 @@ fun EntryEditScreen(
                 title = item.entry.title
                 body = item.entry.body
                 selectedMood = item.entry.mood
-                item.entry.imageUri?.let { attachedImageUri = Uri.parse(it) }
+                attachedImages.clear()
+                item.entry.imageUri?.let { attachedImages.add(Uri.parse(it)) }
+                item.mediaItems
+                    .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+                    .forEach { media ->
+                        val uri = Uri.parse(media.uri)
+                        if (attachedImages.none { it.toString() == media.uri }) {
+                            attachedImages.add(uri)
+                        }
+                    }
                 tagsList.clear()
                 tagsList.addAll(item.tags.map { it.name })
                 pages.clear()
@@ -249,7 +268,7 @@ fun EntryEditScreen(
             mood = selectedMood,
             location = autoContext.ifBlank { null },
             manualTags = tagsList.toList(),
-            attachedImageUri = attachedImageUri,
+            attachedImages = attachedImages.toList(),
             pages = pages.toList(),
             audioRecords = audioRecords.toList(),
             onComplete = onComplete
@@ -432,29 +451,51 @@ fun EntryEditScreen(
                 }
             }
 
-            // Attached photo
-            if (attachedImageUri != null) {
+            // Attached photos — horizontal gallery, tap a photo to remove it,
+            // the + tile appends more (multi-select picker).
+            if (attachedImages.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    AsyncImage(
-                        model = attachedImageUri,
-                        contentDescription = "Foto adjunta",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                    )
-                    IconButton(
-                        onClick = { attachedImageUri = null },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clip(CircleShape)
-                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))
-                            .size(32.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Quitar foto", tint = androidx.compose.ui.graphics.Color.White)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    attachedImages.forEachIndexed { index, imgUri ->
+                        Box(
+                            modifier = Modifier
+                                .size(width = 120.dp, height = 90.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                        ) {
+                            AsyncImage(
+                                model = imgUri,
+                                contentDescription = "Foto ${index + 1}",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            IconButton(
+                                onClick = { attachedImages.removeAt(index) },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .clip(CircleShape)
+                                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))
+                                    .size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Quitar foto", tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(16.dp))
+                            }
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -659,7 +700,17 @@ fun EntryEditScreen(
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    // v1.6: sections are EDITABLE after
+                                    // creation — tap opens the same dialog
+                                    // pre-filled (before: delete-only).
+                                    editingPageIndex = index
+                                    newPageTitle = page.title
+                                    newPageBody = page.body
+                                }
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -678,8 +729,34 @@ fun EntryEditScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                IconButton(onClick = { pages.removeAt(index) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Eliminar sección", tint = MaterialTheme.colorScheme.error)
+                                Column {
+                                    IconButton(
+                                        onClick = {
+                                            if (index > 0) {
+                                                val moved = pages.removeAt(index)
+                                                pages.add(index - 1, moved)
+                                            }
+                                        },
+                                        enabled = index > 0,
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Subir", tint = if (index > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            if (index < pages.size - 1) {
+                                                val moved = pages.removeAt(index)
+                                                pages.add(index + 1, moved)
+                                            }
+                                        },
+                                        enabled = index < pages.size - 1,
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Bajar", tint = if (index < pages.size - 1) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
+                                    }
+                                    IconButton(onClick = { pages.removeAt(index) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Eliminar sección", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
@@ -691,11 +768,17 @@ fun EntryEditScreen(
         }
     }
 
-    // Add Section dialog
-    if (showAddPageDialog) {
+    // Add / Edit Section dialog (v1.6: same dialog, two modes)
+    if (showAddPageDialog || editingPageIndex != null) {
+        val isEditing = editingPageIndex != null
         AlertDialog(
-            onDismissRequest = { showAddPageDialog = false },
-            title = { Text("Añadir sección") },
+            onDismissRequest = {
+                showAddPageDialog = false
+                editingPageIndex = null
+                newPageTitle = ""
+                newPageBody = ""
+            },
+            title = { Text(if (isEditing) "Editar sección" else "Añadir sección") },
             text = {
                 Column {
                     OutlinedTextField(
@@ -718,26 +801,44 @@ fun EntryEditScreen(
                 Button(
                     onClick = {
                         if (newPageTitle.isNotBlank() || newPageBody.isNotBlank()) {
-                            pages.add(
-                                JournalPage(
-                                    entryId = entryId ?: 0L,
-                                    pageIndex = pages.size,
-                                    title = newPageTitle.trim(),
-                                    body = newPageBody.trim()
+                            if (isEditing) {
+                                val idx = editingPageIndex!!
+                                if (idx in pages.indices) {
+                                    // Preserve the row id so the DAO UPDATES
+                                    // instead of duplicating the page.
+                                    pages[idx] = pages[idx].copy(
+                                        title = newPageTitle.trim(),
+                                        body = newPageBody.trim()
+                                    )
+                                }
+                            } else {
+                                pages.add(
+                                    JournalPage(
+                                        entryId = entryId ?: 0L,
+                                        pageIndex = pages.size,
+                                        title = newPageTitle.trim(),
+                                        body = newPageBody.trim()
+                                    )
                                 )
-                            )
+                            }
                             newPageTitle = ""
                             newPageBody = ""
                             showAddPageDialog = false
+                            editingPageIndex = null
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
                 ) {
-                    Text("Añadir")
+                    Text(if (isEditing) "Guardar cambios" else "Añadir")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddPageDialog = false }) {
+                TextButton(onClick = {
+                    showAddPageDialog = false
+                    editingPageIndex = null
+                    newPageTitle = ""
+                    newPageBody = ""
+                }) {
                     Text("Cancelar")
                 }
             }

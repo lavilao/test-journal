@@ -169,17 +169,19 @@ class JournalRepository(
         manualTags: List<String> = emptyList(),
         attachedImageUri: Uri? = null,
         pages: List<JournalPage> = emptyList(),
-        audioRecords: List<AudioRecordItem> = emptyList()
+        audioRecords: List<AudioRecordItem> = emptyList(),
+        attachedImages: List<Uri> = emptyList()
     ): Long = withContext(Dispatchers.IO) {
         val wordCount = entry.body.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
         val pagesText = pages.joinToString("\n") { "${it.title}\n${it.body}" }
         val currentHash = MindForgerSemanticEngine.computeContentHash(entry.title, "${entry.body}\n$pagesText")
 
-        val savedImageUri = if (attachedImageUri != null) {
-            persistImageToLocalStorage(attachedImageUri)
-        } else {
-            entry.imageUri
-        }
+        // v1.6: photos are a LIST. The legacy single-uri param still works
+        // (first position) so every existing caller keeps behaving.
+        val requestedUris: List<Uri> = (listOfNotNull(attachedImageUri) + attachedImages).distinct()
+        val persistedUris: List<String> = requestedUris.map { persistImageToLocalStorage(it) }
+
+        val savedImageUri = persistedUris.firstOrNull() ?: entry.imageUri
 
         val entryToSave = entry.copy(
             wordCount = wordCount,
@@ -231,30 +233,51 @@ class JournalRepository(
             }
         }
 
-        // Process Attached Image asynchronously
-        attachedImageUri?.let { uri ->
-            semanticScope.launch {
-                if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
-                    val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
-                    val labelsJson = JSONArray(analysis.labels).toString()
-                    dao.insertMediaItem(
-                        MediaItem(
-                            entryId = entryId,
-                            uri = uri.toString(),
-                            labelsJson = labelsJson,
-                            faceCount = analysis.faceCount,
-                            ocrText = analysis.ocrText,
-                            caption = ""
+        // ------------------------------------------------------------------
+        // v1.6 media SYNC: the entry's photo set is exactly the requested
+        // set — no more duplicate rows on every re-save (the old code
+        // INSERTED a new MediaItem for attachedImageUri on each save), and
+        // photos attached later (detail screen / share intake) are no
+        // longer orphaned: they are now part of the synced set.
+        // ------------------------------------------------------------------
+        if (requestedUris.isNotEmpty()) {
+            val existing = dao.getMediaListForEntry(entryId)
+            val existingByUri = existing.associateBy { it.uri }
+            existing.filter { it.uri !in persistedUris }.forEach { dao.deleteMediaById(it.id) }
+            val newUris = mutableListOf<Uri>()
+            persistedUris.forEachIndexed { idx, uriStr ->
+                val row = existingByUri[uriStr]
+                if (row == null) {
+                    newUris.add(Uri.parse(uriStr))
+                } else if (row.sortOrder != idx) {
+                    dao.updateMediaItem(row.copy(sortOrder = idx))
+                }
+            }
+            newUris.forEachIndexed { idx, uri ->
+                semanticScope.launch {
+                    if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
+                        val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
+                        dao.insertMediaItem(
+                            MediaItem(
+                                entryId = entryId,
+                                uri = uri.toString(),
+                                labelsJson = JSONArray(analysis.labels).toString(),
+                                faceCount = analysis.faceCount,
+                                ocrText = analysis.ocrText,
+                                caption = "",
+                                sortOrder = persistedUris.indexOf(uri.toString())
+                            )
                         )
-                    )
-                } else {
-                    dao.insertMediaItem(
-                        MediaItem(
-                            entryId = entryId,
-                            uri = uri.toString(),
-                            caption = ""
+                    } else {
+                        dao.insertMediaItem(
+                            MediaItem(
+                                entryId = entryId,
+                                uri = uri.toString(),
+                                caption = "",
+                                sortOrder = persistedUris.indexOf(uri.toString())
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -292,13 +315,24 @@ class JournalRepository(
     suspend fun addPhotoToEntry(entryId: Long, uri: Uri, caption: String = ""): Long = withContext(Dispatchers.IO) {
         val persistentUriString = persistImageToLocalStorage(uri)
         val persistentUri = Uri.parse(persistentUriString)
+        val sortOrder = dao.getMediaListForEntry(entryId).size
         val mediaId = dao.insertMediaItem(
             MediaItem(
                 entryId = entryId,
                 uri = persistentUriString,
-                caption = caption
+                caption = caption,
+                sortOrder = sortOrder
             )
         )
+        // v1.6: the legacy entry.imageUri (single-photo field still read by
+        // thumbnails/search surfaces) is filled when empty, so photos added
+        // from the detail screen or via share-intake become VISIBLE instead
+        // of living in an unrendered table.
+        dao.getEntryById(entryId)?.let { row ->
+            if (row.imageUri.isNullOrBlank()) {
+                dao.updateEntry(row.copy(imageUri = persistentUriString))
+            }
+        }
         semanticScope.launch {
             // OCR/vision toggle (OcrIndexer): when off, skip the whole
             // vision pass — the user's "puede petar el dispositivo" switch.
@@ -321,6 +355,11 @@ class JournalRepository(
         mediaId
     }
 
+    /** v1.6: one-shot media list (ordered) for the gallery UI. */
+    suspend fun mediaForEntry(entryId: Long): List<MediaItem> = withContext(Dispatchers.IO) {
+        dao.getMediaListForEntry(entryId)
+    }
+
     /** Attaches an already-materialized audio file to an existing entry. */
     suspend fun attachAudioRecord(record: AudioRecordItem): Long = withContext(Dispatchers.IO) {
         val id = dao.insertAudioRecord(record)
@@ -339,6 +378,18 @@ class JournalRepository(
         val media = dao.getMediaById(mediaId)
         dao.deleteMediaById(mediaId)
         media?.let {
+            // v1.6: keep sortOrder dense and entry.imageUri pointing at an
+            // existing photo (or null when the gallery is empty).
+            val remaining = dao.getMediaListForEntry(it.entryId)
+            remaining.forEachIndexed { idx, m ->
+                if (m.sortOrder != idx) dao.updateMediaItem(m.copy(sortOrder = idx))
+            }
+            dao.getEntryById(it.entryId)?.let { row ->
+                val newImageUri = remaining.firstOrNull()?.uri
+                if (newImageUri != row.imageUri) {
+                    dao.updateEntry(row.copy(imageUri = newImageUri))
+                }
+            }
             semanticScope.launch {
                 processSemanticIntelligence(it.entryId)
             }

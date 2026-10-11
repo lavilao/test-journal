@@ -107,6 +107,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
 import com.example.data.model.AutolinkSpan
 import com.example.data.model.EntityType
 import com.example.data.model.JournalPage
@@ -207,6 +208,9 @@ fun EntryDetailScreen(
     // ---- On-device photo surgery (subject segmentation) ----
     var photoProcessing by remember(entryId) { mutableStateOf<String?>(null) }
     var photoResultUri by remember(entryId) { mutableStateOf<android.net.Uri?>(null) }
+    // v1.6: fullscreen photo viewer (gallery tap) — the surgery actions and
+    // the delete action apply to the photo being viewed.
+    var viewerPhotoUri by remember(entryId) { mutableStateOf<String?>(null) }
 
     fun runPhotoOp(sourceUri: String?, op: SubjectSegmentationManager.Op) {
         if (sourceUri.isNullOrBlank()) {
@@ -215,18 +219,64 @@ fun EntryDetailScreen(
         }
         scope.launch {
             photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
-            val out = try {
+            var result = try {
                 SubjectSegmentationManager.process(context, android.net.Uri.parse(sourceUri), op)
-            } catch (_: Exception) {
-                null
+            } catch (e: Exception) {
+                SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+            }
+            // v1.6: if the ML model is missing, ASK Play Services to fetch
+            // it once (visible progress) and retry — instead of failing
+            // forever with a guess-y message.
+            if (result is SubjectSegmentationManager.SegResult.ModelNeeded) {
+                photoProcessing = "descargando el modelo (una sola vez)"
+                val ready = SubjectSegmentationManager.ensureModel(context) { state, pct ->
+                    photoProcessing = if (pct >= 0) "$state $pct%" else state
+                }
+                if (ready) {
+                    photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
+                    result = try {
+                        SubjectSegmentationManager.process(context, android.net.Uri.parse(sourceUri), op)
+                    } catch (e: Exception) {
+                        SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+                    }
+                }
             }
             photoProcessing = null
-            if (out != null) {
-                photoResultUri = android.net.Uri.fromFile(out)
-                viewModel.addPhoto(entryId, photoResultUri!!)
-                Toast.makeText(context, "Foto procesada y adjuntada (IA local).", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "La segmentación falló (¿sin Play Services o modelo no descargado aún?).", Toast.LENGTH_LONG).show()
+            when (result) {
+                is SubjectSegmentationManager.SegResult.Success -> {
+                    photoResultUri = android.net.Uri.fromFile(result.file)
+                    viewModel.addPhoto(entryId, photoResultUri!!)
+                    Toast.makeText(context, "Foto procesada y adjuntada (IA local).", Toast.LENGTH_SHORT).show()
+                }
+                is SubjectSegmentationManager.SegResult.ModelNeeded -> {
+                    // ML unavailable: for background removal there is an
+                    // honest software fallback ("aproximado").
+                    if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) {
+                        Toast.makeText(
+                            context,
+                            "El modelo de IA no está disponible (Play Services antiguo o sin conexión). Uso el recorte rápido por software: calidad aproximada.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        photoProcessing = "recorte rápido (sin IA)"
+                        val fallback = SubjectSegmentationManager.quickCutoutFallback(context, android.net.Uri.parse(sourceUri))
+                        photoProcessing = null
+                        if (fallback != null) {
+                            photoResultUri = android.net.Uri.fromFile(fallback)
+                            viewModel.addPhoto(entryId, photoResultUri!!)
+                        } else {
+                            Toast.makeText(context, "El recorte rápido tampoco pudo procesar la foto.", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Quitar el sujeto necesita el modelo de IA: ${result.reason}. Actualiza Google Play Services y reintenta.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+                is SubjectSegmentationManager.SegResult.Failed -> {
+                    Toast.makeText(context, "La segmentación falló: ${result.reason}.", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -236,7 +286,7 @@ fun EntryDetailScreen(
     ) { uri ->
         if (uri != null) {
             viewModel.addPhoto(entryId, uri)
-            Toast.makeText(context, "Photo attached and scanned with ML Kit OCR!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Foto adjuntada y analizada con IA local.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -264,7 +314,7 @@ fun EntryDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Memory Details", style = MaterialTheme.typography.titleMedium) },
+                title = { Text("Detalle de la memoria", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("detail_back_button")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -439,7 +489,7 @@ fun EntryDetailScreen(
                 ) {
                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Attach Photo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                    Text("Adjuntar foto", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
                 }
 
                 // Add Section
@@ -451,32 +501,92 @@ fun EntryDetailScreen(
                 ) {
                     Icon(Icons.Default.NoteAdd, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add Section", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                    Text("Añadir sección", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
                 }
             }
 
-            // Optional Image Attachment & ML Kit Vision Metadata
-            if (!entry.imageUri.isNullOrBlank()) {
+            // v1.6 — Photo GALLERY: every attached photo is VISIBLE here.
+            // (Before, only the legacy single entry.imageUri was rendered —
+            // photos added via "Adjuntar foto" or the share-intake lived in
+            // an unrendered table and the note looked empty.)
+            val galleryMedia = itemWithRelations?.mediaItems.orEmpty()
+                .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            val galleryPhotos: List<String> = (
+                galleryMedia.map { it.uri } +
+                    (if (galleryMedia.isEmpty() && !entry.imageUri.isNullOrBlank()) listOf(entry.imageUri!! ) else emptyList())
+                ).distinct()
+            val media = galleryMedia.firstOrNull()
+
+            if (galleryPhotos.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
-                AsyncImage(
-                    model = entry.imageUri,
-                    contentDescription = "Attached photo",
-                    contentScale = ContentScale.Crop,
+                if (galleryPhotos.size > 1) {
+                    Text(
+                        text = "Fotos (${galleryPhotos.size})",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    galleryPhotos.forEachIndexed { index, uri ->
+                        Box(
+                            modifier = Modifier
+                                .size(width = 128.dp, height = 96.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { viewerPhotoUri = uri }
+                        ) {
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = "Foto ${index + 1}",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    // Add-more tile
+                    Box(
+                        modifier = Modifier
+                            .size(width = 128.dp, height = 96.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .clickable {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Añadir foto", tint = ForestPrimary, modifier = Modifier.size(22.dp))
+                            Text("Añadir", style = MaterialTheme.typography.labelSmall, color = ForestPrimary)
+                        }
+                    }
+                }
 
-                val media = itemWithRelations?.mediaItems?.firstOrNull()
                 Spacer(modifier = Modifier.height(8.dp))
-                // ---- On-device photo surgery: quitar fondo / quitar sujeto ----
+                // ---- On-device photo surgery on the first photo ----
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        onClick = { runPhotoOp(entry.imageUri, SubjectSegmentationManager.Op.REMOVE_BACKGROUND) },
+                        onClick = { runPhotoOp(galleryPhotos.first(), SubjectSegmentationManager.Op.REMOVE_BACKGROUND) },
                         enabled = photoProcessing == null,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.weight(1f).testTag("photo_remove_bg_btn")
@@ -484,12 +594,17 @@ fun EntryDetailScreen(
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            if (photoProcessing == "quitando el fondo") "Procesando…" else "Quitar fondo",
+                            when {
+                                photoProcessing?.startsWith("quitando el fondo") == true -> "Procesando…"
+                                photoProcessing?.startsWith("descargando") == true || photoProcessing?.startsWith("instalando") == true -> "Modelo…"
+                                photoProcessing?.startsWith("recorte") == true -> "Recortando…"
+                                else -> "Quitar fondo"
+                            },
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
                     OutlinedButton(
-                        onClick = { runPhotoOp(entry.imageUri, SubjectSegmentationManager.Op.REMOVE_SUBJECT) },
+                        onClick = { runPhotoOp(galleryPhotos.first(), SubjectSegmentationManager.Op.REMOVE_SUBJECT) },
                         enabled = photoProcessing == null,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.weight(1f).testTag("photo_remove_subject_btn")
@@ -497,10 +612,22 @@ fun EntryDetailScreen(
                         Icon(Icons.Default.Delete, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            if (photoProcessing == "quitando el sujeto") "Procesando…" else "Quitar sujeto",
+                            when {
+                                photoProcessing?.startsWith("quitando el sujeto") == true -> "Procesando…"
+                                photoProcessing?.startsWith("descargando") == true || photoProcessing?.startsWith("instalando") == true -> "Modelo…"
+                                else -> "Quitar sujeto"
+                            },
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
+                }
+                if (photoProcessing != null && (photoProcessing?.startsWith("descargando") == true || photoProcessing?.startsWith("preparando") == true)) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "El modelo de segmentación se descarga una única vez vía Play Services: $photoProcessing.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 if (photoResultUri != null) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -514,6 +641,7 @@ fun EntryDetailScreen(
                             .clip(RoundedCornerShape(12.dp))
                     )
                 }
+            }
                 if (media != null && (media.labelsJson.isNotBlank() || media.faceCount > 0 || media.ocrText.isNotBlank())) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
@@ -526,7 +654,7 @@ fun EntryDetailScreen(
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "On-Device ML Vision Intelligence",
+                                    text = "Inteligencia de visión local (ML Kit)",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -542,7 +670,7 @@ fun EntryDetailScreen(
                                         Icon(Icons.Default.Face, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = "${media.faceCount} face${if (media.faceCount > 1) "s" else ""} detected",
+                                            text = "${media.faceCount} rostro${if (media.faceCount > 1) "s" else ""} detectado${if (media.faceCount > 1) "s" else ""}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -554,14 +682,14 @@ fun EntryDetailScreen(
                                     ) {
                                         Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(12.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Identify Person", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                        Text("Identificar persona", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
                                     }
                                 }
                             }
                             if (media.labelsJson.isNotBlank() && media.labelsJson != "[]") {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Detected objects: ${media.labelsJson.replace("[\"", "").replace("\"]", "").replace("\",\"", ", ")}",
+                                    text = "Objetos detectados: ${media.labelsJson.replace("[\"", "").replace("\"]", "").replace("\",\"", ", ")}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -572,7 +700,7 @@ fun EntryDetailScreen(
                                     Icon(Icons.Default.TextFields, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(13.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "OCR text: ${media.ocrText.take(120)}${if (media.ocrText.length > 120) "..." else ""}",
+                                        text = "Texto OCR: ${media.ocrText.take(120)}${if (media.ocrText.length > 120) "..." else ""}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -581,7 +709,6 @@ fun EntryDetailScreen(
                         }
                     }
                 }
-            }
 
             Spacer(modifier = Modifier.height(18.dp))
 
@@ -614,7 +741,7 @@ fun EntryDetailScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Sections & Sub-Pages (${pages.size})",
+                    text = "Secciones y sub-páginas (${pages.size})",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -625,7 +752,7 @@ fun EntryDetailScreen(
                 ) {
                     Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Section", style = MaterialTheme.typography.labelSmall)
+                    Text("Añadir sección", style = MaterialTheme.typography.labelSmall)
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -636,7 +763,7 @@ fun EntryDetailScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Organize this memory into sub-pages or chapters (e.g. Day 1, Quotes, Decisions). Tap 'Add Section' above.",
+                        text = "Organiza esta memoria en sub-páginas o capítulos (p. ej. Día 1, Citas, Decisiones). Toca «Añadir sección» arriba.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)
@@ -650,7 +777,7 @@ fun EntryDetailScreen(
                                 Icon(Icons.Default.Description, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = p.title.ifBlank { "Section ${idx + 1}" },
+                                    text = p.title.ifBlank { "Sección ${idx + 1}" },
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
@@ -1211,7 +1338,7 @@ fun EntryDetailScreen(
 
         AlertDialog(
             onDismissRequest = { faceToLinkIndex = null },
-            title = { Text("Link Face to Person") },
+            title = { Text("Vincular rostro con persona") },
             text = {
                 Column {
                     Text("Select a known person entity to associate with this face:", style = MaterialTheme.typography.bodySmall)
@@ -1242,11 +1369,102 @@ fun EntryDetailScreen(
         )
     }
 
+    // v1.6 — Fullscreen photo viewer: the gallery thumbnails open this.
+    // The viewed photo can be deleted or sent to the on-device surgery
+    // (quitar fondo / quitar sujeto) directly from here.
+    viewerPhotoUri?.let { photoUri ->
+        val mediaRow = itemWithRelations?.mediaItems
+            ?.sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            ?.firstOrNull { it.uri == photoUri }
+        Dialog(onDismissRequest = { viewerPhotoUri = null }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.92f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(420.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { viewerPhotoUri = null }
+                    ) {
+                        AsyncImage(
+                            model = photoUri,
+                            contentDescription = "Foto ampliada",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    if (photoProcessing != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = photoProcessing ?: "",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                runPhotoOp(photoUri, SubjectSegmentationManager.Op.REMOVE_BACKGROUND)
+                            },
+                            enabled = photoProcessing == null,
+                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                contentColor = androidx.compose.ui.graphics.Color.White
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Quitar fondo", style = MaterialTheme.typography.labelSmall)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                runPhotoOp(photoUri, SubjectSegmentationManager.Op.REMOVE_SUBJECT)
+                            },
+                            enabled = photoProcessing == null,
+                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                contentColor = androidx.compose.ui.graphics.Color.White
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Quitar sujeto", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (mediaRow != null) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.deletePhoto(mediaRow.id, entryId)
+                                    viewerPhotoUri = null
+                                    Toast.makeText(context, "Foto eliminada de la nota.", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                modifier = Modifier.weight(0.7f)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Eliminar foto", modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Delete Confirmation Dialog
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Memory?") },
+            title = { Text("¿Eliminar esta memoria?") },
             text = { Text("This will permanently delete this journal entry and remove all its associations from the knowledge graph.") },
             confirmButton = {
                 TextButton(
@@ -1394,7 +1612,7 @@ fun EntryDetailScreen(
     if (showAddSectionDialog) {
         AlertDialog(
             onDismissRequest = { showAddSectionDialog = false },
-            title = { Text("Add Section / Page") },
+            title = { Text("Añadir sección / página") },
             text = {
                 Column {
                     androidx.compose.material3.OutlinedTextField(

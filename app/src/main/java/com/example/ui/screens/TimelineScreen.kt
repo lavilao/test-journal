@@ -108,7 +108,8 @@ fun TimelineScreen(
     onNavigateToDetail: (Long) -> Unit,
     onNavigateToEntity: (Long) -> Unit = {},
     onOpenLens: () -> Unit = {},
-    onOpenAssistant: () -> Unit = {}
+    onOpenAssistant: () -> Unit = {},
+    onOpenNews: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -655,6 +656,20 @@ fun TimelineScreen(
                                     contentDescription = "Actualizar",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Full news browser with source filters — the
+                            // same screen the Samsung digest opens (parity).
+                            if (selectedFeedView == HomeFeedView.NOTICIAS) {
+                                Text(
+                                    text = "Ver todas ›",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = GoogleBlue,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable(onClick = onOpenNews)
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
                                 )
                             }
                         }

@@ -113,7 +113,11 @@ object ShareIntakeManager {
         val repo = JournalRepository(context)
         val title = if (uris.size == 1) "Foto compartida" else "Fotos compartidas (${uris.size})"
         return try {
-            val entryId = repo.saveEntry(
+            // v1.6: photos go through saveEntry(attachedImages=...) — the
+            // entry's imageUri is set AND the media rows sync, so the photos
+            // are actually VISIBLE in the note (before, they were written to
+            // an unrendered table and the note looked empty).
+            repo.saveEntry(
                 JournalEntry(
                     title = title,
                     body = "Compartido desde otra app el ${java.text.SimpleDateFormat(
@@ -121,19 +125,33 @@ object ShareIntakeManager {
                     ).format(java.util.Date())}.",
                     journalDate = System.currentTimeMillis()
                 ),
-                manualTags = listOf("compartido", "foto")
+                manualTags = listOf("compartido", "foto"),
+                attachedImages = uris
             )
-            var ok = 0
-            uris.forEach { uri ->
-                try {
-                    repo.addPhotoToEntry(entryId, uri)
-                    ok++
-                } catch (_: Exception) {
-                }
-            }
-            if (ok > 0) "$ok foto(s) guardadas en tu diario." else "No pude leer las fotos compartidas."
+            "Fotos guardadas en tu diario (galería de la nota)."
         } catch (e: Exception) {
-            "No pude guardar las fotos: ${e.message}"
+            // Fallback: at least persist what we can row by row.
+            try {
+                val entryId = repo.saveEntry(
+                    JournalEntry(
+                        title = title,
+                        body = "Compartido desde otra app.",
+                        journalDate = System.currentTimeMillis()
+                    ),
+                    manualTags = listOf("compartido", "foto")
+                )
+                var ok = 0
+                uris.forEach { uri ->
+                    try {
+                        repo.addPhotoToEntry(entryId, uri)
+                        ok++
+                    } catch (_: Exception) {
+                    }
+                }
+                if (ok > 0) "$ok foto(s) guardadas en tu diario." else "No pude leer las fotos compartidas."
+            } catch (e2: Exception) {
+                "No pude guardar las fotos: ${e2.message}"
+            }
         }
     }
 

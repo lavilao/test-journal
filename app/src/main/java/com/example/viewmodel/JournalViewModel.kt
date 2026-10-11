@@ -639,6 +639,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         location: String? = null,
         manualTags: List<String> = emptyList(),
         attachedImageUri: Uri? = null,
+        attachedImages: List<Uri> = emptyList(),
         pages: List<JournalPage> = emptyList(),
         audioRecords: List<AudioRecordItem> = emptyList(),
         onComplete: (Long) -> Unit = {}
@@ -652,7 +653,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 mood = mood,
                 location = location?.trim()?.ifBlank { null }
             )
-            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages, audioRecords)
+            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages, audioRecords, attachedImages)
             refreshGraph()
             refreshOnThisDay()
             onComplete(savedId)

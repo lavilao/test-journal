@@ -195,6 +195,10 @@ interface JournalDao {
     @Query("SELECT * FROM media_items WHERE entryId = :entryId")
     fun getMediaForEntry(entryId: Long): Flow<List<MediaItem>>
 
+    /** One-shot variant used by the media-sync in saveEntry / the gallery. */
+    @Query("SELECT * FROM media_items WHERE entryId = :entryId ORDER BY sortOrder ASC, id ASC")
+    suspend fun getMediaListForEntry(entryId: Long): List<MediaItem>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMediaItem(item: MediaItem): Long
 
