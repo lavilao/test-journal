@@ -3,6 +3,8 @@ package com.example.rss
 import android.content.Context
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,9 +79,9 @@ class RssFeedManager(private val context: Context) {
         try {
             // Feeds are fetched in parallel (bounded by OkHttp's own pool):
             // 15 sources no longer take 15 × timeouts sequentially.
-            val fetched = kotlinx.coroutines.coroutineScope {
+            val fetched = coroutineScope {
                 _sources.value.map { source ->
-                    kotlinx.coroutines.async(Dispatchers.IO) {
+                    async(Dispatchers.IO) {
                         fetchSource(source)
                     }
                 }.map { it.await() }.flatten()

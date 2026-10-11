@@ -72,6 +72,11 @@ object SubjectSegmentationManager {
      * Asks Play Services to fetch the subject-segmentation module.
      * Returns true when the module is available afterwards.
      * [onProgress] receives a short state label and 0..100 percent.
+     *
+     * API verified against the RESOLVED play-services-base 18.1.0 AAR:
+     * ModuleInstallRequest.Builder exposes addApi + setListener (NOT
+     * addOnProgressListener, which only exists in later versions), and
+     * installModules returns a Task with no public cancel().
      */
     suspend fun ensureModel(
         context: Context,
@@ -83,7 +88,7 @@ object SubjectSegmentationManager {
         )
         val request = ModuleInstallRequest.newBuilder()
             .addApi(segmenter)
-            .addOnProgressListener(object : InstallStatusListener {
+            .setListener(object : InstallStatusListener {
                 override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
                     val info = update.progressInfo
                     val pct = if (info != null && info.totalBytesToDownload > 0) {
@@ -110,8 +115,7 @@ object SubjectSegmentationManager {
             suspendCancellableCoroutine<Boolean> { cont ->
                 task
                     .addOnSuccessListener { cont.resume(true) }
-                    .addOnFailureListener { e -> cont.resume(false) }
-                cont.invokeOnCancellation { try { task.cancel() } catch (_: Exception) {} }
+                    .addOnFailureListener { cont.resume(false) }
             }
         } ?: false
     } catch (_: Exception) {
@@ -127,15 +131,20 @@ object SubjectSegmentationManager {
         withContext(Dispatchers.IO) {
             val input = loadScaled(context, sourceUri)
                 ?: return@withContext SegResult.Failed("no pude leer la imagen")
-            val foreground = try {
-                segmentForeground(input)
+
+            val foreground: Bitmap?
+            try {
+                foreground = segmentForeground(input)
             } catch (e: Exception) {
                 return@withContext if (isModelMissing(e)) {
                     SegResult.ModelNeeded(e.message ?: "el modelo de segmentación no está instalado")
                 } else {
                     SegResult.Failed(e.message ?: "la segmentación falló")
                 }
-            } ?: return@withContext SegResult.Failed("la segmentación no devolvió resultado (¿modelo ausente?)")
+            }
+            if (foreground == null) {
+                return@withContext SegResult.Failed("la segmentación no devolvió resultado (¿modelo ausente?)")
+            }
 
             // Guard against size mismatch between input and mask.
             val mask = if (foreground.width == input.width && foreground.height == input.height) {
