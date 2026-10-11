@@ -232,7 +232,7 @@ object SubjectSegmentationManager {
         val result = Tasks.await(task, 60, TimeUnit.SECONDS)
         val fg = result?.foregroundBitmap
         segmenter.close()
-        fg
+        return fg
     }
 
     // ------------------------------------------------------------------
