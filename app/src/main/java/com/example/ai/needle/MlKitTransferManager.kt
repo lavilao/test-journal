@@ -152,7 +152,7 @@ object MlKitTransferManager {
                     }
                 } ?: return@withContext TransferResult(false, "No pude abrir el destino")
                 TransferResult(true, "Exportados $written archivos de modelos ML Kit " +
-                        "(${formatBytes(files.sumOf { it.sizeBytes }})).")
+                        "(${formatBytes(files.sumOf { it.sizeBytes })}).")
             } catch (t: Throwable) {
                 TransferResult(false, t.message ?: t.javaClass.simpleName)
             }
