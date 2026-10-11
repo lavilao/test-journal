@@ -22,21 +22,35 @@ import kotlin.coroutines.resumeWithException
  * they are the big ones, ~30 MB per language, and the user asked to carry
  * them between installs instead of re-downloading).
  *
- * HOW IT WORKS, HONESTLY: ML Kit stores downloaded models inside the app's
- * private storage (files dir). We scan that storage for model-looking files
- * (translate/vision/digital-ink folders, .tflite/.task blobs), zip them
- * with a manifest, and restore them in place. Models that Google keeps in
- * its own protected storage (some GMS-side caches) are simply not in the
- * app's dir and can't be exported — the UI reports exactly what was found.
+ * v1.5.2 FIX — "imported fine but the app still demands internet downloads":
+ * the old import dumped EVERY restored file into [Context.filesDir] even when
+ * it had been exported from [Context.noBackupFilesDir] — which is where ML Kit
+ * actually keeps its models on many devices. Files landed in the WRONG root,
+ * so ML Kit never saw them and kept asking to re-download. Now:
+ *  - every exported file records its origin root in the zip manifest
+ *    (type "mnemosyne_mlkit_v2");
+ *  - new zips restore each file to its ORIGINAL root;
+ *  - OLD zips (no root info — like the backup made with v1.5.0/1.5.1) are
+ *    restored into BOTH roots, so ML Kit finds its files wherever it looks;
+ *  - after restoring, the languages ML Kit recognizes are re-checked and
+ *    reported honestly in the result message.
+ *
+ * Models Google keeps in its own protected storage (GMS-side caches) are
+ * simply not in the app's dirs and can't be exported — the UI reports
+ * exactly what was found.
  */
 object MlKitTransferManager {
 
     data class TransferResult(val ok: Boolean, val message: String)
 
-    data class ModelFile(val relPath: String, val sizeBytes: Long)
+    /** relPath + size + origin root ("files" | "nobackup"). */
+    data class ModelFile(val relPath: String, val sizeBytes: Long, val root: String)
 
     /** Marker written into the zip so an import can identify our exports. */
     private const val MANIFEST_ENTRY = "manifest.json"
+
+    private const val ROOT_FILES = "files"
+    private const val ROOT_NOBACKUP = "nobackup"
 
     private val SUSPICIOUS_DIR_TOKENS = listOf(
         "mlkit", "translate", "vision", "digitalink", "digital_ink",
@@ -58,11 +72,12 @@ object MlKitTransferManager {
      */
     fun discover(context: Context): List<ModelFile> {
         val out = mutableListOf<ModelFile>()
-        val roots = listOfNotNull(
-            context.filesDir,
-            context.noBackupFilesDir
+        val roots = listOf(
+            context.filesDir to ROOT_FILES,
+            context.noBackupFilesDir to ROOT_NOBACKUP
         )
-        for (root in roots) {
+        for ((root, rootTag) in roots) {
+            if (!root.exists()) continue
             root.walkTopDown()
                 .filter { it.isFile }
                 .forEach { f ->
@@ -72,11 +87,14 @@ object MlKitTransferManager {
                     if (lower.startsWith("needle/") || lower.startsWith("voice_notes/")) return@forEach
                     if (lower.endsWith(".tmp") || lower.endsWith(".tmp-")) return@forEach
                     if (f.length() <= 0L || f.length() > MAX_FILE_BYTES) return@forEach
-                    val inModelDir = lower.split('/').dropLast(1)
+                    val segments = lower.split('/')
+                    val inModelDir = segments.dropLast(1)
                         .any { dir -> SUSPICIOUS_DIR_TOKENS.any { dir.contains(it) } }
+                    val fileName = segments.lastOrNull() ?: ""
+                    val fileNameLooksModelish = SUSPICIOUS_DIR_TOKENS.any { fileName.contains(it) }
                     val modelExt = MODEL_EXTENSIONS.any { lower.endsWith(it) }
-                    if (inModelDir || modelExt) {
-                        out.add(ModelFile(rel, f.length()))
+                    if (inModelDir || modelExt || fileNameLooksModelish) {
+                        out.add(ModelFile(rel, f.length(), rootTag))
                     }
                 }
         }
@@ -108,21 +126,24 @@ object MlKitTransferManager {
                                 "(quizá Google los guarda fuera del alcance de la app en este dispositivo)."
                     )
                 }
-                val filesRoot = app.filesDir
-                val noBackupRoot = app.noBackupFilesDir
                 var written = 0
                 app.contentResolver.openOutputStream(dest, "w")?.use { raw ->
                     ZipOutputStream(raw.buffered()).use { zip ->
+                        // Per-file origin root — THE fix: an import must put
+                        // each file back where ML Kit expects to find it.
+                        val rootsJson = JSONObject()
+                        for (mf in files) rootsJson.put(mf.relPath, mf.root)
                         val manifest = JSONObject()
-                            .put("type", "mnemosyne_mlkit_v1")
+                            .put("type", "mnemosyne_mlkit_v2")
                             .put("device", Build.MODEL)
                             .put("exported_at", System.currentTimeMillis())
                             .put("files", files.size)
+                            .put("roots", rootsJson)
                         zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
                         zip.write(manifest.toString().toByteArray(Charsets.UTF_8))
                         zip.closeEntry()
                         for (mf in files) {
-                            val source = resolve(app, mf.relPath, filesRoot, noBackupRoot) ?: continue
+                            val source = sourceFor(app, mf) ?: continue
                             zip.putNextEntry(ZipEntry("files/${mf.relPath}"))
                             source.inputStream().use { it.copyTo(zip, 64 * 1024) }
                             zip.closeEntry()
@@ -131,7 +152,7 @@ object MlKitTransferManager {
                     }
                 } ?: return@withContext TransferResult(false, "No pude abrir el destino")
                 TransferResult(true, "Exportados $written archivos de modelos ML Kit " +
-                        "(${formatBytes(files.sumOf { it.sizeBytes })}).")
+                        "(${formatBytes(files.sumOf { it.sizeBytes }})).")
             } catch (t: Throwable) {
                 TransferResult(false, t.message ?: t.javaClass.simpleName)
             }
@@ -144,23 +165,57 @@ object MlKitTransferManager {
                 val filesRoot = app.filesDir
                 val noBackupRoot = app.noBackupFilesDir
                 var restored = 0
+                var dual = 0
                 var skipped = 0
+                val rootMap = mutableMapOf<String, String>()
                 app.contentResolver.openInputStream(src)?.use { raw ->
                     ZipInputStream(raw.buffered()).use { zip ->
                         var entry: ZipEntry? = zip.nextEntry
                         while (entry != null) {
                             val name = entry.name
                             try {
-                                if (!entry.isDirectory && name.startsWith("files/") && name != MANIFEST_ENTRY) {
+                                if (!entry.isDirectory && name == MANIFEST_ENTRY) {
+                                    // Our exports always write the manifest
+                                    // FIRST, so it is parsed before any file.
+                                    val text = zip.readBytes().toString(Charsets.UTF_8)
+                                    runCatching {
+                                        val roots = JSONObject(text).optJSONObject("roots")
+                                        if (roots != null) {
+                                            val it2 = roots.keys()
+                                            while (it2.hasNext()) {
+                                                val key = it2.next() as String
+                                                rootMap[key] = roots.optString(key, ROOT_FILES)
+                                            }
+                                        }
+                                    }
+                                } else if (!entry.isDirectory && name.startsWith("files/")) {
                                     val rel = name.removePrefix("files/")
                                     // Path traversal guard: only plain relative paths.
                                     if (rel.contains("..") || rel.startsWith("/") || rel.isBlank()) {
                                         skipped++
                                     } else {
-                                        val target = File(filesRoot, rel)
-                                        target.parentFile?.mkdirs()
-                                        target.outputStream().use { zip.copyTo(it, 64 * 1024) }
-                                        restored++
+                                        when (rootMap[rel]) {
+                                            ROOT_NOBACKUP -> {
+                                                if (restoreTo(noBackupRoot, rel, zip)) restored++
+                                                else skipped++
+                                            }
+                                            ROOT_FILES -> {
+                                                if (restoreTo(filesRoot, rel, zip)) restored++
+                                                else skipped++
+                                            }
+                                            else -> {
+                                                // OLD-FORMAT zip (v1.5.0/1.5.1 export, no root
+                                                // info): restore into BOTH roots so ML Kit finds
+                                                // the files whichever dir it reads from.
+                                                var ok = false
+                                                if (restoreTo(filesRoot, rel, zip)) ok = true
+                                                if (restoreTo(noBackupRoot, rel, zip)) ok = true
+                                                if (ok) {
+                                                    restored++
+                                                    dual++
+                                                } else skipped++
+                                            }
+                                        }
                                     }
                                 } else if (!entry.isDirectory) {
                                     skipped++
@@ -177,10 +232,18 @@ object MlKitTransferManager {
                 if (restored == 0) {
                     TransferResult(false, "El zip no contenía modelos restaurables ($skipped ignorados).")
                 } else {
+                    // Honest verification: what does ML Kit actually recognize now?
+                    val recognized = try { installedTranslateLanguages() } catch (_: Exception) { emptyList() }
+                    val langsText = if (recognized.isEmpty()) {
+                        "ningún idioma aún (reinicia la app y vuelve a entrar para re-comprobar)"
+                    } else {
+                        recognized.joinToString(", ")
+                    }
                     TransferResult(
                         true,
-                        "Restaurados $restored archivos de modelos ML Kit. Reinicia la app " +
-                                "para que ML Kit los vuelva a leer."
+                        "Restaurados $restored archivos de modelos ML Kit" +
+                                (if (dual > 0) " ($dual en ambas raíces — zip antiguo)" else "") +
+                                ". Idiomas reconocidos: $langsText."
                     )
                 }
             } catch (t: Throwable) {
@@ -192,17 +255,26 @@ object MlKitTransferManager {
     // Helpers
     // ------------------------------------------------------------------
 
-    private fun resolve(
-        context: Context,
-        relPath: String,
-        filesRoot: File,
-        noBackupRoot: File
-    ): File? {
-        val inFiles = File(filesRoot, relPath)
-        if (inFiles.exists()) return inFiles
-        val inNoBackup = File(noBackupRoot, relPath)
-        if (inNoBackup.exists()) return inNoBackup
-        return null
+    /** Streams the current zip entry into root/relPath. */
+    private fun restoreTo(root: File, rel: String, zip: ZipInputStream): Boolean = try {
+        val target = File(root, rel)
+        target.parentFile?.mkdirs()
+        target.outputStream().use { zip.copyTo(it, 64 * 1024) }
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    /** Where a discovered file lives, preferring its recorded root. */
+    private fun sourceFor(context: Context, mf: ModelFile): File? {
+        val primary = if (mf.root == ROOT_NOBACKUP) {
+            File(context.noBackupFilesDir, mf.relPath)
+        } else {
+            File(context.filesDir, mf.relPath)
+        }
+        if (primary.exists()) return primary
+        File(context.filesDir, mf.relPath).takeIf { it.exists() }?.let { return it }
+        return File(context.noBackupFilesDir, mf.relPath).takeIf { it.exists() }
     }
 
     fun formatBytes(bytes: Long): String =

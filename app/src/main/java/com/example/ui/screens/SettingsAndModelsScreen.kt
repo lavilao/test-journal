@@ -562,9 +562,11 @@ fun SettingsAndModelsScreen(
                 Text(
                     text = "Exporta los modelos descargados (traducción incluida) a un zip y " +
                             "reimpórtalos cuando quieras — otro teléfono o una reinstalación sin " +
-                            "volver a bajar ~30 MB por idioma. Lo que Google guarde fuera del " +
-                            "almacenamiento de la app no aparece aquí: se muestra exactamente " +
-                            "lo encontrado.",
+                            "volver a bajar ~30 MB por idioma. Desde v1.5.2 la importación restaura " +
+                            "cada archivo en su ubicación original (files/no_backup) para que ML Kit " +
+                            "los reconozca de verdad; los zips antiguos se restauran en ambas " +
+                            "ubicaciones. Lo que Google guarde fuera del almacenamiento de la app " +
+                            "no aparece aquí: se muestra exactamente lo encontrado.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -613,6 +615,13 @@ fun SettingsAndModelsScreen(
                             val result = com.example.ai.needle.MlKitTransferManager.importAll(context, uri)
                             Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
                             mlkitBackupFiles.value = com.example.ai.needle.MlKitTransferManager.discover(context)
+                            // v1.5.2: re-check the REAL ML Kit state right after the
+                            // import so the language list stops demanding internet
+                            // downloads for models that are already back on disk.
+                            isEntityModelDownloaded = MlKitAnalyzer.isEntityModelDownloaded()
+                            MlKitAnalyzer.POPULAR_LANGUAGES.forEach { lang ->
+                                downloadedModels[lang.code] = MlKitAnalyzer.isModelDownloaded(lang.code)
+                            }
                         }
                     }
                 }

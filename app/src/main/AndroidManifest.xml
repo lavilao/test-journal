@@ -92,14 +92,11 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Eligibility path #2 for the assistant selector: apps that
-                 handle ACTION_ASSIST also appear under Ajustes → Apps → Apps
-                 predeterminadas → App de asistencia (Android 8-11), even on
-                 ROMs that are slow to list VoiceInteractionServices. -->
-            <intent-filter>
-                <action android:name="android.intent.action.ASSIST" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            <!-- v1.5.2: the ACTION_ASSIST intent-filter was REMOVED for good —
+                 the user decided Mnemosyne will never integrate with the
+                 Android system assistant after the v1.5.0 reboot-loop
+                 incident. The in-app assistant (Needle + Whistle) is the only
+                 assistant surface this app exposes. -->
             <!-- RECEIVE shares from any app: links, text, photos, audio, PDFs. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -135,15 +132,16 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- ⚠️ POSTMORTEM v1.5.1: the VoiceInteractionService + session service
-             declarations were REMOVED after they caused a system reboot loop
-             (v1.5.0): the moment the user granted the ASSISTANT role, Android
+        <!-- ⚠️ POSTMORTEM v1.5.1/v1.5.2: the VoiceInteractionService + session
+             service declarations were REMOVED after they caused a system reboot
+             loop (v1.5.0): the moment the user granted the ASSISTANT role, Android
              bound our VIS and the system process died at every boot afterwards
-             (re-bind on boot → crash → reboot → loop). Assistant eligibility
-             is provided SAFELY by MainActivity's ACTION_ASSIST intent-filter:
-             the system simply launches the activity on the assistant gesture,
-             with zero system-side binding. DO NOT re-add BIND_VOICE_INTERACTION
-             services without an on-device logcat-verified repro first. -->
+             (re-bind on boot → crash → reboot → loop). In v1.5.2 the user decided
+             Mnemosyne will NEVER integrate with the system assistant, so the
+             ACTION_ASSIST intent-filter was removed too — the in-app assistant
+             (Needle + Whistle) is the only assistant surface. DO NOT re-add
+             BIND_VOICE_INTERACTION services or ASSIST filters without an
+             on-device logcat-verified repro first. -->
 
         <!-- Google At a Glance Android Home Screen Widget -->
         <receiver

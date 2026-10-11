@@ -93,15 +93,9 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_TAB = "open_tab"
         const val TAB_NOTIFICATIONS = "notifications"
 
-        /** The system-assistant gesture opens the local assistant screen. */
-        const val EXTRA_OPEN_ASSISTANT = "open_assistant"
-
         /** Voice commands that must open the assistant screen (from the
-         *  hotword notification or the system-assistant session). */
+         *  hotword notification). */
         val voiceCommandRequests = MutableStateFlow<String?>(null)
-
-        /** Assistant-gesture opens (from the VoiceInteractionSession). */
-        val openAssistantRequests = MutableStateFlow(false)
 
         /** Tab deep-links coming from notifications / the widget. */
         val openTabRequests = MutableStateFlow<String?>(null)
@@ -120,22 +114,20 @@ class MainActivity : ComponentActivity() {
         if (!command.isNullOrBlank()) {
             voiceCommandRequests.value = command
         }
-        if (intent?.getBooleanExtra(EXTRA_OPEN_ASSISTANT, false) == true) {
-            openAssistantRequests.value = true
-        }
         intent?.getStringExtra(EXTRA_OPEN_TAB)?.let { tab ->
             openTabRequests.value = tab
         }
     }
 
     /**
-     * Routes system intents: the ASSIST gesture opens the local assistant;
-     * shares (text / links / photos / audio / PDF) land in the journal.
+     * Routes system intents: shares (text / links / photos / audio / PDF)
+     * land in the journal. NOTE: the system-assistant integration was
+     * removed ENTIRELY in v1.5.2 (post-reboot-loop decision) — this app
+     * no longer responds to the ASSIST gesture in any way.
      */
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
         when (intent.action) {
-            Intent.ACTION_ASSIST -> openAssistantRequests.value = true
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
                 if (shareRequests.value == null) shareRequests.value = intent
             }
@@ -189,15 +181,6 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         if (!command.isNullOrBlank()) {
             screenState = AppScreen.Assistant
             MainActivity.voiceCommandRequests.value = null
-        }
-    }
-
-    // The bare assistant gesture (no utterance) just opens the assistant.
-    val openAssistantRequest by MainActivity.openAssistantRequests.collectAsState()
-    LaunchedEffect(openAssistantRequest) {
-        if (openAssistantRequest) {
-            screenState = AppScreen.Assistant
-            MainActivity.openAssistantRequests.value = false
         }
     }
 

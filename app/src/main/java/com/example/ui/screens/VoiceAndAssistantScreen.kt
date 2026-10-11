@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.app.role.RoleManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -65,7 +64,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -85,8 +83,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.speech.OfflineSpeechSupport
@@ -106,8 +102,9 @@ import java.util.Locale
 /**
  * "Voz y asistente" settings: recognition engine picker (fixes the
  * Gboard/Samsung voice confusion), offline model manager (with in-app
- * download on Android 13+), software hotword, our own Voice Match and the
- * system-assistant role. Everything here is honest about platform limits.
+ * download on Android 13+), software hotword and our own Voice Match.
+ * The system-assistant integration was removed for good in v1.5.2.
+ * Everything here is honest about platform limits.
  */
 @Composable
 fun VoiceAndAssistantScreen(
@@ -162,9 +159,6 @@ fun VoiceAndAssistantScreen(
     var testVerdict by remember { mutableStateOf<Boolean?>(null) }
     // Which recording mode is active (set before starting the countdown).
     var enrollMode by remember { mutableStateOf("enroll") }
-
-    // ---- assistant role state ----
-    var roleHeld by remember { mutableStateOf(isAssistantRoleHeld(context)) }
 
     // ---- local AI (Cactus Needle 3) state ----
     var needleTick by remember { mutableIntStateOf(0) }
@@ -396,19 +390,6 @@ fun VoiceAndAssistantScreen(
             whistleTestState = if (raw != null) "pass" else "fail"
             needleTick++
         }
-    }
-
-    // Refresh role state every time the screen resumes (user may have
-    // changed the default assistant in system settings).
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                roleHeld = isAssistantRoleHeld(context)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // ------------------------------------------------------------------
@@ -1347,8 +1328,8 @@ fun VoiceAndAssistantScreen(
             Text(
                 text = "Límites honestos: el hotword de bajo consumo tipo «Hey Google» corre en " +
                         "el chip DSP con APIs privilegiadas que Android YA NO expone a apps de " +
-                        "terceros (AlwaysOnHotwordDetector salió del SDK público) — ni siquiera " +
-                        "siendo el asistente del sistema. Este hotword es por software: escucha " +
+                        "terceros (AlwaysOnHotwordDetector salió del SDK público). Este hotword " +
+                        "es por software: escucha " +
                         "mientras el servicio esté vivo y Android permita el micrófono (consume " +
                         "más batería). Con la pantalla apagada, algunas ROMs lo pausan.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1555,91 +1536,14 @@ fun VoiceAndAssistantScreen(
             }
         }
 
-        // ============ 5. System assistant role ============
-        SettingsCard(
-            icon = { Icon(Icons.Default.AutoAwesome, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "Asistente del sistema",
-            badge = {
-                if (roleHeld) BadgePill("Asistente activo", GoogleGreen)
-                else BadgePill("No configurado", MaterialTheme.colorScheme.outline)
-            }
-        ) {
-            Text(
-                text = "Haz de Mnemosyne tu asistente predeterminado: el gesto de asistente " +
-                        "(pulsación larga del inicio / deslizamiento) abrirá el asistente local " +
-                        "en vez de Google Assistant o Bixby. Selecciona «Mnemosyne» dentro de " +
-                        "«App de asistencia» en los ajustes del sistema. Puedes volver atrás " +
-                        "cuando quieras.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = {
-                    // ⚠️ v1.5.1: the RoleManager ROLE_ASSISTANT grant dialog was
-                    // REMOVED — granting that role made Android bind our (now
-                    // deleted) VoiceInteractionService and crashed the system
-                    // into a reboot loop on Android 11. The SAFE path is the
-                    // classic "assist app" selection: the system records our
-                    // package and simply launches MainActivity (ACTION_ASSIST)
-                    // on the gesture — no system-side binding, no services.
-                    val voiceInput = android.content.Intent(
-                        android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    if (tryStart(context, voiceInput)) {
-                        Toast.makeText(
-                            context,
-                            "Toca «App de asistencia» (o «Asistente digital») y elige «Mnemosyne»",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@Button
-                    }
-                    try {
-                        val intent = android.content.Intent(
-                            android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
-                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                        Toast.makeText(
-                            context,
-                            "Abre «Apps predeterminadas → App de asistencia» y elige Mnemosyne",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } catch (_: Exception) {
-                        Toast.makeText(context, "No pude abrir el ajuste", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
-                modifier = Modifier.fillMaxWidth().testTag("request_assistant_role_btn")
-            ) {
-                Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(if (roleHeld) "Cambiar / revisar asistente" else "Configurar como asistente")
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            val currentAssistant = remember(refreshTick) { currentAssistantComponent(context) }
-            Text(
-                text = if (roleHeld) {
-                    "✔ Activo: el gesto de asistente (pulsación larga del botón de inicio o el " +
-                        "gesto configurado) abre Mnemosyne. El hotword de bajo consumo «Hey Google» " +
-                        "sigue siendo privilegiado; el de esta app es el de software de la tarjeta " +
-                        "de arriba."
-                } else {
-                    buildString {
-                        append("En Android 11: Ajustes → Apps y notificaciones → Avanzado → Apps ")
-                        append("predeterminadas → App de asistencia → «Mnemosyne». La app se " +
-                        "registra como app de asistencia clásica (vía segura: el sistema solo ")
-                        append("abre la actividad con el gesto, sin vincular servicios). Si no ")
-                        append("aparece en la lista: reinicia el teléfono una vez tras instalar ")
-                        append("(algunas ROMs cachean la lista) y vuelve a entrar en ese ajuste.")
-                        currentAssistant?.let {
-                            append("\nAsistente actual del sistema: ${it.substringAfterLast('.')}.")
-                        }
-                    }
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        // ============ 5. System assistant role — REMOVED (v1.5.2) ============
+        // The user's final decision after the v1.5.0 reboot-loop incident:
+        // Mnemosyne will NEVER integrate with the Android system assistant.
+        // No role requests, no "App de asistencia" nudging, no ACTION_ASSIST
+        // handling anywhere in the app. The in-app assistant (Needle +
+        // Whistle, hotword, voice notes, share intake) is the ONLY assistant
+        // surface this app exposes — it cannot crash the system because the
+        // system never binds to it.
 
         Spacer(modifier = Modifier.height(30.dp))
     }
@@ -1787,39 +1691,6 @@ private fun RecordingIndicator(phase: String, countdown: Int, label: String) {
             }
         }
     }
-}
-
-private fun isAssistantRoleHeld(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        try {
-            val rm = context.getSystemService(RoleManager::class.java)
-            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) &&
-                rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-            ) {
-                return true
-            }
-        } catch (_: Exception) {
-        }
-    }
-    // Android 9-11: the RoleManager may not know the assistant role, but the
-    // system still records the active VoiceInteractionService in
-    // Settings.Secure — read it directly so the status is honest everywhere.
-    return currentAssistantComponent(context)?.contains(context.packageName) == true
-}
-
-/** The active system assistant as "package/class", or null when unset. */
-private fun currentAssistantComponent(context: Context): String? = try {
-    android.provider.Settings.Secure.getString(context.contentResolver, "assistant")
-        ?.takeIf { it.isNotBlank() }
-} catch (_: Exception) {
-    null
-}
-
-private fun tryStart(context: Context, intent: android.content.Intent): Boolean = try {
-    context.startActivity(intent)
-    true
-} catch (_: Exception) {
-    false
 }
 
 // ----------------------------------------------------------------------
