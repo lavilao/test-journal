@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Download
 import com.example.data.AppInterfaceMode
 import com.example.ui.components.GoogleBlue
+import com.example.ui.components.ExpandableHint
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
@@ -362,6 +363,90 @@ fun SettingsAndModelsScreen(
 
         Spacer(modifier = Modifier.height(22.dp))
 
+        // SECTION: v1.7 — Widget configuración (elige qué tarjetas muestra)
+        Text(
+            text = "Widget de inicio",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Elige qué páginas muestra el widget At a Glance.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("widget_config_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                com.example.widget.WidgetConfig.MODULES.forEach { module ->
+                    var moduleEnabled by remember(module.id) {
+                        mutableStateOf(com.example.widget.WidgetConfig.isEnabled(context, module.id))
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = module.label,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                            Text(
+                                text = module.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = moduleEnabled,
+                            onCheckedChange = { checked ->
+                                moduleEnabled = checked
+                                com.example.widget.WidgetConfig.setEnabled(context, module.id, checked)
+                                com.example.widget.AtAGlanceWidgetProvider.refreshAll(context)
+                            }
+                        )
+                    }
+                }
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                )
+                var weatherHeader by remember { mutableStateOf(com.example.widget.WidgetConfig.weatherHeaderEnabled(context)) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Clima junto a la fecha",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = weatherHeader,
+                        onCheckedChange = { checked ->
+                            weatherHeader = checked
+                            com.example.widget.WidgetConfig.setWeatherHeaderEnabled(context, checked)
+                            com.example.widget.AtAGlanceWidgetProvider.refreshAll(context)
+                        }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
         // Local Storage & Knowledge Stats
         Text(
             text = "Knowledge Base Storage",
@@ -559,7 +644,7 @@ fun SettingsAndModelsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
+                ExpandableHint(
                     text = "Exporta los modelos descargados (traducción incluida) a un zip y " +
                             "reimpórtalos cuando quieras — otro teléfono o una reinstalación sin " +
                             "volver a bajar ~30 MB por idioma. Desde v1.5.2 la importación restaura " +
@@ -794,7 +879,7 @@ fun SettingsAndModelsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text(
+                ExpandableHint(
                     text = "El Lens (botón de cámara de la app) ejecuta en tu teléfono: reconocimiento " +
                             "de texto (OCR), traducción con cámara, códigos QR y de barras, etiquetado " +
                             "de objetos y escaneo de documentos con limpieza de página. Los modelos " +
@@ -815,7 +900,7 @@ fun SettingsAndModelsScreen(
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
+        ExpandableHint(
             text = "Inspect local device storage usage. OCR cache and semantic indices can be safely pruned and regenerated anytime.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -892,7 +977,7 @@ fun SettingsAndModelsScreen(
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
+        ExpandableHint(
             text = "Re-indexes all journal entries, re-derives entities, offsets, and relationships from original notes.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1044,7 +1129,7 @@ fun SettingsAndModelsScreen(
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
+        ExpandableHint(
             text = "El OCR local (ML Kit, en el dispositivo) hace que el texto de tus fotos " +
                 "y documentos compartidos aparezca en la búsqueda. Como puede cargar el " +
                 "teléfono, cada pieza va con su interruptor.",
@@ -1160,7 +1245,7 @@ fun SettingsAndModelsScreen(
 
         EditorialCard {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
+                ExpandableHint(
                     text = "Export your entire journal and knowledge graph without vendor lock-in. Compatible with Obsidian, Logseq, and external backup tools.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1213,7 +1298,7 @@ fun SettingsAndModelsScreen(
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
+        ExpandableHint(
             text = "La app aprende de tu rutina (apps, sueño, lugares, batería, interrupciones) para crear funciones útiles. Todo se queda en tu teléfono.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1237,7 +1322,7 @@ fun SettingsAndModelsScreen(
                             text = "Aprender de mis hábitos",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
-                        Text(
+                        ExpandableHint(
                             text = "Registro local de uso, sueño y lugares con retención de ${HabitEngine.retentionDays(context)} días.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1319,7 +1404,7 @@ fun SettingsAndModelsScreen(
                             text = "Fondo dinámico del sol",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
-                        Text(
+                        ExpandableHint(
                             text = "El sol recorre el cielo de tu ubicación y el tono del gradiente cambia del amanecer a la noche (modo Samsung).",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1374,7 +1459,7 @@ fun SettingsAndModelsScreen(
                 ) {
                     Text("Poner como fondo de pantalla del sistema")
                 }
-                Text(
+                ExpandableHint(
                     text = "El interruptor cambia el fondo DENTRO de la app (modo Samsung); el botón lo instala como fondo de pantalla del teléfono. Come de la última ubicación que usó el clima.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1392,7 +1477,7 @@ fun SettingsAndModelsScreen(
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
+        ExpandableHint(
             text = "App privada: guarda tus lugares y recibe recordatorios al acercarte. Las coordenadas viven solo en este teléfono.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1459,7 +1544,7 @@ fun SettingsAndModelsScreen(
                             "Recordatorios espaciales del calendario",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
-                        Text(
+                        ExpandableHint(
                             text = "Combina los LUGARES de tus eventos del calendario con tu " +
                                     "ubicación: aviso de «es hora de salir» con el tiempo de viaje " +
                                     "estimado (a pie o en coche, según tu actividad detectada) y " +
@@ -1533,7 +1618,7 @@ fun SettingsAndModelsScreen(
                             }
                         }
                     }
-                    Text(
+                    ExpandableHint(
                         text = "La sincronización de 5 minutos avisa cuando estás a menos de ${savedPlaces.first().radiusMeters} m de un lugar (máx. un aviso cada 45 min). Para que suceda con la app cerrada, activa «Ubicación en segundo plano» para Mnemosyne en Ajustes del sistema.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1559,7 +1644,7 @@ fun SettingsAndModelsScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
+                ExpandableHint(
                     text = "Diario semántico 100% en el dispositivo. Las versiones se firmarán con la misma clave para poder actualizarse sin perder datos.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1687,7 +1772,7 @@ fun SettingsAndModelsScreen(
             title = { Text("Nuevo lugar") },
             text = {
                 Column {
-                    Text(
+                    ExpandableHint(
                         text = "Se usará UNA lectura de tu posición actual. Ejemplos: Casa, Trabajo, Mercadona del barrio — con una nota como «comprar pan» o «lleva el paquete».",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

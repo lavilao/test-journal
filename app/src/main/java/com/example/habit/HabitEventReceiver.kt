@@ -31,8 +31,20 @@ class HabitEventReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 when (action) {
-                    Intent.ACTION_POWER_CONNECTED -> HabitEngine.logPowerAsync(app, charging = true)
-                    Intent.ACTION_POWER_DISCONNECTED -> HabitEngine.logPowerAsync(app, charging = false)
+                    Intent.ACTION_POWER_CONNECTED -> {
+                        HabitEngine.logPowerAsync(app, charging = true)
+                        // v1.7: user routines ("al conectar el cargador").
+                        com.example.routine.RoutineEngine.evaluateAsync(
+                            app, com.example.routine.RoutineEngine.RoutineEvent.POWER_CONNECTED
+                        )
+                    }
+                    Intent.ACTION_POWER_DISCONNECTED -> {
+                        HabitEngine.logPowerAsync(app, charging = false)
+                        // v1.7: user routines ("al desconectar el cargador").
+                        com.example.routine.RoutineEngine.evaluateAsync(
+                            app, com.example.routine.RoutineEngine.RoutineEvent.POWER_DISCONNECTED
+                        )
+                    }
                     Intent.ACTION_BOOT_COMPLETED ->
                         HabitEngine.log(app, HabitEventType.BOOT)
                     Intent.ACTION_MY_PACKAGE_REPLACED ->

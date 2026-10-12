@@ -92,6 +92,7 @@ import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
 import com.example.speech.voiceprint.VoiceSampleRecorder
 import com.example.ui.components.GoogleGreen
+import com.example.ui.components.ExpandableHint
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.Dispatchers
@@ -613,11 +614,11 @@ fun VoiceAndAssistantScreen(
                     text = "Voz y asistente",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
-                Text(
-                    text = "Motor, modelos sin conexión, hotword y Voice Match",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                ExpandableHint(
+                        text = "Motor, modelos sin conexión, hotword y Voice Match",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
             }
         }
 
@@ -629,16 +630,11 @@ fun VoiceAndAssistantScreen(
                 BadgePill(text = resolvedEngine.label, color = GoogleGreen)
             }
         ) {
-            Text(
-                text = "El dictado usa el motor que elijas aquí. En los Samsung el " +
-                        "predeterminado del sistema es «Samsung Voice Input», el mismo motor " +
-                        "que usa el teclado de voz de Gboard — por eso las voces sonaban a " +
-                        "Gboard. Si quieres las voces de Google, elige «Speech Services by " +
-                        "Google»; si prefieres las de Samsung, elige el suyo. «Automático» " +
-                        "prioriza el motor en el dispositivo y luego el de Google.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "El dictado usa el motor que elijas aquí. En los Samsung el predeterminado del sistema es «Samsung Voice Input», el mismo motor que usa el teclado de voz de Gboard — por eso las voces sonaban a Gboard. Si quieres las voces de Google, elige «Speech Services by Google»; si prefieres las de Samsung, elige el suyo. «Automático» prioriza el motor en el dispositivo y luego el de Google.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedButton(
                 onClick = { showEngineDialog = true },
@@ -742,19 +738,11 @@ fun VoiceAndAssistantScreen(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "¿Se pueden descargar los modelos de Google desde la app? En Android 13+ " +
-                        "SÍ: el botón «Descargar» se lo pide directamente al motor. En Android 12 " +
-                        "o menos solo se puede desde el ajuste del sistema. Sobre tu caso: los " +
-                        "modelos offline pertenecen a «Servicios de Voz de Google»; cuando la " +
-                        "app de Google se actualiza puede retirar los modelos de la versión " +
-                        "anterior (por eso dejaban de funcionar tras actualizar y solo volvían " +
-                        "al desinstalar actualizaciones). Volver a descargarlos — desde aquí o " +
-                        "desde el ajuste del sistema — los deja disponibles de nuevo sin " +
-                        "desinstalar nada.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "¿Se pueden descargar los modelos de Google desde la app? En Android 13+ SÍ: el botón «Descargar» se lo pide directamente al motor. En Android 12 o menos solo se puede desde el ajuste del sistema. Sobre tu caso: los modelos offline pertenecen a «Servicios de Voz de Google»; cuando la app de Google se actualiza puede retirar los modelos de la versión anterior (por eso dejaban de funcionar tras actualizar y solo volvían al desinstalar actualizaciones). Volver a descargarlos — desde aquí o desde el ajuste del sistema — los deja disponibles de nuevo sin desinstalar nada.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             TextButton(onClick = { checkOfflineSupport() }) {
                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
@@ -775,20 +763,14 @@ fun VoiceAndAssistantScreen(
                 }
             }
         ) {
-            Text(
-                text = "Needle 3 es un modelo de IA de 35 MB hecho para móviles: entiende lo " +
-                        "que pides, elige la herramienta correcta del asistente y rellena los " +
-                        "argumentos — todo dentro del teléfono, sin nube. Es opcional: " +
-                        "descárgalo con el botón y pruébalo; el asistente funciona igual sin él " +
-                        "(con el analizador de reglas). Coste real: ~80 MB de RAM mientras " +
-                        "responde y de 1 a 8 s por respuesta según el teléfono. Nada se " +
-                        "descarga solo ni se envía nada afuera.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "Needle 3 es un modelo de IA de 35 MB hecho para móviles: entiende lo que pides, elige la herramienta correcta del asistente y rellena los argumentos — todo dentro del teléfono, sin nube. Es opcional: descárgalo con el botón y pruébalo; el asistente funciona igual sin él (con el analizador de reglas). Coste real: ~80 MB de RAM mientras responde y de 1 a 8 s por respuesta según el teléfono. Nada se descarga solo ni se envía nada afuera.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             if (!needleSupported) {
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
+                ExpandableHint(
                     text = "Este procesador no tiene motor nativo disponible (el motor de " +
                             "Cactus se compila para ARM de 32 y 64 bits). " +
                             (needleSupportError ?: ""),
@@ -877,7 +859,7 @@ fun VoiceAndAssistantScreen(
                 }
             }
             if (whistleDownloaded) {
-                Text(
+                ExpandableHint(
                     text = "Whistle transcribe español en local; con él, el micrófono del " +
                             "asistente va directo del audio a la acción sin pasar por el " +
                             "reconocedor del sistema.",
@@ -954,7 +936,7 @@ fun VoiceAndAssistantScreen(
                 Spacer(modifier = Modifier.height(6.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
+                ExpandableHint(
                     text = "Copia de seguridad local: exporta los archivos del modelo y " +
                             "reimpórtalos cuando quieras (otro teléfono, o si el servidor " +
                             "retirara las descargas). Los archivos no caducan.",
@@ -1017,15 +999,11 @@ fun VoiceAndAssistantScreen(
                 BadgePill("$active / ${NeedleTools.TOOL_CATALOG.size}", ForestPrimary)
             }
         ) {
-            Text(
-                text = "Needle es un modelo pequeño y su ventana de contexto es limitada: cada " +
-                        "herramienta activa ocupa tokens de esa ventana (el «context bloat» que " +
-                        "también degrada a los modelos grandes). Las herramientas desactivadas NO " +
-                        "se le declaran: el enrutador gana precisión y velocidad. Enciende lo que " +
-                        "uses, apaga lo que no.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "Needle es un modelo pequeño y su ventana de contexto es limitada: cada herramienta activa ocupa tokens de esa ventana (el «context bloat» que también degrada a los modelos grandes). Las herramientas desactivadas NO se le declaran: el enrutador gana precisión y velocidad. Enciende lo que uses, apaga lo que no.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             Spacer(modifier = Modifier.height(8.dp))
             if (needleDownloaded) {
                 Text(
@@ -1134,14 +1112,11 @@ fun VoiceAndAssistantScreen(
                 }
             }
         ) {
-            Text(
-                text = "Comprueba que Needle y Whistle funcionan DE VERDAD en este " +
-                        "teléfono, con una prueba reproducible: el router debe devolver la " +
-                        "herramienta correcta para «enciende la linterna», y Whistle debe " +
-                        "transcribir 3 segundos de tu voz sin pasar por Google ni Gboard.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "Comprueba que Needle y Whistle funcionan DE VERDAD en este teléfono, con una prueba reproducible: el router debe devolver la herramienta correcta para «enciende la linterna», y Whistle debe transcribir 3 segundos de tu voz sin pasar por Google ni Gboard.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             Spacer(modifier = Modifier.height(10.dp))
 
             @Composable
@@ -1325,16 +1300,11 @@ fun VoiceAndAssistantScreen(
             Spacer(modifier = Modifier.height(10.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "Límites honestos: el hotword de bajo consumo tipo «Hey Google» corre en " +
-                        "el chip DSP con APIs privilegiadas que Android YA NO expone a apps de " +
-                        "terceros (AlwaysOnHotwordDetector salió del SDK público). Este hotword " +
-                        "es por software: escucha " +
-                        "mientras el servicio esté vivo y Android permita el micrófono (consume " +
-                        "más batería). Con la pantalla apagada, algunas ROMs lo pausan.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "Límites honestos: el hotword de bajo consumo tipo «Hey Google» corre en el chip DSP con APIs privilegiadas que Android YA NO expone a apps de terceros (AlwaysOnHotwordDetector salió del SDK público). Este hotword es por software: escucha mientras el servicio esté vivo y Android permita el micrófono (consume más batería). Con la pantalla apagada, algunas ROMs lo pausan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
         }
 
         // ============ 4. Voice Match ============
@@ -1346,16 +1316,11 @@ fun VoiceAndAssistantScreen(
                 else BadgePill("Sin inscribir", MaterialTheme.colorScheme.outline)
             }
         ) {
-            Text(
-                text = "La huella de voz de Google («Hey Google») es privilegiada y no está " +
-                        "disponible para terceros. Esta es NUESTRA huella on-device: 12 " +
-                        "coeficientes MFCC por tramo sonoro → embedding que se compara por " +
-                        "similitud coseno. Es más débil que un modelo neuronal, pero es real " +
-                        "y local: tras detectar el hotword se te pedirá repetir tu frase y " +
-                        "solo tu voz ejecutará el comando.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ExpandableHint(
+                    text = "La huella de voz de Google («Hey Google») es privilegiada y no está disponible para terceros. Esta es NUESTRA huella on-device: 12 coeficientes MFCC por tramo sonoro → embedding que se compara por similitud coseno. Es más débil que un modelo neuronal, pero es real y local: tras detectar el hotword se te pedirá repetir tu frase y solo tu voz ejecutará el comando.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             Spacer(modifier = Modifier.height(10.dp))
 
             if (enrollPhase == null) {
@@ -1716,15 +1681,11 @@ private fun CustomToolsCard(
             BadgePill("$active / ${tools.size} activas", ForestPrimary)
         }
     ) {
-        Text(
-            text = "Crea herramientas que el asistente local puede llamar por ti. " +
-                "Reglas de oro (de la guía de diseño de herramientas para Needle): " +
-                "UNA acción por herramienta; describe las ACCIONES que cubre, no una categoría; " +
-                "cada argumento debe describir DÓNDE está el valor en lo que dices (p. ej. «el importe que mencione»); " +
-                "si un valor no siempre se dice, márcalo opcional.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        ExpandableHint(
+                text = "Crea herramientas que el asistente local puede llamar por ti. Reglas de oro (de la guía de diseño de herramientas para Needle): UNA acción por herramienta; describe las ACCIONES que cubre, no una categoría; cada argumento debe describir DÓNDE está el valor en lo que dices (p. ej. «el importe que mencione»); si un valor no siempre se dice, márcalo opcional.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         Spacer(modifier = Modifier.height(8.dp))
         if (tools.isEmpty()) {
             Text(

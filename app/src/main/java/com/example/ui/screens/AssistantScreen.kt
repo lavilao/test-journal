@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -102,7 +103,7 @@ fun AssistantScreen(
     val context = LocalContext.current
 
     var messages by remember { mutableStateOf(listOf(AssistantMessage(false, WELCOME_TEXT))) }
-    var typedInput by remember { mutableStateOf("") }
+    var typedInput by rememberSaveable { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
 
     // ---- optional local AI (Cactus Needle 3 + Whistle) ----

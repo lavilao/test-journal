@@ -79,6 +79,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,23 +143,25 @@ fun EntryEditScreen(
     val audioRecords = remember { mutableStateListOf<AudioRecordItem>() }
     var editingAudioIndex by remember { mutableStateOf<Int?>(null) }
 
-    var title by remember { mutableStateOf("") }
-    var body by remember { mutableStateOf("") }
-    var selectedMood by remember { mutableStateOf<String?>(null) }
+    // v1.7: draft fields are rememberSaveable — a process death or a
+    // configuration recreate no longer eats the note you were writing.
+    var title by rememberSaveable { mutableStateOf("") }
+    var body by rememberSaveable { mutableStateOf("") }
+    var selectedMood by rememberSaveable { mutableStateOf<String?>(null) }
 
     // v1.6: multi-photo support — the note's photo gallery is a LIST now.
     val attachedImages = remember { mutableStateListOf<Uri>() }
 
     val tagsList = remember { mutableStateListOf<String>() }
-    var newTagInput by remember { mutableStateOf("") }
-    var showDetails by remember { mutableStateOf(false) }
-    var showTemplateMenu by remember { mutableStateOf(false) }
+    var newTagInput by rememberSaveable { mutableStateOf("") }
+    var showDetails by rememberSaveable { mutableStateOf(false) }
+    var showTemplateMenu by rememberSaveable { mutableStateOf(false) }
 
     // Multi-page sections (v1.6: editable after creation + reorder)
     val pages = remember { mutableStateListOf<JournalPage>() }
-    var showAddPageDialog by remember { mutableStateOf(false) }
-    var newPageTitle by remember { mutableStateOf("") }
-    var newPageBody by remember { mutableStateOf("") }
+    var showAddPageDialog by rememberSaveable { mutableStateOf(false) }
+    var newPageTitle by rememberSaveable { mutableStateOf("") }
+    var newPageBody by rememberSaveable { mutableStateOf("") }
     var editingPageIndex by remember { mutableStateOf<Int?>(null) }
 
     // Linked contacts

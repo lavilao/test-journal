@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,6 +72,10 @@ import androidx.compose.ui.unit.sp
 import com.example.habit.HabitEngine
 import com.example.habit.HabitMiners
 import com.example.location.SmartPlaces
+import com.example.routine.RoutineEngine
+import com.example.routine.RoutineEngine.Action
+import com.example.routine.RoutineEngine.Trigger
+import com.example.routine.RoutineEngine.UserRoutine
 import com.example.ui.components.AppIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
@@ -228,6 +235,9 @@ fun RoutinesScreen(
                 }
             }
         }
+
+        // ---------------- v1.7: user routines (Bixby style) ----------------
+        MyRoutinesCard(onChanged = { refreshSensors() })
 
         // ---------------- Master switch ----------------
         SectionCard(title = "Motor de hábitos", testTag = "routines_master_card") {
@@ -966,6 +976,356 @@ fun RoutinesScreen(
                 TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar") }
             }
         )
+    }
+}
+
+// ----------------------------------------------------------------------
+// v1.7: user routines (Bixby-style "si X entonces Y"), all on-device
+// ----------------------------------------------------------------------
+
+@Composable
+private fun MyRoutinesCard(onChanged: () -> Unit = {}) {
+    val context = LocalContext.current
+    var routines by remember { mutableStateOf<List<UserRoutine>>(emptyList()) }
+    var editing by remember { mutableStateOf<UserRoutine?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
+
+    fun reload() {
+        routines = RoutineEngine.load(context)
+    }
+
+    LaunchedEffect(Unit) { reload() }
+
+    SectionCard(title = "Mis rutinas (si → entonces)", testTag = "my_routines_card") {
+        Text(
+            text = "Automatizaciones que creas tú. Todo ocurre en este teléfono.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (routines.isEmpty()) {
+            Text(
+                text = "Aún no tienes rutinas. Ejemplo: «si son las 8:00 → avisarme de salir».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            routines.forEach { routine ->
+                RoutineRow(
+                    routine = routine,
+                    onToggle = { enabled ->
+                        RoutineEngine.upsert(context, routine.copy(enabled = enabled))
+                        reload()
+                    },
+                    onEdit = {
+                        editing = routine
+                        showEditor = true
+                    },
+                    onDelete = {
+                        RoutineEngine.delete(context, routine.id)
+                        reload()
+                        onChanged()
+                    }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(
+            onClick = {
+                editing = null
+                showEditor = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Nueva rutina")
+        }
+    }
+
+    if (showEditor) {
+        RoutineEditorDialog(
+            initial = editing,
+            onDismiss = { showEditor = false },
+            onSave = { routine ->
+                RoutineEngine.upsert(context, routine)
+                showEditor = false
+                reload()
+                onChanged()
+            }
+        )
+    }
+}
+
+@Composable
+private fun RoutineRow(
+    routine: UserRoutine,
+    onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEdit() }
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = routine.name,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+            )
+            Text(
+                text = "Si ${RoutineEngine.triggerLabel(routine)} → ${RoutineEngine.actionLabel(routine)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            RoutineEngine.lastFiredLabel(routine)?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
+        Switch(checked = routine.enabled, onCheckedChange = onToggle)
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "Eliminar rutina",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoutineEditorDialog(
+    initial: UserRoutine?,
+    onDismiss: () -> Unit,
+    onSave: (UserRoutine) -> Unit
+) {
+    // Trigger selection state
+    var triggerType by remember { mutableStateOf(initial?.trigger?.type ?: "time") }
+    var hour by remember { mutableStateOf((initial?.trigger as? Trigger.Time)?.hour ?: 8) }
+    var minute by remember { mutableStateOf((initial?.trigger as? Trigger.Time)?.minute ?: 0) }
+    var batteryLevel by remember {
+        mutableStateOf((initial?.trigger as? Trigger.BatteryBelow)?.level ?: 20)
+    }
+
+    // Action selection state
+    var actionType by remember { mutableStateOf(initial?.action?.type ?: "notification") }
+    var actionTitle by remember {
+        mutableStateOf(
+            (initial?.action as? Action.Notify)?.title
+                ?: (initial?.action as? Action.CreateNote)?.title
+                ?: ""
+        )
+    }
+    var actionText by remember {
+        mutableStateOf(
+            (initial?.action as? Action.Notify)?.text
+                ?: (initial?.action as? Action.CreateNote)?.body
+                ?: ""
+        )
+    }
+    var routineName by remember { mutableStateOf(initial?.name ?: "") }
+
+    val triggerOptions = listOf(
+        "time" to "A una hora",
+        "charging_on" to "Al conectar carga",
+        "charging_off" to "Al quitar carga",
+        "battery_below" to "Batería baja",
+        "app_open" to "Al abrir la app"
+    )
+    val actionOptions = listOf(
+        "notification" to "Avisarme",
+        "note" to "Crear nota",
+        "open_news" to "Abrir noticias",
+        "open_assistant" to "Abrir asistente"
+    )
+
+    fun buildRoutine(): UserRoutine {
+        val trigger: Trigger = when (triggerType) {
+            "charging_on" -> Trigger.ChargingOn
+            "charging_off" -> Trigger.ChargingOff
+            "battery_below" -> Trigger.BatteryBelow(batteryLevel)
+            "app_open" -> Trigger.AppOpen
+            else -> Trigger.Time(hour, minute)
+        }
+        val action: Action = when (actionType) {
+            "note" -> Action.CreateNote(
+                actionTitle.ifBlank { "Nota de rutina" },
+                actionText
+            )
+            "open_news" -> Action.OpenNews
+            "open_assistant" -> Action.OpenAssistant
+            else -> Action.Notify(
+                actionTitle.ifBlank { "Mnemosyne" },
+                actionText
+            )
+        }
+        val name = routineName.ifBlank {
+            triggerOptions.firstOrNull { it.first == triggerType }?.second ?: "Rutina"
+        }
+        return UserRoutine(
+            id = initial?.id ?: RoutineEngine.newId(),
+            name = name,
+            enabled = initial?.enabled ?: true,
+            trigger = trigger,
+            action = action,
+            lastFiredAt = initial?.lastFiredAt ?: 0L
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (initial == null) "Nueva rutina" else "Editar rutina")
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = routineName,
+                    onValueChange = { routineName = it.take(40) },
+                    label = { Text("Nombre (opcional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    "SI…",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                FlowRowImpl(triggerOptions, triggerType) { selected -> triggerType = selected }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                when (triggerType) {
+                    "time" -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                String.format(Locale.getDefault(), "%02d:%02d", hour, minute),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Hora",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Slider(
+                                    value = hour.toFloat(),
+                                    onValueChange = { hour = it.toInt() },
+                                    valueRange = 0f..23f,
+                                    steps = 22
+                                )
+                                Text(
+                                    "Minutos",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Slider(
+                                    value = minute.toFloat(),
+                                    onValueChange = { minute = (it.toInt() / 5) * 5 },
+                                    valueRange = 0f..55f,
+                                    steps = 10
+                                )
+                            }
+                        }
+                    }
+                    "battery_below" -> {
+                        Text(
+                            "Avisar al llegar a $batteryLevel% de batería",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = batteryLevel.toFloat(),
+                            onValueChange = { batteryLevel = it.toInt() },
+                            valueRange = 5f..50f,
+                            steps = 8
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "ENTONCES…",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                FlowRowImpl(actionOptions, actionType) { selected -> actionType = selected }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (actionType == "notification" || actionType == "note") {
+                    OutlinedTextField(
+                        value = actionTitle,
+                        onValueChange = { actionTitle = it.take(60) },
+                        label = {
+                            Text(if (actionType == "note") "Título de la nota" else "Título del aviso")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = actionText,
+                        onValueChange = { actionText = it.take(500) },
+                        label = {
+                            Text(if (actionType == "note") "Contenido de la nota" else "Texto del aviso")
+                        },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Text(
+                    text = "Los avisos llegan como notificación; el resto ocurre dentro de la app.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(buildRoutine()) }) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+/** Chip row that wraps — used for trigger/action selection. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FlowRowImpl(
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        options.forEach { (id, label) ->
+            FilterChip(
+                selected = selected == id,
+                onClick = { onSelect(id) },
+                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+            )
+        }
     }
 }
 

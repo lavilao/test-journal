@@ -32,18 +32,20 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Pixel-style "At a Glance" widget with REAL data only, now PAGED:
+ * Pixel-style "At a Glance" widget with REAL data only, now PAGED and
+ * CONFIGURABLE (v1.7 — Samsung Now Brief-style "choose your cards"):
  *
- *   Página 1  → próximo evento (solo futuro, con cuenta atrás)
- *   Página 2  → pasos de hoy (baseline diario persistido)
- *   Página 3  → próxima tarea pendiente
- *   Página 4  → batería + próxima alarma
+ *   Calendario  → próximo evento (solo futuro, con cuenta atrás)
+ *   Pasos       → pasos de hoy (baseline diario persistido)
+ *   Tareas      → próxima tarea pendiente
+ *   Sistema     → batería + próxima alarma
+ *   Noticias    → titular más reciente del caché RSS
  *
- * Standard app widgets cannot capture horizontal swipes (that only exists
- * for launcher-embedded widgets like Lawnchair's), so pages advance on tap
- * of the content area; the date row opens the app. It refreshes on the
- * system 30-minute tick, on every weather/step/calendar change the app
- * observes, and from the 5-minute background sync.
+ * The user toggles modules in Ajustes → Widget. Standard app widgets
+ * cannot capture horizontal swipes, so pages advance on tap of the
+ * content area; the date row opens the app. It refreshes on the system
+ * 30-minute tick, on every weather/step/calendar change the app observes,
+ * and from the 5-minute background sync.
  */
 class AtAGlanceWidgetProvider : AppWidgetProvider() {
 
@@ -77,7 +79,6 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
         private const val ACTION_REFRESH = "com.example.widget.REFRESH"
         private const val EXTRA_WIDGET_ID = "widget_id"
         private const val PAGE_PREFS = "widget_pages"
-        private const val PAGE_COUNT = 4
 
         private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -95,7 +96,9 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
             val taskTitle: String,
             val taskSub: String,
             val systemTitle: String,
-            val systemSub: String
+            val systemSub: String,
+            val newsTitle: String,
+            val newsSub: String
         )
 
         private suspend fun gatherData(context: Context): WidgetData = withContext(Dispatchers.IO) {
@@ -170,12 +173,25 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
                 "Sin alarmas programadas"
             }
 
+            // --- v1.7: top headline from the RSS disk cache (honest empty) ---
+            val topNews = readTopHeadline(app)
+            val newsTitle: String
+            val newsSub: String
+            if (topNews != null) {
+                newsTitle = "📰 ${topNews.first.take(70)}"
+                newsSub = topNews.second
+            } else {
+                newsTitle = "📰 Noticias"
+                newsSub = "Abre la app y actualiza tus fuentes"
+            }
+
             WidgetData(
                 dateText, weatherText,
                 eventTitle, eventSub,
                 stepsTitle, stepsSub,
                 taskTitle, taskSub,
-                systemTitle, systemSub
+                systemTitle, systemSub,
+                newsTitle, newsSub
             )
         }
 
@@ -192,31 +208,32 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
                 try {
                     val app = context.applicationContext
                     val data = gatherData(app)
-                    val page = currentPage(app, appWidgetId)
+                    val modules = WidgetConfig.enabledModules(app)
+
+                    // Each enabled module contributes one (title, sub) page.
+                    val pages: List<Pair<String, String>> = modules.map { id ->
+                        when (id) {
+                            "steps" -> data.stepsTitle to data.stepsSub
+                            "task" -> data.taskTitle to data.taskSub
+                            "system" -> data.systemTitle to data.systemSub
+                            "news" -> data.newsTitle to data.newsSub
+                            else -> data.eventTitle to data.eventSub
+                        }
+                    }
+                    if (pages.isEmpty()) return@launch
+
+                    val page = currentPage(app, appWidgetId).coerceIn(0, pages.size - 1)
 
                     val views = RemoteViews(app.packageName, R.layout.widget_at_a_glance)
                     views.setTextViewText(R.id.widget_date, data.dateText)
-                    views.setTextViewText(R.id.widget_weather, data.weatherText)
+                    views.setTextViewText(
+                        R.id.widget_weather,
+                        if (WidgetConfig.weatherHeaderEnabled(app)) data.weatherText else ""
+                    )
 
-                    when (page) {
-                        1 -> {
-                            views.setTextViewText(R.id.widget_page_title, data.stepsTitle)
-                            views.setTextViewText(R.id.widget_page_sub, data.stepsSub)
-                        }
-                        2 -> {
-                            views.setTextViewText(R.id.widget_page_title, data.taskTitle)
-                            views.setTextViewText(R.id.widget_page_sub, data.taskSub)
-                        }
-                        3 -> {
-                            views.setTextViewText(R.id.widget_page_title, data.systemTitle)
-                            views.setTextViewText(R.id.widget_page_sub, data.systemSub)
-                        }
-                        else -> {
-                            views.setTextViewText(R.id.widget_page_title, data.eventTitle)
-                            views.setTextViewText(R.id.widget_page_sub, data.eventSub)
-                        }
-                    }
-                    views.setTextViewText(R.id.widget_dots, dotsFor(page))
+                    views.setTextViewText(R.id.widget_page_title, pages[page].first)
+                    views.setTextViewText(R.id.widget_page_sub, pages[page].second)
+                    views.setTextViewText(R.id.widget_dots, dotsFor(page, pages.size))
 
                     // Header (date + weather) → open the app.
                     val openIntent = Intent(app, MainActivity::class.java).apply {
@@ -246,8 +263,8 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        private fun dotsFor(page: Int): String =
-            (0 until PAGE_COUNT).joinToString(" ") { if (it == page) "●" else "○" }
+        private fun dotsFor(page: Int, count: Int): String =
+            (0 until count).joinToString(" ") { if (it == page) "●" else "○" }
 
         private fun currentPage(context: Context, widgetId: Int): Int {
             return try {
@@ -260,7 +277,8 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
 
         private fun advancePage(context: Context, widgetId: Int) {
             try {
-                val next = (currentPage(context, widgetId) + 1) % PAGE_COUNT
+                val count = WidgetConfig.enabledModules(context).size.coerceAtLeast(1)
+                val next = (currentPage(context, widgetId) + 1) % count
                 context.getSharedPreferences(PAGE_PREFS, Context.MODE_PRIVATE)
                     .edit().putInt("page_$widgetId", next).apply()
             } catch (_: Exception) {
@@ -280,6 +298,25 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
                 }
                 else -> "${minutes / (60 * 24)} d"
             }
+        }
+
+        /**
+         * v1.7: reads the newest cached headline (title + source) straight
+         * from the RSS disk cache the app persists — no network, no fabric.
+         */
+        private fun readTopHeadline(context: Context): Pair<String, String>? = try {
+            val f = java.io.File(context.filesDir, "rss_articles_cache.json")
+            if (!f.exists()) return null
+            val arr = org.json.JSONArray(f.readText())
+            if (arr.length() == 0) null
+            else {
+                val top = arr.getJSONObject(0)
+                val title = top.optString("title", "")
+                val source = top.optString("sourceTitle", "")
+                if (title.isBlank()) null else title to source
+            }
+        } catch (_: Exception) {
+            null
         }
 
         private fun formatNumber(n: Int): String =

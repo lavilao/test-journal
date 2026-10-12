@@ -42,6 +42,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +88,43 @@ sealed interface AppScreen {
     data object News : AppScreen
 }
 
+/**
+ * v1.7: encodes the current screen as a Bundle-friendly string so the
+ * navigation state survives rotation and process death. Before this, a
+ * kill while you read a note dropped you back on Inicio.
+ */
+private val AppScreenSaver: Saver<AppScreen, String> = Saver(
+    save = { screen ->
+        when (screen) {
+            is AppScreen.Main -> "main:${screen.tab.name}"
+            is AppScreen.Edit -> "edit:${screen.entryId ?: -1L}"
+            is AppScreen.Detail -> "detail:${screen.entryId}"
+            AppScreen.Assistant -> "assistant"
+            AppScreen.Lens -> "lens"
+            AppScreen.VoiceSettings -> "voicesettings"
+            AppScreen.Routines -> "routines"
+            AppScreen.News -> "news"
+        }
+    },
+    restore = { value ->
+        val parts = value.split(":", limit = 2)
+        val arg = parts.getOrNull(1)
+        when (parts.firstOrNull()) {
+            "main" -> runCatching { AppScreen.Main(MainNavTab.valueOf(arg ?: "INICIO")) }
+                .getOrDefault(AppScreen.Main(MainNavTab.INICIO))
+            "edit" -> AppScreen.Edit(arg?.toLongOrNull()?.takeIf { it > 0L })
+            "detail" -> arg?.toLongOrNull()?.let { AppScreen.Detail(it) }
+                ?: AppScreen.Main(MainNavTab.INICIO)
+            "assistant" -> AppScreen.Assistant
+            "lens" -> AppScreen.Lens
+            "voicesettings" -> AppScreen.VoiceSettings
+            "routines" -> AppScreen.Routines
+            "news" -> AppScreen.News
+            else -> AppScreen.Main(MainNavTab.INICIO)
+        }
+    }
+)
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -95,12 +134,27 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_TAB = "open_tab"
         const val TAB_NOTIFICATIONS = "notifications"
 
+        /** Routine notifications deep-link to a full screen (news/assistant). */
+        const val EXTRA_OPEN_SCREEN = "open_screen"
+        const val SCREEN_NEWS = "news"
+        const val SCREEN_ASSISTANT = "assistant"
+        const val SCREEN_ROUTINES = "routines"
+
+        /** Routine "note created" notifications deep-link to that note. */
+        const val EXTRA_OPEN_DETAIL = "open_detail"
+
         /** Voice commands that must open the assistant screen (from the
          *  hotword notification). */
         val voiceCommandRequests = MutableStateFlow<String?>(null)
 
         /** Tab deep-links coming from notifications / the widget. */
         val openTabRequests = MutableStateFlow<String?>(null)
+
+        /** Screen deep-links coming from routine notifications. */
+        val openScreenRequests = MutableStateFlow<String?>(null)
+
+        /** Note deep-links coming from routine notifications. */
+        val openDetailRequests = MutableStateFlow<Long?>(null)
 
         /** Shares from other apps (ACTION_SEND), consumed by the UI layer. */
         val shareRequests = MutableStateFlow<android.content.Intent?>(null)
@@ -118,6 +172,12 @@ class MainActivity : ComponentActivity() {
         }
         intent?.getStringExtra(EXTRA_OPEN_TAB)?.let { tab ->
             openTabRequests.value = tab
+        }
+        intent?.getStringExtra(EXTRA_OPEN_SCREEN)?.let { screen ->
+            openScreenRequests.value = screen
+        }
+        intent.getLongExtra(EXTRA_OPEN_DETAIL, -1L).let { detailId ->
+            if (detailId > 0L) openDetailRequests.value = detailId
         }
     }
 
@@ -141,6 +201,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         handleVoiceCommandIntent(intent)
         handleIncomingIntent(intent)
+        // v1.7: Bixby-style routines — "al abrir la app" trigger.
+        com.example.routine.RoutineEngine.evaluateAsync(
+            this, com.example.routine.RoutineEngine.RoutineEvent.APP_OPEN
+        )
         setContent {
             val viewModel: JournalViewModel = viewModel()
             MnemosyneApp(viewModel = viewModel)
@@ -169,11 +233,24 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MnemosyneApp(viewModel: JournalViewModel) {
-    var screenState by remember { mutableStateOf<AppScreen>(AppScreen.Main(MainNavTab.INICIO)) }
+    // v1.7: navigation survives rotation AND process death (before, a
+    // rotation or a kill while reading a note dropped you back on Inicio).
+    var screenState by rememberSaveable(stateSaver = AppScreenSaver) {
+        mutableStateOf<AppScreen>(AppScreen.Main(MainNavTab.INICIO))
+    }
     val currentTab by viewModel.currentTab.collectAsState()
     val interfaceMode by viewModel.interfaceMode.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val appContext = androidx.compose.ui.platform.LocalContext.current
+
+    // After a process-death restore, put the saved tab back into the
+    // ViewModel so the Main screen renders what the user was seeing.
+    LaunchedEffect(Unit) {
+        val saved = screenState
+        if (saved is AppScreen.Main && saved.tab != viewModel.currentTab.value) {
+            viewModel.selectTab(saved.tab)
+        }
+    }
 
     // Voice commands arriving from the hotword notification or the
     // system-assistant gesture open the local assistant with the utterance.
@@ -195,6 +272,28 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         if (openTabRequest != null) {
             screenState = AppScreen.Main(viewModel.currentTab.value)
             MainActivity.openTabRequests.value = null
+        }
+    }
+
+    // v1.7: routine deep-links ("abrir las noticias" / "abrir el asistente").
+    val openScreenRequest by MainActivity.openScreenRequests.collectAsState()
+    LaunchedEffect(openScreenRequest) {
+        when (openScreenRequest) {
+            MainActivity.SCREEN_NEWS -> screenState = AppScreen.News
+            MainActivity.SCREEN_ASSISTANT -> screenState = AppScreen.Assistant
+            MainActivity.SCREEN_ROUTINES -> screenState = AppScreen.Routines
+        }
+        if (openScreenRequest != null) {
+            MainActivity.openScreenRequests.value = null
+        }
+    }
+
+    // v1.7: "nota creada por una rutina" deep-links straight to that note.
+    val openDetailRequest by MainActivity.openDetailRequests.collectAsState()
+    LaunchedEffect(openDetailRequest) {
+        openDetailRequest?.let { id ->
+            screenState = AppScreen.Detail(id)
+            MainActivity.openDetailRequests.value = null
         }
     }
 

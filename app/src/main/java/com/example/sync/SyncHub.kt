@@ -144,6 +144,14 @@ object SyncHub {
             } catch (_: Exception) {
             }
             try {
+                // v1.7: Bixby-style routines — time & battery triggers ride
+                // the same 5-minute tick.
+                com.example.routine.RoutineEngine.evaluate(
+                    app, com.example.routine.RoutineEngine.RoutineEvent.TICK
+                )
+            } catch (_: Exception) {
+            }
+            try {
                 // Location-based reminders (private app: coordinates never
                 // leave the device).
                 com.example.location.SmartPlaces.checkProximityAndNotify(app)
