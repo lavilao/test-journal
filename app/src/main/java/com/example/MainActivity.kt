@@ -176,9 +176,8 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(EXTRA_OPEN_SCREEN)?.let { screen ->
             openScreenRequests.value = screen
         }
-        intent.getLongExtra(EXTRA_OPEN_DETAIL, -1L).let { detailId ->
-            if (detailId > 0L) openDetailRequests.value = detailId
-        }
+        val detailId = intent?.getLongExtra(EXTRA_OPEN_DETAIL, -1L) ?: -1L
+        if (detailId > 0L) openDetailRequests.value = detailId
     }
 
     /**

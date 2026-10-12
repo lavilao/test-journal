@@ -306,14 +306,16 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
          */
         private fun readTopHeadline(context: Context): Pair<String, String>? = try {
             val f = java.io.File(context.filesDir, "rss_articles_cache.json")
-            if (!f.exists()) return null
-            val arr = org.json.JSONArray(f.readText())
-            if (arr.length() == 0) null
+            if (!f.exists()) null
             else {
-                val top = arr.getJSONObject(0)
-                val title = top.optString("title", "")
-                val source = top.optString("sourceTitle", "")
-                if (title.isBlank()) null else title to source
+                val arr = org.json.JSONArray(f.readText())
+                if (arr.length() == 0) null
+                else {
+                    val top = arr.getJSONObject(0)
+                    val title = top.optString("title", "")
+                    val source = top.optString("sourceTitle", "")
+                    if (title.isBlank()) null else title to source
+                }
             }
         } catch (_: Exception) {
             null

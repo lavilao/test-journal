@@ -162,38 +162,40 @@ object RoutineEngine {
         save(context, load(context).filter { it.id != id })
     }
 
-    private fun parseRoutine(o: JSONObject): UserRoutine? = try {
-        val trigger: Trigger = when (val t = o.getString("trigger_type")) {
-            "time" -> Trigger.Time(o.getInt("hour"), o.getInt("minute"))
-            "charging_on" -> Trigger.ChargingOn
-            "charging_off" -> Trigger.ChargingOff
-            "battery_below" -> Trigger.BatteryBelow(o.optInt("level", 20))
-            "app_open" -> Trigger.AppOpen
-            else -> return null
-        }
-        val action: Action = when (val a = o.getString("action_type")) {
-            "notification" -> Action.Notify(
-                o.optString("action_title", "Rutina"),
-                o.optString("action_text", "")
+    private fun parseRoutine(o: JSONObject): UserRoutine? {
+        return try {
+            val trigger: Trigger = when (val t = o.getString("trigger_type")) {
+                "time" -> Trigger.Time(o.getInt("hour"), o.getInt("minute"))
+                "charging_on" -> Trigger.ChargingOn
+                "charging_off" -> Trigger.ChargingOff
+                "battery_below" -> Trigger.BatteryBelow(o.optInt("level", 20))
+                "app_open" -> Trigger.AppOpen
+                else -> return null
+            }
+            val action: Action = when (val a = o.getString("action_type")) {
+                "notification" -> Action.Notify(
+                    o.optString("action_title", "Rutina"),
+                    o.optString("action_text", "")
+                )
+                "note" -> Action.CreateNote(
+                    o.optString("action_title", "Nota de rutina"),
+                    o.optString("action_body", "")
+                )
+                "open_news" -> Action.OpenNews
+                "open_assistant" -> Action.OpenAssistant
+                else -> return null
+            }
+            UserRoutine(
+                id = o.getString("id"),
+                name = o.optString("name", "Rutina"),
+                enabled = o.optBoolean("enabled", true),
+                trigger = trigger,
+                action = action,
+                lastFiredAt = o.optLong("last_fired_at", 0L)
             )
-            "note" -> Action.CreateNote(
-                o.optString("action_title", "Nota de rutina"),
-                o.optString("action_body", "")
-            )
-            "open_news" -> Action.OpenNews
-            "open_assistant" -> Action.OpenAssistant
-            else -> return null
+        } catch (_: Exception) {
+            null
         }
-        UserRoutine(
-            id = o.getString("id"),
-            name = o.optString("name", "Rutina"),
-            enabled = o.optBoolean("enabled", true),
-            trigger = trigger,
-            action = action,
-            lastFiredAt = o.optLong("last_fired_at", 0L)
-        )
-    } catch (_: Exception) {
-        null
     }
 
     private fun routineJson(r: UserRoutine): JSONObject = JSONObject().apply {
@@ -290,8 +292,7 @@ object RoutineEngine {
 
     private fun batteryPercent(context: Context): Int? = try {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-            ?: return null
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
         if (pct in 0..100) pct else null
     } catch (_: Exception) {
         null
