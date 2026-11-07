@@ -375,7 +375,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         Scaffold(
             contentWindowInsets = WindowInsets.safeDrawing,
             bottomBar = {
-                if (screenState is AppScreen.Main && !isSamsungMode) {
+                if (screenState is AppScreen.Main) {
                     GoogleNavBar(
                         currentTab = currentTab,
                         onSelect = { viewModel.selectTab(it) }
@@ -398,30 +398,19 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         is AppScreen.Main -> {
                             when (currentTab) {
                                 MainNavTab.INICIO, MainNavTab.TIMELINE -> {
-                                    if (isSamsungMode) {
-                                        NowBriefHomeScreen(
-                                            viewModel = viewModel,
-                                            onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
-                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
-                                            onOpenLens = { screenState = AppScreen.Lens },
-                                            onOpenAssistant = { screenState = AppScreen.Assistant },
-                                            onOpenRoutines = { screenState = AppScreen.Routines },
-                                            onOpenNews = { screenState = AppScreen.News }
-                                        )
-                                    } else {
-                                        TimelineScreen(
-                                            viewModel = viewModel,
-                                            onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
-                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
-                                            onNavigateToEntity = { entityId ->
-                                                viewModel.selectEntity(entityId)
-                                                viewModel.selectTab(MainNavTab.GRAPH)
-                                            },
-                                            onOpenLens = { screenState = AppScreen.Lens },
-                                            onOpenAssistant = { screenState = AppScreen.Assistant },
-                                            onOpenNews = { screenState = AppScreen.News }
-                                        )
-                                    }
+                                    TimelineScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
+                                        onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                        onNavigateToEntity = { entityId ->
+                                            viewModel.selectEntity(entityId)
+                                            viewModel.selectTab(MainNavTab.GRAPH)
+                                        },
+                                        onOpenLens = { screenState = AppScreen.Lens },
+                                        onOpenAssistant = { screenState = AppScreen.Assistant },
+                                        onOpenRoutines = { screenState = AppScreen.Routines },
+                                        onOpenNews = { screenState = AppScreen.News }
+                                    )
                                 }
                                 MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> GoogleUniversalSearchScreen(
                                     viewModel = viewModel,

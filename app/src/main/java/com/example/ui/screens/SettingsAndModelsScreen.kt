@@ -224,70 +224,47 @@ fun SettingsAndModelsScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // SECTION: Interface Mode Selector (Modo Google vs Modo Samsung)
+        // SECTION: Experiencia de Inicio Unificada
         Text(
-            text = "Modo de Pantalla de Inicio",
+            text = "Pantalla de Inicio Unificada",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Elige tu estilo visual preferido para el hub principal.",
+            text = "Integración total: At a Glance, búsqueda universal en el teléfono, resumen diario con vitales y feed de noticias y notas.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(10.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = GoogleBlue.copy(alpha = 0.08f),
+            border = BorderStroke(1.dp, GoogleBlue.copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            val isGoogle = interfaceMode == AppInterfaceMode.GOOGLE
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (isGoogle) GoogleBlue.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                border = if (isGoogle) BorderStroke(2.dp, GoogleBlue) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { viewModel.setInterfaceMode(AppInterfaceMode.GOOGLE) }
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "Modo Google",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = if (isGoogle) GoogleBlue else MaterialTheme.colorScheme.onSurface
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = GoogleBlue,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Pixel At a Glance transparente y sin bordes, buscador Google y feed limpio.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Experiencia Unificada Activa",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = GoogleBlue
                     )
                 }
-            }
-
-            val isSamsung = interfaceMode == AppInterfaceMode.SAMSUNG
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (isSamsung) GoogleBlue.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                border = if (isSamsung) BorderStroke(2.dp, GoogleBlue) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { viewModel.setInterfaceMode(AppInterfaceMode.SAMSUNG) }
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "Modo Samsung",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = if (isSamsung) GoogleBlue else MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Now brief: tarjetas de vidrio líquido, fondo aurora y cápsula flotante.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Incluye el widget At a Glance transparente, buscador universal en el dispositivo (archivos, contactos y notas), resumen adaptativo del momento del día y métricas de pasos/pantalla.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 

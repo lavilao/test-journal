@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -38,10 +39,14 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -88,6 +93,8 @@ import com.example.ui.components.StorypadNewNoteFab
 import com.example.ui.components.StorypadNoteType
 import com.example.ui.components.VoiceTranscriptionModal
 import com.example.ui.theme.ForestPrimary
+import com.example.ui.theme.NowBriefNewsBlue
+import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
 import kotlinx.coroutines.delay
@@ -109,6 +116,7 @@ fun TimelineScreen(
     onNavigateToEntity: (Long) -> Unit = {},
     onOpenLens: () -> Unit = {},
     onOpenAssistant: () -> Unit = {},
+    onOpenRoutines: () -> Unit = {},
     onOpenNews: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -603,6 +611,249 @@ fun TimelineScreen(
                         }
                     }
                 } else {
+                    // Unified Intelligent Daily Briefing & Vitals Card
+                    item {
+                        var briefingExpanded by remember { mutableStateOf(false) }
+                        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                        val periodGreeting = when {
+                            hour < 6 -> "Buenas noches"
+                            hour < 12 -> "Buenos días"
+                            hour < 19 -> "Buenas tardes"
+                            else -> "Buenas noches"
+                        }
+                        val periodQuote = when {
+                            hour < 12 -> "Empieza el día con claridad e intención."
+                            hour < 19 -> "Revisa tu avance y mantén el enfoque."
+                            else -> "Cierra el día, reflexiona y descansa."
+                        }
+
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = GoogleBlue.copy(alpha = 0.12f),
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.AutoAwesome,
+                                                    contentDescription = null,
+                                                    tint = GoogleBlue,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = periodGreeting,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = periodQuote,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { briefingExpanded = !briefingExpanded },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (briefingExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = if (briefingExpanded) "Contraer" else "Expandir",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Quick glanceable metrics: Pasos, Pantalla, Recordatorios
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    // Steps
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = NowBriefVitalsGreen.copy(alpha = 0.10f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                if (!telemetry.hasActivityRecognitionPermission) {
+                                                    activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.DirectionsWalk,
+                                                contentDescription = null,
+                                                tint = NowBriefVitalsGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column {
+                                                Text(
+                                                    text = if (telemetry.hasActivityRecognitionPermission && telemetry.isStepSensorAvailable) {
+                                                        "${telemetry.todaySteps}"
+                                                    } else {
+                                                        "Pasos"
+                                                    },
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = NowBriefVitalsGreen
+                                                )
+                                                Text(
+                                                    text = if (telemetry.hasActivityRecognitionPermission) "pasos hoy" else "activar",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Screen Time
+                                    val screenTimeText = telemetry.screenTimeMinutes?.let {
+                                        val h = it / 60
+                                        val m = it % 60
+                                        if (h > 0) "${h}h ${m}m" else "${m}m"
+                                    } ?: "—"
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = NowBriefNewsBlue.copy(alpha = 0.10f),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Smartphone,
+                                                contentDescription = null,
+                                                tint = NowBriefNewsBlue,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column {
+                                                Text(
+                                                    text = screenTimeText,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = NowBriefNewsBlue
+                                                )
+                                                Text(
+                                                    text = "pantalla",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Calendar / Agenda status
+                                    val eventCount = calendarEvents.size
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = GoogleBlue.copy(alpha = 0.10f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                if (telemetry.hasCalendarPermission) {
+                                                    viewModel.calendarSyncManager.openCalendarApp()
+                                                } else {
+                                                    calendarPermissionLauncher.launch(
+                                                        viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                                    )
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CalendarToday,
+                                                contentDescription = null,
+                                                tint = GoogleBlue,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column {
+                                                Text(
+                                                    text = if (telemetry.hasCalendarPermission) "$eventCount eventos" else "Conectar",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = GoogleBlue
+                                                )
+                                                Text(
+                                                    text = "agenda",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (briefingExpanded) {
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    androidx.compose.material3.HorizontalDivider(
+                                        thickness = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Interactive reflection / rutinas shortcuts
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        TextButton(onClick = onNavigateToNewEntry) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Escribir reflexión", fontSize = 12.sp)
+                                        }
+                                        TextButton(onClick = onOpenRoutines) {
+                                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Ver rutinas", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Section Toggle: Noticias vs Mis Memorias
                     item {
                         Row(
