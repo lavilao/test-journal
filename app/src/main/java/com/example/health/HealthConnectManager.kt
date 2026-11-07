@@ -162,6 +162,37 @@ object HealthConnectManager {
         return out
     }
 
+    /** Sleep per day in minutes for the last [days] days (oldest first). */
+    suspend fun sleepLastDays(context: Context, days: Int = 7): List<Pair<LocalDate, Long>>? =
+        withContext(Dispatchers.IO) {
+            if (!preferEnabled(context)) return@withContext null
+            val hc = client(context) ?: return@withContext null
+            if (!hasReadSleepPermission(hc)) return@withContext null
+            val zone = ZoneId.systemDefault()
+            val out = mutableListOf<Pair<LocalDate, Long>>()
+            var day = LocalDate.now(zone)
+            repeat(days.coerceIn(1, 14)) {
+                val start = day.minusDays(1).atTime(LocalTime.of(18, 0)).atZone(zone).toInstant()
+                val end = day.atTime(LocalTime.of(15, 0)).atZone(zone).toInstant()
+                try {
+                    val response = hc.readRecords(
+                        ReadRecordsRequest(
+                            SleepSessionRecord::class,
+                            TimeRangeFilter.between(start, end)
+                        )
+                    )
+                    val totalMinutes = response.records.sumOf { record ->
+                        Duration.between(record.startTime, record.endTime).toMinutes()
+                    }
+                    out.add(0, day to totalMinutes)
+                } catch (_: Exception) {
+                    out.add(0, day to 0L)
+                }
+                day = day.minusDays(1)
+            }
+            out
+        }
+
     // ------------------------------------------------------------------
     // Steps cache bridge (feeds the existing step pipeline)
     // ------------------------------------------------------------------
@@ -219,6 +250,14 @@ object HealthConnectManager {
         // permissionController is a PROPERTY (not a function) in 1.1.0.
         hc.permissionController.getGrantedPermissions().contains(
             "android.permission.health.READ_STEPS"
+        )
+    } catch (_: Exception) {
+        false
+    }
+
+    suspend fun hasReadSleepPermission(hc: HealthConnectClient): Boolean = try {
+        hc.permissionController.getGrantedPermissions().contains(
+            "android.permission.health.READ_SLEEP"
         )
     } catch (_: Exception) {
         false

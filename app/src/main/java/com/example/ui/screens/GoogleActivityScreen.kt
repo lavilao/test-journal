@@ -63,6 +63,7 @@ import com.example.ui.components.AppIconImage
 import com.example.ui.components.FileIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
+import com.example.ui.components.WeeklyHealthTrendsCard
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
 import java.text.SimpleDateFormat
@@ -82,6 +83,22 @@ fun GoogleActivityScreen(
     val recentFiles by viewModel.recentDeviceFiles.collectAsState()
     val recentApps by viewModel.recentDeviceApps.collectAsState()
     val habitDigest by viewModel.habitDigest.collectAsState()
+
+    val weeklyTrends by viewModel.weeklyHealthTrends.collectAsState()
+
+    // Activity Recognition / Health Connect permission launcher
+    val activityPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.refreshTelemetry()
+            viewModel.refreshWeeklyHealthTrends()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshWeeklyHealthTrends()
+    }
 
     var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
 
@@ -157,6 +174,18 @@ fun GoogleActivityScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // SECTION: Weekly Health Trends (Activity Recognition & Health Connect)
+            weeklyTrends?.let { trends ->
+                item {
+                    WeeklyHealthTrendsCard(
+                        trends = trends,
+                        onConnectHealthClick = {
+                            activityPermissionLauncher.launch(android.Manifest.permission.ACTIVITY_RECOGNITION)
+                        }
+                    )
+                }
+            }
+
             // SECTION: Digital health report (local data only)
             item {
                 Card(

@@ -152,6 +152,16 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val lifeHubManager = DeviceLifeHubManager(application, viewModelScope)
     val telemetry: StateFlow<LifeHubTelemetry> = lifeHubManager.telemetry
 
+    // Weekly Health & Activity Trends (Activity Recognition & Health Connect)
+    private val _weeklyHealthTrends = MutableStateFlow<com.example.health.WeeklyHealthTrends?>(null)
+    val weeklyHealthTrends: StateFlow<com.example.health.WeeklyHealthTrends?> = _weeklyHealthTrends.asStateFlow()
+
+    fun refreshWeeklyHealthTrends() {
+        viewModelScope.launch {
+            _weeklyHealthTrends.value = com.example.health.WeeklyHealthTrendRepository.getWeeklyTrends(getApplication<Application>())
+        }
+    }
+
     // Local Reminders
     val allReminders: StateFlow<List<LocalReminder>> = repository.allReminders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -167,6 +177,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val rssSources: StateFlow<List<RssFeedSource>> = rssFeedManager.sources
 
     init {
+        refreshWeeklyHealthTrends()
         viewModelScope.launch {
             rssFeedManager.refreshFeeds()
         }
