@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceFileInfo
 import com.example.rss.RssArticle
+import com.example.ui.components.AuroraBackground
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
@@ -153,19 +154,21 @@ fun GoogleUniversalSearchScreen(
         if (searchQuery.isNotBlank()) viewModel.searchDevice(searchQuery)
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .testTag("universal_search_screen")
     ) {
-        // Search Header Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        AuroraBackground(modifier = Modifier.fillMaxSize())
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Search Header Bar
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                shadowElevation = 0.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Surface(
                     shape = RoundedCornerShape(26.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -239,12 +242,12 @@ fun GoogleUniversalSearchScreen(
             }
         }
 
-        // Search Content List
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+            // Search Content List
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             if (searchQuery.isBlank()) {
                 item {
                     Text(
@@ -463,6 +466,7 @@ fun GoogleUniversalSearchScreen(
                     }
                 }
             }
+        }
         }
     }
 

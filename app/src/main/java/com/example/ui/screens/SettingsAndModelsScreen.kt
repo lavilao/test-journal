@@ -224,15 +224,15 @@ fun SettingsAndModelsScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // SECTION: Experiencia de Inicio Unificada
+        // SECTION: Experiencia Unificada NowBrief + Búsqueda Universal
         Text(
-            text = "Pantalla de Inicio Unificada",
+            text = "Experiencia Liquid Glass Unificada",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Integración total: At a Glance, búsqueda universal en el teléfono, resumen diario con vitales y feed de noticias y notas.",
+            text = "Base visual Samsung Now brief combinada con el buscador universal, noticias enriquecidas y gestos del modo Google.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -240,8 +240,8 @@ fun SettingsAndModelsScreen(
 
         Surface(
             shape = RoundedCornerShape(14.dp),
-            color = GoogleBlue.copy(alpha = 0.08f),
-            border = BorderStroke(1.dp, GoogleBlue.copy(alpha = 0.35f)),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -249,19 +249,19 @@ fun SettingsAndModelsScreen(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = GoogleBlue,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Experiencia Unificada Activa",
+                        text = "Now brief Unificado Activo",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = GoogleBlue
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Incluye el widget At a Glance transparente, buscador universal en el dispositivo (archivos, contactos y notas), resumen adaptativo del momento del día y métricas de pasos/pantalla.",
+                    text = "Incluye tarjetas Liquid Glass sobre fondo Aurora, anillos de vitales, clima de la semana, alertas de alarma/batería, buscador en todo el teléfono y feed Noticias/Memorias con selección múltiple.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1641,7 +1641,7 @@ fun SettingsAndModelsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(104.dp))
     }
 
     // Export Result Dialog

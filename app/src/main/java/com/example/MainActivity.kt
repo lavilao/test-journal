@@ -13,29 +13,17 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,14 +35,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.data.AppInterfaceMode
 import com.example.speech.hotword.HotwordService
 import com.example.ui.components.GlassBottomBar
 import com.example.ui.components.GlassTab
-import com.example.ui.components.GoogleBlue
 import com.example.ui.lens.LensScreen
 import com.example.ui.screens.AssistantScreen
 import com.example.ui.screens.EntityExplorerScreen
@@ -64,14 +49,12 @@ import com.example.ui.screens.GoogleActivityScreen
 import com.example.ui.screens.GoogleNotificationsScreen
 import com.example.ui.screens.GoogleUniversalSearchScreen
 import com.example.ui.screens.KnowledgeGraphScreen
+import com.example.ui.screens.NewsBrowserScreen
 import com.example.ui.screens.NowBriefHomeScreen
 import com.example.ui.screens.RoutinesScreen
 import com.example.ui.screens.SettingsAndModelsScreen
-import com.example.ui.screens.TimelineScreen
 import com.example.ui.screens.VaultExplorerScreen
 import com.example.ui.screens.VoiceAndAssistantScreen
-import com.example.ui.screens.NewsBrowserScreen
-import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NowBriefTheme
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
@@ -238,7 +221,6 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         mutableStateOf<AppScreen>(AppScreen.Main(MainNavTab.INICIO))
     }
     val currentTab by viewModel.currentTab.collectAsState()
-    val interfaceMode by viewModel.interfaceMode.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val appContext = androidx.compose.ui.platform.LocalContext.current
 
@@ -323,7 +305,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         }
     }
 
-    MnemosyneThemeFor(interfaceMode, darkTheme) {
+    NowBriefTheme(darkTheme = darkTheme) {
         // Handle system back button for sub-screens
         when (val screen = screenState) {
             is AppScreen.Edit -> {
@@ -370,18 +352,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
             }
         }
 
-        val isSamsungMode = interfaceMode == AppInterfaceMode.SAMSUNG
-
         Scaffold(
             contentWindowInsets = WindowInsets.safeDrawing,
-            bottomBar = {
-                if (screenState is AppScreen.Main) {
-                    GoogleNavBar(
-                        currentTab = currentTab,
-                        onSelect = { viewModel.selectTab(it) }
-                    )
-                }
-            },
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
             Box(
@@ -398,14 +370,10 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         is AppScreen.Main -> {
                             when (currentTab) {
                                 MainNavTab.INICIO, MainNavTab.TIMELINE -> {
-                                    TimelineScreen(
+                                    NowBriefHomeScreen(
                                         viewModel = viewModel,
                                         onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
                                         onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
-                                        onNavigateToEntity = { entityId ->
-                                            viewModel.selectEntity(entityId)
-                                            viewModel.selectTab(MainNavTab.GRAPH)
-                                        },
                                         onOpenLens = { screenState = AppScreen.Lens },
                                         onOpenAssistant = { screenState = AppScreen.Assistant },
                                         onOpenRoutines = { screenState = AppScreen.Routines },
@@ -489,7 +457,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         is AppScreen.News -> {
                             NewsBrowserScreen(
                                 viewModel = viewModel,
-                                isSamsungMode = isSamsungMode,
+                                isSamsungMode = true,
                                 onBack = { screenState = AppScreen.Main(currentTab) },
                                 onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) }
                             )
@@ -504,12 +472,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     }
                 }
 
-                // In Samsung mode the glass capsule floats OVER the content
-                // (drawn after it, so it stays on top), horizontally centered.
-                // The Scaffold's innerPadding already reserves the nav-bar
-                // inset, so no extra windowInsetsPadding here (double inset
-                // used to push the dock too high above the gesture bar).
-                if (screenState is AppScreen.Main && isSamsungMode) {
+                // Floating NowBrief liquid-glass capsule dock across all Main tabs
+                if (screenState is AppScreen.Main) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -528,24 +492,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
 }
 
 /**
- * Applies the theme that matches the selected interface mode.
- */
-@Composable
-private fun MnemosyneThemeFor(
-    mode: AppInterfaceMode,
-    darkTheme: Boolean,
-    content: @Composable () -> Unit
-) {
-    when (mode) {
-        AppInterfaceMode.SAMSUNG -> NowBriefTheme(darkTheme = darkTheme, content = content)
-        AppInterfaceMode.GOOGLE -> MyApplicationTheme(darkTheme = darkTheme, content = content)
-    }
-}
-
-/**
- * Samsung mode navigation: the Now brief floating glass capsule, centered.
- * Four destinations for full feature parity with the Google mode dock:
- * Inicio / Buscar / Tareas (notificaciones y recordatorios) / Actividad.
+ * NowBrief floating liquid-glass capsule navigation bar, centered.
+ * Four destinations: Inicio / Buscar / Tareas / Actividad.
  */
 @Composable
 private fun NowBriefGlassNavBar(
@@ -582,68 +530,6 @@ private fun NowBriefGlassNavBar(
             tabs = tabs,
             selectedTabIndex = selected,
             onTabSelected = { index -> onSelect(tabTargets[index]) }
-        )
-    }
-}
-
-/**
- * Google mode navigation: the classic full-width Material bar.
- */
-@Composable
-private fun GoogleNavBar(
-    currentTab: MainNavTab,
-    onSelect: (MainNavTab) -> Unit
-) {
-    NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .testTag("main_navigation_bar")
-    ) {
-        NavigationBarItem(
-            selected = currentTab == MainNavTab.INICIO || currentTab == MainNavTab.TIMELINE,
-            onClick = { onSelect(MainNavTab.INICIO) },
-            icon = { Icon(Icons.Default.Home, contentDescription = "Inicio", modifier = Modifier.size(24.dp)) },
-            label = { Text("Inicio") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = GoogleBlue,
-                indicatorColor = GoogleBlue.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.testTag("nav_inicio")
-        )
-        NavigationBarItem(
-            selected = currentTab == MainNavTab.BUSCAR || currentTab == MainNavTab.VAULT || currentTab == MainNavTab.SEARCH,
-            onClick = { onSelect(MainNavTab.BUSCAR) },
-            icon = { Icon(Icons.Default.Search, contentDescription = "Buscar", modifier = Modifier.size(24.dp)) },
-            label = { Text("Buscar") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = GoogleBlue,
-                indicatorColor = GoogleBlue.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.testTag("nav_buscar")
-        )
-        NavigationBarItem(
-            selected = currentTab == MainNavTab.NOTIFICACIONES,
-            onClick = { onSelect(MainNavTab.NOTIFICACIONES) },
-            icon = { Icon(Icons.Default.Notifications, contentDescription = "Notificaciones", modifier = Modifier.size(24.dp)) },
-            label = { Text("Notificaciones") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = GoogleBlue,
-                indicatorColor = GoogleBlue.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.testTag("nav_notificaciones")
-        )
-        NavigationBarItem(
-            selected = currentTab == MainNavTab.ACTIVIDAD || currentTab == MainNavTab.GRAPH,
-            onClick = { onSelect(MainNavTab.ACTIVIDAD) },
-            icon = { Icon(Icons.Default.History, contentDescription = "Actividad", modifier = Modifier.size(24.dp)) },
-            label = { Text("Actividad") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = GoogleBlue,
-                indicatorColor = GoogleBlue.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.testTag("nav_actividad")
         )
     }
 }

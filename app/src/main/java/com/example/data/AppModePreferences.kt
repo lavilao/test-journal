@@ -19,11 +19,11 @@ class AppModePreferences(context: Context) {
     val interfaceMode: StateFlow<AppInterfaceMode> = _interfaceMode.asStateFlow()
 
     private fun loadMode(): AppInterfaceMode {
-        val saved = prefs.getString("interface_mode", AppInterfaceMode.GOOGLE.name)
+        val saved = prefs.getString("interface_mode", AppInterfaceMode.SAMSUNG.name)
         return try {
-            AppInterfaceMode.valueOf(saved ?: AppInterfaceMode.GOOGLE.name)
+            AppInterfaceMode.valueOf(saved ?: AppInterfaceMode.SAMSUNG.name)
         } catch (_: Exception) {
-            AppInterfaceMode.GOOGLE
+            AppInterfaceMode.SAMSUNG
         }
     }
 

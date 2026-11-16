@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.AuroraBackground
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
@@ -105,18 +106,20 @@ fun GoogleNotificationsScreen(
         viewModel.refreshTelemetry()
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .testTag("google_notifications_screen")
     ) {
-        // Top Header
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        AuroraBackground(modifier = Modifier.fillMaxSize())
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Header
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                shadowElevation = 0.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -165,7 +168,7 @@ fun GoogleNotificationsScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Android System Calendar Events Section
@@ -390,6 +393,7 @@ fun GoogleNotificationsScreen(
                     }
                 }
             }
+        }
         }
     }
 

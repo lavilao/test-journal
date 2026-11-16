@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.health.HealthInsightsManager
 import com.example.ui.components.AppIconImage
+import com.example.ui.components.AuroraBackground
 import com.example.ui.components.FileIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
@@ -136,18 +137,20 @@ fun GoogleActivityScreen(
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .testTag("google_activity_screen")
     ) {
-        // Top Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        AuroraBackground(modifier = Modifier.fillMaxSize())
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Bar
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                shadowElevation = 0.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -171,7 +174,7 @@ fun GoogleActivityScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 104.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // SECTION: Weekly Health Trends (Activity Recognition & Health Connect)
@@ -617,6 +620,7 @@ fun GoogleActivityScreen(
                     }
                 }
             }
+        }
         }
     }
 }
