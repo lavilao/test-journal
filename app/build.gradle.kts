@@ -96,7 +96,10 @@ android {
 
   splits {
     abi {
-      isEnable = false
+      isEnable = true
+      reset()
+      include("armeabi-v7a")
+      isUniversalApk = false
     }
   }
 }
