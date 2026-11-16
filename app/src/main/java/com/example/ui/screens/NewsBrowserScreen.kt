@@ -49,11 +49,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.rss.RssArticle
-import com.example.ui.components.AuroraBackground
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleDiscoverCard
 import com.example.ui.components.RssOfflineReaderModal
 import com.example.viewmodel.JournalViewModel
+import com.example.wallpaper.NowBriefAppBackground
 import kotlinx.coroutines.launch
 
 /**
@@ -125,9 +125,13 @@ fun NewsBrowserScreen(
             )
         }
     ) { padding ->
+        val realWeather by viewModel.realWeather.collectAsState()
         Box(modifier = Modifier.fillMaxSize()) {
             if (isSamsungMode) {
-                AuroraBackground(modifier = Modifier.fillMaxSize())
+                NowBriefAppBackground(
+                    modifier = Modifier.fillMaxSize(),
+                    weatherCode = realWeather.weatherCode
+                )
             }
 
             Column(

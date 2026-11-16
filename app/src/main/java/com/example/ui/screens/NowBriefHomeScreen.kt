@@ -116,7 +116,6 @@ import com.example.rss.RssArticle
 import com.example.telemetry.ForecastData
 import com.example.telemetry.RealWeatherData
 import com.example.telemetry.WeatherCity
-import com.example.ui.components.AuroraBackground
 import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.GlassRing
@@ -133,7 +132,8 @@ import com.example.ui.theme.NowBriefPrimaryLight
 import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
-import com.example.wallpaper.SunGradientBackground
+import com.example.wallpaper.NowBriefAppBackground
+import com.example.wallpaper.SunCycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -323,7 +323,33 @@ fun NowBriefHomeScreen(
     val dateFormat = remember { SimpleDateFormat("EEEE d 'de' MMMM", Locale.getDefault()) }
 
     val isDark = isSystemInDarkTheme()
-    val heroColor = if (isDark) NowBriefPrimaryDark else NowBriefPrimaryLight
+    val dynamicBgOn = remember { SunCycle.isDynamicAtmosphereEnabled(context) }
+    val skyCoords = remember(nowMillis) { SunCycle.lastCoordinates(context) }
+    val skyDaylight = remember(nowMillis, skyCoords) {
+        SunCycle.daylightFor(nowMillis, skyCoords?.first, skyCoords?.second)
+    }
+    val skyPhase = SunCycle.phaseAt(nowMillis, skyDaylight)
+    val skyWeather = SunCycle.weatherFromCode(weather.weatherCode ?: SunCycle.lastWeatherCode(context))
+    val useLightHeaderText = if (dynamicBgOn) {
+        SunCycle.isDarkHeaderBackdrop(skyPhase, skyWeather, isDark)
+    } else {
+        isDark
+    }
+    val heroColor = when {
+        !dynamicBgOn -> if (isDark) NowBriefPrimaryDark else NowBriefPrimaryLight
+        useLightHeaderText -> Color.White
+        else -> Color(0xFF1F2A38)
+    }
+    val headerSecondaryColor = when {
+        !dynamicBgOn -> MaterialTheme.colorScheme.onSurfaceVariant
+        useLightHeaderText -> Color.White.copy(alpha = 0.86f)
+        else -> Color(0xFF3A495C)
+    }
+    val headerAccentColor = when {
+        !dynamicBgOn -> MaterialTheme.colorScheme.primary
+        useLightHeaderText -> Color(0xFFFFD8A8)
+        else -> MaterialTheme.colorScheme.primary
+    }
 
     val greeting = remember(nowMillis) {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -342,16 +368,10 @@ fun NowBriefHomeScreen(
             .fillMaxSize()
             .testTag("nowbrief_home_root")
     ) {
-        // Signature Samsung NowBrief background (dynamic Sun or Aurora)
-        val sunWallpaperOn = remember {
-            context.getSharedPreferences("sun_wallpaper", Context.MODE_PRIVATE)
-                .getBoolean("enabled", false)
-        }
-        if (sunWallpaperOn) {
-            SunGradientBackground(modifier = Modifier.fillMaxSize())
-        } else {
-            AuroraBackground(modifier = Modifier.fillMaxSize())
-        }
+        NowBriefAppBackground(
+            modifier = Modifier.fillMaxSize(),
+            weatherCode = weather.weatherCode
+        )
 
         PullToRefreshBox(
             isRefreshing = isRefreshing || isRssLoading,
@@ -395,7 +415,7 @@ fun NowBriefHomeScreen(
                                     letterSpacing = 0.5.sp,
                                     fontSize = 11.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = headerSecondaryColor
                             )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -407,7 +427,7 @@ fun NowBriefHomeScreen(
                                 Icon(
                                     Icons.Default.LocationOn,
                                     contentDescription = "Cambiar ciudad",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = headerAccentColor,
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -416,7 +436,7 @@ fun NowBriefHomeScreen(
                                         ?: selectedCity?.name
                                         ?: "Elige tu ciudad",
                                     style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = headerSecondaryColor
                                 )
                             }
                         }
@@ -432,13 +452,13 @@ fun NowBriefHomeScreen(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
                                     strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = headerAccentColor
                                 )
                             } else {
                                 Icon(
                                     Icons.Default.Refresh,
                                     contentDescription = "Actualizar",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = headerSecondaryColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -451,7 +471,7 @@ fun NowBriefHomeScreen(
                             Icon(
                                 Icons.Default.Settings,
                                 contentDescription = "Ajustes",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = headerSecondaryColor,
                                 modifier = Modifier.size(22.dp)
                             )
                         }

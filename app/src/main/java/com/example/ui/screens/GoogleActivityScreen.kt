@@ -60,13 +60,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.health.HealthInsightsManager
 import com.example.ui.components.AppIconImage
-import com.example.ui.components.AuroraBackground
 import com.example.ui.components.FileIconImage
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.WeeklyHealthTrendsCard
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
+import com.example.wallpaper.NowBriefAppBackground
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -137,12 +137,17 @@ fun GoogleActivityScreen(
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
 
+    val realWeather by viewModel.realWeather.collectAsState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag("google_activity_screen")
     ) {
-        AuroraBackground(modifier = Modifier.fillMaxSize())
+        NowBriefAppBackground(
+            modifier = Modifier.fillMaxSize(),
+            weatherCode = realWeather.weatherCode
+        )
 
         Column(modifier = Modifier.fillMaxSize()) {
             // Top Bar

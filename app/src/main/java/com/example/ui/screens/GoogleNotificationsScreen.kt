@@ -67,11 +67,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.AuroraBackground
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
 import com.example.viewmodel.JournalViewModel
+import com.example.wallpaper.NowBriefAppBackground
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -106,12 +106,17 @@ fun GoogleNotificationsScreen(
         viewModel.refreshTelemetry()
     }
 
+    val realWeather by viewModel.realWeather.collectAsState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag("google_notifications_screen")
     ) {
-        AuroraBackground(modifier = Modifier.fillMaxSize())
+        NowBriefAppBackground(
+            modifier = Modifier.fillMaxSize(),
+            weatherCode = realWeather.weatherCode
+        )
 
         Column(modifier = Modifier.fillMaxSize()) {
             // Top Header

@@ -1,5 +1,6 @@
 package com.example.wallpaper
 
+import android.content.Context
 import java.util.Calendar
 import java.util.TimeZone
 import kotlin.math.acos
@@ -9,11 +10,8 @@ import kotlin.math.tan
 
 /**
  * Sunrise / sunset math (NOAA solar approximation, accurate to a few
- * minutes) plus the day-phase model the dynamic sun wallpaper renders.
- *
- * Location comes from the weather layer (selected city or last GPS fix),
- * persisted in the weather prefs; a sane equinox fallback (6:30 / 18:30)
- * keeps the wallpaper alive with no location at all.
+ * minutes) plus the day-phase & weather-condition model used by the dynamic
+ * atmospheric background and live wallpaper.
  */
 object SunCycle {
 
@@ -21,15 +19,78 @@ object SunCycle {
     const val PREFS = "weather_prefs"
     const val KEY_LAST_LAT = "last_lat"
     const val KEY_LAST_LON = "last_lon"
+    const val KEY_CACHE_CODE = "cache_code"
+
+    const val WALLPAPER_PREFS = "sun_wallpaper"
+    const val KEY_WALLPAPER_ENABLED = "enabled"
 
     data class Daylight(
         val sunriseMillis: Long,
         val sunsetMillis: Long
     )
 
+    enum class Phase { NIGHT, DAWN, MORNING, MIDDAY, AFTERNOON, DUSK }
+
+    enum class AtmosphereWeather {
+        CLEAR,
+        PARTLY_CLOUDY,
+        CLOUDY,
+        FOG,
+        RAIN,
+        SNOW,
+        STORM
+    }
+
+    fun weatherFromCode(code: Int?): AtmosphereWeather = when (code) {
+        null, 0, 1 -> AtmosphereWeather.CLEAR
+        2 -> AtmosphereWeather.PARTLY_CLOUDY
+        3 -> AtmosphereWeather.CLOUDY
+        45, 48 -> AtmosphereWeather.FOG
+        51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> AtmosphereWeather.RAIN
+        71, 73, 75, 77, 85, 86 -> AtmosphereWeather.SNOW
+        95, 96, 99 -> AtmosphereWeather.STORM
+        else -> AtmosphereWeather.PARTLY_CLOUDY
+    }
+
+    fun isDynamicAtmosphereEnabled(context: Context): Boolean {
+        return try {
+            context.getSharedPreferences(WALLPAPER_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_WALLPAPER_ENABLED, true)
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    fun lastWeatherCode(context: Context): Int? {
+        return try {
+            val code = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_CACHE_CODE, -1)
+            code.takeIf { it >= 0 }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Returns true when the upper sky rendered for (phase, weather, systemDark)
+     * is dark enough that header text drawn directly on the sky should use
+     * luminous light ink instead of dark ink.
+     */
+    fun isDarkHeaderBackdrop(
+        phase: Phase,
+        weather: AtmosphereWeather,
+        systemDark: Boolean
+    ): Boolean {
+        if (systemDark) return true
+        if (weather == AtmosphereWeather.FOG) return false
+        return when (phase) {
+            Phase.NIGHT, Phase.DAWN, Phase.DUSK -> true
+            Phase.MORNING, Phase.MIDDAY, Phase.AFTERNOON -> true
+        }
+    }
+
     fun daylightFor(nowMillis: Long, lat: Double?, lon: Double?): Daylight {
         if (lat == null || lon == null || lat < -89.0 || lat > 89.0 || lon < -179.0 || lon > 179.0) {
-            // No location: fixed 6:30 / 18:30 local schedule.
             val cal = Calendar.getInstance().apply {
                 timeInMillis = nowMillis
                 set(Calendar.HOUR_OF_DAY, 6); set(Calendar.MINUTE, 30)
@@ -43,11 +104,8 @@ object SunCycle {
 
         val cal = Calendar.getInstance().apply { timeInMillis = nowMillis }
         val dayOfYear = cal.get(Calendar.DAY_OF_YEAR)
-
-        // Fractional year (gamma), radians.
         val gamma = 2.0 * Math.PI / 365.0 * (dayOfYear - 1 + (cal.get(Calendar.HOUR_OF_DAY) - 12) / 24.0)
 
-        // Equation of time (minutes) and solar declination (radians).
         val eqTime = 229.18 * (
             0.000075 +
                 0.001868 * cos(gamma) - 0.032077 * sin(gamma) -
@@ -60,20 +118,14 @@ object SunCycle {
 
         val latRad = Math.toRadians(lat)
         val zenith = Math.toRadians(90.833)
-
         val cosHa = (cos(zenith) / (cos(latRad) * cos(decl))) - (tan(latRad) * tan(decl))
-        val ha = if (cosHa >= 1.0) {
-            // Polar night: no sunrise today.
-            0.0
-        } else if (cosHa <= -1.0) {
-            // Midnight sun: no sunset today.
-            Math.PI
-        } else {
-            acos(cosHa)
+        val ha = when {
+            cosHa >= 1.0 -> 0.0
+            cosHa <= -1.0 -> Math.PI
+            else -> acos(cosHa)
         }
         val haDeg = Math.toDegrees(ha)
 
-        // Solar noon / sunrise / sunset in UTC minutes.
         val sunriseUtcMin = 720 - 4 * (lon + haDeg) - eqTime
         val sunsetUtcMin = 720 - 4 * (lon - haDeg) - eqTime
 
@@ -86,9 +138,7 @@ object SunCycle {
                 set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
             }
-            var localMinutes = minutes + offsetHours * 60.0
-            // Keep inside today (wrap polar edge cases into the day).
-            localMinutes = localMinutes.coerceIn(0.0, 24.0 * 60.0 - 1.0)
+            val localMinutes = (minutes + offsetHours * 60.0).coerceIn(0.0, 24.0 * 60.0 - 1.0)
             cal2.add(Calendar.MINUTE, localMinutes.toInt())
             return cal2.timeInMillis
         }
@@ -101,14 +151,32 @@ object SunCycle {
 
     /**
      * 0f..1f position of the sun across the sky between sunrise and sunset
-     * (before sunrise / after sunset it clamps to the ends).
+     * (at night, tracks an analogous nocturnal arc from sunset to sunrise).
      */
     fun sunProgress(nowMillis: Long, daylight: Daylight): Float {
         val span = (daylight.sunsetMillis - daylight.sunriseMillis).coerceAtLeast(1)
         return ((nowMillis - daylight.sunriseMillis).toFloat() / span).coerceIn(0f, 1f)
     }
 
-    enum class Phase { NIGHT, DAWN, MORNING, MIDDAY, AFTERNOON, DUSK }
+    /**
+     * 0f..1f nocturnal arc for the moon between sunset and next sunrise.
+     */
+    fun moonProgress(nowMillis: Long, daylight: Daylight): Float {
+        val dayMs = 86_400_000L
+        return when {
+            nowMillis >= daylight.sunsetMillis -> {
+                val nextSunrise = daylight.sunriseMillis + dayMs
+                val nightSpan = (nextSunrise - daylight.sunsetMillis).coerceAtLeast(1L)
+                ((nowMillis - daylight.sunsetMillis).toFloat() / nightSpan).coerceIn(0f, 1f)
+            }
+            nowMillis <= daylight.sunriseMillis -> {
+                val prevSunset = daylight.sunsetMillis - dayMs
+                val nightSpan = (daylight.sunriseMillis - prevSunset).coerceAtLeast(1L)
+                ((nowMillis - prevSunset).toFloat() / nightSpan).coerceIn(0f, 1f)
+            }
+            else -> 0.5f
+        }
+    }
 
     fun phaseAt(nowMillis: Long, daylight: Daylight): Phase {
         val sunrise = daylight.sunriseMillis
@@ -125,9 +193,9 @@ object SunCycle {
     }
 
     /** Reads the last known coordinates the weather layer persisted. */
-    fun lastCoordinates(context: android.content.Context): Pair<Double, Double>? {
+    fun lastCoordinates(context: Context): Pair<Double, Double>? {
         return try {
-            val prefs = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val lat = prefs.getFloat(KEY_LAST_LAT, Float.NaN)
             val lon = prefs.getFloat(KEY_LAST_LON, Float.NaN)
             if (lat.isNaN() || lon.isNaN()) null else lat.toDouble() to lon.toDouble()

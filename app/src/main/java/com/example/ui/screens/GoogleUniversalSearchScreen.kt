@@ -71,13 +71,13 @@ import androidx.compose.ui.unit.sp
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceFileInfo
 import com.example.rss.RssArticle
-import com.example.ui.components.AuroraBackground
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
 import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.theme.ForestPrimary
 import com.example.viewmodel.JournalViewModel
+import com.example.wallpaper.NowBriefAppBackground
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -154,12 +154,17 @@ fun GoogleUniversalSearchScreen(
         if (searchQuery.isNotBlank()) viewModel.searchDevice(searchQuery)
     }
 
+    val realWeather by viewModel.realWeather.collectAsState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag("universal_search_screen")
     ) {
-        AuroraBackground(modifier = Modifier.fillMaxSize())
+        NowBriefAppBackground(
+            modifier = Modifier.fillMaxSize(),
+            weatherCode = realWeather.weatherCode
+        )
 
         Column(modifier = Modifier.fillMaxSize()) {
             // Search Header Bar

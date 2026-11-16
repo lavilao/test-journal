@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -92,6 +93,7 @@ import kotlinx.coroutines.launch
 import com.example.BuildConfig
 import com.example.habit.HabitEngine
 import com.example.location.SmartPlaces
+import com.example.wallpaper.SunCycle
 import com.example.wallpaper.SunGradientBackground
 import com.example.wallpaper.SunWallpaperService
 
@@ -173,12 +175,9 @@ fun SettingsAndModelsScreen(
         }
     }
 
-    // ---- experimental sun wallpaper + places state ----
+    // ---- dynamic time+weather atmosphere + places state ----
     var sunWallpaperChecked by remember {
-        mutableStateOf(
-            context.getSharedPreferences("sun_wallpaper", Context.MODE_PRIVATE)
-                .getBoolean("enabled", false)
-        )
+        mutableStateOf(SunCycle.isDynamicAtmosphereEnabled(context))
     }
     var placesTick by remember { mutableStateOf(0) }
     val savedPlaces = remember(placesTick) { SmartPlaces.places(context) }
@@ -1378,11 +1377,11 @@ fun SettingsAndModelsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Fondo dinámico del sol",
+                            text = "Fondo dinámico (hora del día + clima)",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
                         ExpandableHint(
-                            text = "El sol recorre el cielo de tu ubicación y el tono del gradiente cambia del amanecer a la noche (modo Samsung).",
+                            text = "El cielo, el sol/luna y las nubes, niebla, lluvia, nieve o tormenta cambian automáticamente con la hora y tu clima real.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1391,8 +1390,8 @@ fun SettingsAndModelsScreen(
                         checked = sunWallpaperChecked,
                         onCheckedChange = { checked ->
                             sunWallpaperChecked = checked
-                            context.getSharedPreferences("sun_wallpaper", Context.MODE_PRIVATE)
-                                .edit().putBoolean("enabled", checked).apply()
+                            context.getSharedPreferences(SunCycle.WALLPAPER_PREFS, Context.MODE_PRIVATE)
+                                .edit().putBoolean(SunCycle.KEY_WALLPAPER_ENABLED, checked).apply()
                         },
                         modifier = Modifier.testTag("sun_wallpaper_switch")
                     )
@@ -1400,17 +1399,60 @@ fun SettingsAndModelsScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Live preview of the same renderer the wallpaper uses.
+                // Interactive preview of time + weather combinations
+                var previewPreset by remember { mutableStateOf("En vivo") }
+                val previewOverridePhase = when (previewPreset) {
+                    "Amanecer" -> SunCycle.Phase.DAWN
+                    "Mediodía" -> SunCycle.Phase.MIDDAY
+                    "Atardecer" -> SunCycle.Phase.DUSK
+                    "Noche" -> SunCycle.Phase.NIGHT
+                    "Tormenta" -> SunCycle.Phase.AFTERNOON
+                    "Lluvia" -> SunCycle.Phase.AFTERNOON
+                    "Nieve" -> SunCycle.Phase.MORNING
+                    else -> null
+                }
+                val previewOverrideWeather = when (previewPreset) {
+                    "Amanecer" -> SunCycle.AtmosphereWeather.PARTLY_CLOUDY
+                    "Mediodía" -> SunCycle.AtmosphereWeather.CLEAR
+                    "Atardecer" -> SunCycle.AtmosphereWeather.CLEAR
+                    "Noche" -> SunCycle.AtmosphereWeather.CLEAR
+                    "Lluvia" -> SunCycle.AtmosphereWeather.RAIN
+                    "Tormenta" -> SunCycle.AtmosphereWeather.STORM
+                    "Nieve" -> SunCycle.AtmosphereWeather.SNOW
+                    else -> null
+                }
+
                 androidx.compose.foundation.layout.Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .height(148.dp)
+                        .clip(RoundedCornerShape(14.dp))
                 ) {
-                    SunGradientBackground()
+                    SunGradientBackground(
+                        weatherCode = weather.weatherCode,
+                        overridePhase = previewOverridePhase,
+                        overrideWeather = previewOverrideWeather
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("En vivo", "Amanecer", "Mediodía", "Atardecer", "Noche", "Lluvia", "Tormenta", "Nieve").forEach { preset ->
+                        androidx.compose.material3.FilterChip(
+                            selected = previewPreset == preset,
+                            onClick = { previewPreset = preset },
+                            label = { Text(preset, fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
                         try {
@@ -1437,7 +1479,7 @@ fun SettingsAndModelsScreen(
                     Text("Poner como fondo de pantalla del sistema")
                 }
                 ExpandableHint(
-                    text = "El interruptor cambia el fondo DENTRO de la app (modo Samsung); el botón lo instala como fondo de pantalla del teléfono. Come de la última ubicación que usó el clima.",
+                    text = "El interruptor activa el fondo atmosférico dentro de la app (si lo desactivas vuelve el Aurora clásico); el botón lo instala como fondo animado del teléfono.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
