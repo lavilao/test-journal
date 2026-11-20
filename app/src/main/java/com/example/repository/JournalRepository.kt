@@ -255,29 +255,9 @@ class JournalRepository(
             }
             newUris.forEachIndexed { idx, uri ->
                 semanticScope.launch {
-                    if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
-                        val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
-                        dao.insertMediaItem(
-                            MediaItem(
-                                entryId = entryId,
-                                uri = uri.toString(),
-                                labelsJson = JSONArray(analysis.labels).toString(),
-                                faceCount = analysis.faceCount,
-                                ocrText = analysis.ocrText,
-                                caption = "",
-                                sortOrder = persistedUris.indexOf(uri.toString())
-                            )
-                        )
-                    } else {
-                        dao.insertMediaItem(
-                            MediaItem(
-                                entryId = entryId,
-                                uri = uri.toString(),
-                                caption = "",
-                                sortOrder = persistedUris.indexOf(uri.toString())
-                            )
-                        )
-                    }
+                    val item = analyzeMediaCandidate(entryId, uri, caption = "", sortOrder = persistedUris.indexOf(uri.toString()))
+                    dao.insertMediaItem(item)
+                    processSemanticIntelligence(entryId)
                 }
             }
         }
@@ -334,25 +314,125 @@ class JournalRepository(
             }
         }
         semanticScope.launch {
-            // OCR/vision toggle (OcrIndexer): when off, skip the whole
-            // vision pass — the user's "puede petar el dispositivo" switch.
-            if (com.example.semantic.OcrIndexer.isImageOcrEnabled(context)) {
-                val analysis = MlKitAnalyzer.analyzeImageFromUri(context, persistentUri)
-                val labelsJson = JSONArray(analysis.labels).toString()
-                val existing = dao.getMediaById(mediaId)
-                if (existing != null) {
-                    dao.updateMediaItem(
-                        existing.copy(
-                            labelsJson = labelsJson,
-                            faceCount = analysis.faceCount,
-                            ocrText = analysis.ocrText
-                        )
+            val analyzed = analyzeMediaCandidate(
+                entryId = entryId,
+                uri = persistentUri,
+                caption = caption,
+                sortOrder = sortOrder
+            )
+            val existing = dao.getMediaById(mediaId)
+            if (existing != null) {
+                dao.updateMediaItem(
+                    existing.copy(
+                        labelsJson = analyzed.labelsJson,
+                        faceCount = analyzed.faceCount,
+                        ocrText = analyzed.ocrText,
+                        caption = existing.caption.ifBlank { analyzed.caption }
                     )
-                }
-                processSemanticIntelligence(entryId)
+                )
             }
+            processSemanticIntelligence(entryId)
         }
         mediaId
+    }
+
+    /**
+     * Runs Mirage local VLM on an existing attached photo and saves its Spanish
+     * scene description, objects, and OCR into Room + semantic search index.
+     */
+    suspend fun describeMediaWithMirage(mediaId: Long, entryId: Long): Boolean = withContext(Dispatchers.IO) {
+        val media = dao.getMediaById(mediaId) ?: return@withContext false
+        if (!com.example.ai.needle.NeedleModelManager.isMirageDownloaded(context)) return@withContext false
+        com.example.ai.needle.NeedleModelManager.ensureLoaded(context)
+        if (!com.example.ai.needle.NeedleRuntime.isVisionModelLoaded()) return@withContext false
+
+        val entityNames = runCatching {
+            dao.getEntryWithRelations(entryId)?.entities?.map { it.displayName }.orEmpty()
+        }.getOrDefault(emptyList())
+        val keywords = com.example.ai.needle.WhistleKeywordBuilder.forMirage(context, entityNames)
+        val mirage = com.example.ai.needle.NeedleRuntime.describeImageFromUri(
+            context = context,
+            uri = Uri.parse(media.uri),
+            language = "es",
+            keywords = keywords
+        ) ?: return@withContext false
+
+        val existingLabels = parseLabelsArray(media.labelsJson)
+        val combinedLabels = (existingLabels + mirage.mergedLabels()).distinct()
+        val mirageOcr = mirage.mergedOcrText()
+        val combinedOcr = when {
+            media.ocrText.isBlank() -> mirageOcr
+            mirageOcr.isBlank() || media.ocrText.contains(mirageOcr, ignoreCase = true) -> media.ocrText
+            else -> "${media.ocrText}\n$mirageOcr"
+        }
+        val caption = mirage.formattedJournalCaption().ifBlank { media.caption }
+        dao.updateMediaItem(
+            media.copy(
+                labelsJson = JSONArray(combinedLabels).toString(),
+                ocrText = combinedOcr,
+                caption = caption
+            )
+        )
+        processSemanticIntelligence(entryId)
+        true
+    }
+
+    private suspend fun analyzeMediaCandidate(
+        entryId: Long,
+        uri: Uri,
+        caption: String,
+        sortOrder: Int
+    ): MediaItem {
+        val ocrEnabled = com.example.semantic.OcrIndexer.isImageOcrEnabled(context)
+        val mirageActive = com.example.ai.needle.NeedleModelManager.isMirageDownloaded(context) &&
+            com.example.ai.needle.NeedleModelManager.isMirageVisionEnabled(context)
+
+        val mlAnalysis = if (ocrEnabled) MlKitAnalyzer.analyzeImageFromUri(context, uri) else null
+        var mirageResult: com.example.ai.needle.MirageResult? = null
+        if (mirageActive) {
+            com.example.ai.needle.NeedleModelManager.ensureLoaded(context)
+            if (com.example.ai.needle.NeedleRuntime.isVisionModelLoaded()) {
+                val entityNames = runCatching {
+                    dao.getEntryWithRelations(entryId)?.entities?.map { it.displayName }.orEmpty()
+                }.getOrDefault(emptyList())
+                val keywords = com.example.ai.needle.WhistleKeywordBuilder.forMirage(context, entityNames)
+                mirageResult = com.example.ai.needle.NeedleRuntime.describeImageFromUri(
+                    context = context,
+                    uri = uri,
+                    language = "es",
+                    keywords = keywords
+                )
+            }
+        }
+
+        val combinedLabels = ((mlAnalysis?.labels ?: emptyList()) + (mirageResult?.mergedLabels() ?: emptyList())).distinct()
+        val mlOcr = mlAnalysis?.ocrText.orEmpty()
+        val mirageOcr = mirageResult?.mergedOcrText().orEmpty()
+        val combinedOcr = when {
+            mlOcr.isBlank() -> mirageOcr
+            mirageOcr.isBlank() || mlOcr.contains(mirageOcr, ignoreCase = true) -> mlOcr
+            else -> "$mlOcr\n$mirageOcr"
+        }
+        val resolvedCaption = caption.ifBlank { mirageResult?.formattedJournalCaption().orEmpty() }
+        return MediaItem(
+            entryId = entryId,
+            uri = uri.toString(),
+            labelsJson = if (combinedLabels.isNotEmpty()) JSONArray(combinedLabels).toString() else "",
+            faceCount = mlAnalysis?.faceCount ?: 0,
+            ocrText = combinedOcr,
+            caption = resolvedCaption,
+            sortOrder = sortOrder
+        )
+    }
+
+    private fun parseLabelsArray(labelsJson: String): List<String> {
+        if (labelsJson.isBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(labelsJson)
+            (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     /** v1.6: one-shot media list (ordered) for the gallery UI. */
@@ -522,6 +602,9 @@ class JournalRepository(
                 }
             }
             mediaList.forEach { m ->
+                if (m.caption.isNotBlank()) {
+                    append("\n\nDescripción visual: ").append(m.caption)
+                }
                 if (m.ocrText.isNotBlank()) {
                     append("\n\nPhoto Text: ").append(m.ocrText)
                 }

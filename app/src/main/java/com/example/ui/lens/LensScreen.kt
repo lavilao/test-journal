@@ -44,6 +44,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -89,6 +90,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.ai.needle.MirageResult
+import com.example.ai.needle.NeedleModelManager
+import com.example.ai.needle.NeedleRuntime
+import com.example.ai.needle.WhistleKeywordBuilder
 import com.example.semantic.BarcodeResult
 import com.example.semantic.MlKitAnalyzer
 import com.example.viewmodel.JournalViewModel
@@ -102,12 +107,13 @@ import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Lens working modes — each maps to a bundled ML Kit model. */
+/** Lens working modes — ML Kit plus Cactus Mirage local vision. */
 enum class LensMode(val label: String) {
     TEXT("Texto"),
     TRANSLATE("Traducir"),
     CODES("Códigos"),
-    OBJECTS("Objetos")
+    OBJECTS("Objetos"),
+    MIRAGE("Escena IA")
 }
 
 /** Everything the lens can extract from one shot. */
@@ -117,7 +123,8 @@ data class LensResult(
     val detectedLanguage: String = "",
     val targetLanguage: String = "",
     val barcodes: List<BarcodeResult> = emptyList(),
-    val labels: List<String> = emptyList()
+    val labels: List<String> = emptyList(),
+    val mirage: MirageResult? = null
 )
 
 internal tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -268,6 +275,21 @@ fun LensScreen(
                     val analysis = MlKitAnalyzer.analyzeImageFromUri(context, uri)
                     LensResult(labels = analysis.labels)
                 }
+                LensMode.MIRAGE -> {
+                    if (!NeedleModelManager.isMirageDownloaded(context)) {
+                        statusLine = "Descarga Mirage (22 MB) en Voz e IA local para describir escenas"
+                        LensResult()
+                    } else {
+                        NeedleModelManager.ensureLoaded(context)
+                        val mirageRes = NeedleRuntime.describeImageFromUri(
+                            context = context,
+                            uri = uri,
+                            language = "es",
+                            keywords = WhistleKeywordBuilder.forMirage(context)
+                        )
+                        LensResult(mirage = mirageRes)
+                    }
+                }
             }
             result = newResult
             analyzing = false
@@ -279,6 +301,11 @@ fun LensScreen(
             }
             if (mode == LensMode.OBJECTS && newResult.labels.isEmpty()) {
                 statusLine = "No se detectaron objetos reconocibles"
+            }
+            if (mode == LensMode.MIRAGE && statusLine == null &&
+                (newResult.mirage == null || newResult.mirage.isEmpty())
+            ) {
+                statusLine = "Mirage no pudo describir esta imagen"
             }
         }
     }
@@ -449,6 +476,7 @@ fun LensScreen(
                                 LensMode.TRANSLATE -> Icons.Default.Translate
                                 LensMode.CODES -> Icons.Default.QrCodeScanner
                                 LensMode.OBJECTS -> Icons.Default.PhotoLibrary
+                                LensMode.MIRAGE -> Icons.Default.AutoAwesome
                             }
                             Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                         },
@@ -872,10 +900,126 @@ private fun LensResultPanel(
                 }
             }
 
+            // ---- Mirage scene & VLM understanding ----
+            lensResult.mirage?.let { m ->
+                if (m.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Escena (Mirage IA)",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = m.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                if (m.objects.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Elementos detectados",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        m.objects.take(10).forEach { obj ->
+                            val pct = if (obj.score > 0f) " ${(obj.score * 100).toInt()}%" else ""
+                            val attr = if (obj.attributes.isNotBlank()) " · ${obj.attributes}" else ""
+                            AssistChip(
+                                onClick = { onCopy(obj.name) },
+                                label = { Text("${obj.name}$attr$pct", fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
+                if (m.relations.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Relaciones espaciales",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    m.relations.take(5).forEach { rel ->
+                        Text(
+                            text = "• $rel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                val mirageOcr = m.mergedOcrText()
+                if (mirageOcr.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Texto en escena",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = mirageOcr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                val exportSummary = buildString {
+                    if (m.description.isNotBlank()) append(m.description).append("\n\n")
+                    if (m.objects.isNotEmpty()) {
+                        append("Elementos: ")
+                        append(m.objects.joinToString(", ") { it.name })
+                        append("\n")
+                    }
+                    if (m.relations.isNotEmpty()) {
+                        append("Relaciones: ")
+                        append(m.relations.joinToString("; "))
+                        append("\n")
+                    }
+                    if (mirageOcr.isNotBlank()) {
+                        append("\nTexto leído:\n").append(mirageOcr)
+                    }
+                }.trim()
+                if (exportSummary.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { onCopy(exportSummary) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Copiar", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                onSaveNote(
+                                    m.description.lineSequence().firstOrNull()?.take(40)?.ifBlank { "Escena visual" } ?: "Escena visual",
+                                    exportSummary
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Guardar nota", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
             if (lensResult.ocrText.isBlank() &&
                 lensResult.translatedText.isBlank() &&
                 lensResult.barcodes.isEmpty() &&
-                lensResult.labels.isEmpty()
+                lensResult.labels.isEmpty() &&
+                (lensResult.mirage == null || lensResult.mirage.isEmpty())
             ) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
@@ -887,7 +1031,7 @@ private fun LensResultPanel(
 
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Todo el análisis ocurre en tu dispositivo (ML Kit sin conexión).",
+                text = "Todo el análisis ocurre en tu dispositivo (ML Kit y Cactus Mirage sin conexión).",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -1,6 +1,8 @@
 package com.example.ai.needle
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -9,13 +11,13 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Thin Kotlin wrapper around the Cactus Needle 3 native engine (JNI).
+ * Thin Kotlin wrapper around the Cactus 4.1.4 unified native engine (JNI).
  *
- * Needle 3 is a 35 MB tool-calling foundation model that runs entirely on
- * the device: given a user utterance and the catalogue of tools this app
- * exposes, it decides which tool to call and fills every argument. The
- * optional 17 MB Whistle speech model shares the same engine and gives the
- * assistant local transcription (Spanish included) straight from the mic.
+ * Supports:
+ *  - Needle 3 (35 MB) — on-device tool-calling router and text embeddings.
+ *  - Whistle (17 MB) — local speech transcription (Spanish included).
+ *  - Mirage (22 MB) — local vision-language model (scene description,
+ *    object detection, OCR, and spatial relations in one pass).
  *
  * The engine is process-global and NOT thread-safe, so every call is
  * serialized here and dispatched to a single background thread.
@@ -27,6 +29,9 @@ object NeedleRuntime {
 
     /** Engine bit: the speech model (whistle.cact) is loaded. */
     const val MODEL_SPEECH = 2
+
+    /** Engine bit: the vision model (mirage.cact) is loaded. */
+    const val MODEL_VISION = 4
 
     @Volatile private var libraryLoaded = false
     @Volatile private var libraryError: String? = null
@@ -94,6 +99,15 @@ object NeedleRuntime {
         keywords: String?
     ): ByteArray?
     private external fun nativeStreamStop(): ByteArray?
+    private external fun nativeDescribeImage(
+        rgb: ByteArray,
+        width: Int,
+        height: Int,
+        optionsJson: String?,
+        language: String?,
+        keywords: String?
+    ): ByteArray?
+    private external fun nativeSetThreads(threads: Int)
     private external fun nativeLastError(): ByteArray?
     private external fun nativeReset()
 
@@ -107,11 +121,12 @@ object NeedleRuntime {
     /** Why the native library failed to load, when it did. */
     fun supportError(): String? = if (libraryLoaded) null else libraryError
 
-    /** Bitmask of loaded model kinds (MODEL_TEXT / MODEL_SPEECH). */
+    /** Bitmask of loaded model kinds (MODEL_TEXT / MODEL_SPEECH / MODEL_VISION). */
     fun loadedModels(): Int = if (libraryLoaded) nativeModels() else 0
 
     fun isTextModelLoaded(): Boolean = (loadedModels() and MODEL_TEXT) != 0
     fun isSpeechModelLoaded(): Boolean = (loadedModels() and MODEL_SPEECH) != 0
+    fun isVisionModelLoaded(): Boolean = (loadedModels() and MODEL_VISION) != 0
 
     /** True when the text model is loaded AND the tool catalogue is declared. */
     fun isReady(): Boolean = isTextModelLoaded() && initialized
@@ -129,11 +144,11 @@ object NeedleRuntime {
         val dir = modelsDir(context)
         val textFile = File(dir, NeedleModelManager.NEEDLE_FILE)
         val speechFile = File(dir, NeedleModelManager.WHISTLE_FILE)
+        val visionFile = File(dir, NeedleModelManager.MIRAGE_FILE)
         if (textFile.exists() && !isTextModelLoaded()) {
             val rc = nativeLoadModel(textFile.absolutePath)
             if (rc < 0) {
                 lastErrorMessage = lastError() ?: "no se pudo cargar ${textFile.name}"
-                return@withContext loadedModels()
             }
         }
         if (speechFile.exists() && !isSpeechModelLoaded()) {
@@ -142,8 +157,36 @@ object NeedleRuntime {
                 lastErrorMessage = lastError() ?: "no se pudo cargar ${speechFile.name}"
             }
         }
+        if (visionFile.exists() && !isVisionModelLoaded()) {
+            val rc = nativeLoadModel(visionFile.absolutePath)
+            if (rc < 0) {
+                lastErrorMessage = lastError() ?: "no se pudo cargar ${visionFile.name}"
+            }
+        }
         if (isTextModelLoaded()) initialize(context)
         loadedModels()
+    }
+
+    /**
+     * Probes a candidate `.cact` file on disk using the native Cactus engine
+     * and returns its model bitmask (MODEL_TEXT=1, MODEL_SPEECH=2, MODEL_VISION=4),
+     * or 0 if invalid/incompatible. Resets the transient state afterwards so the
+     * caller can reload the canonical model set cleanly.
+     */
+    suspend fun probeModelKind(file: File): Int = apiMutex.withLock {
+        if (!isSupported() || !file.exists() || file.length() <= 0L) return@withLock 0
+        withContext(needleDispatcher) {
+            nativeReset()
+            initialized = false
+            lastErrorMessage = null
+            val rc = nativeLoadModel(file.absolutePath)
+            val detected = if (rc > 0) rc else 0
+            if (detected == 0) {
+                lastErrorMessage = lastError() ?: "formato .cact incompatible o dañado"
+            }
+            nativeReset()
+            detected
+        }
     }
 
     /** Declares the system prompt + tools. Must run after the text model. */
@@ -298,6 +341,59 @@ object NeedleRuntime {
             ttftMs = ttftValues.takeIf { it.isNotEmpty() }?.average(),
             decodeTps = tpsValues.takeIf { it.isNotEmpty() }?.average()
         )
+    }
+
+    /**
+     * Vision understanding via Mirage (mirage.cact): analyzes a Bitmap locally
+     * in a single pass and returns scene description, objects, OCR text, and relations.
+     */
+    suspend fun describeImage(
+        bitmap: Bitmap,
+        language: String? = "es",
+        keywords: String? = null,
+        optionsJson: String = MirageVision.DEFAULT_OPTIONS_JSON
+    ): MirageResult? = apiMutex.withLock {
+        if (!isVisionModelLoaded()) return@withLock null
+        withContext(needleDispatcher) {
+            try {
+                val (rgb, width, height) = MirageVision.bitmapToPackedRgb(bitmap) ?: return@withContext null
+                val bytes = nativeDescribeImage(rgb, width, height, optionsJson, language, keywords)
+                if (bytes == null) {
+                    lastErrorMessage = lastError() ?: "cactus_describe falló"
+                    return@withContext null
+                }
+                MirageVision.parseJson(bytes.toString(Charsets.UTF_8))
+            } catch (t: Throwable) {
+                lastErrorMessage = t.message
+                null
+            }
+        }
+    }
+
+    /** Loads an image from a content/file URI, decodes scaled RGB, and runs Mirage locally. */
+    suspend fun describeImageFromUri(
+        context: Context,
+        uri: Uri,
+        language: String? = "es",
+        keywords: String? = null,
+        optionsJson: String = MirageVision.DEFAULT_OPTIONS_JSON
+    ): MirageResult? = apiMutex.withLock {
+        if (!isVisionModelLoaded()) return@withLock null
+        withContext(needleDispatcher) {
+            try {
+                val (rgb, width, height) = MirageVision.decodePackedRgbFromUri(context, uri)
+                    ?: return@withContext null
+                val bytes = nativeDescribeImage(rgb, width, height, optionsJson, language, keywords)
+                if (bytes == null) {
+                    lastErrorMessage = lastError() ?: "cactus_describe falló"
+                    return@withContext null
+                }
+                MirageVision.parseJson(bytes.toString(Charsets.UTF_8))
+            } catch (t: Throwable) {
+                lastErrorMessage = t.message
+                null
+            }
+        }
     }
 
     /**

@@ -14,18 +14,19 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Optional-download manager for the local Cactus models:
+ * Optional-download manager for the local Cactus 4.1.4 models:
  *  - needle3.cact (35 MB) — the Needle 3 tool-calling router.
  *  - whistle.cact (17 MB) — the Whistle speech model (Spanish included).
+ *  - mirage.cact  (22 MB) — the Mirage VLM + OCR + detection model.
  *
  * Nothing is bundled in the APK and nothing downloads automatically: the user
- * presses a button, watches the progress and can delete the models at any
- * time. This keeps the installer small and the feature strictly opt-in.
+ * presses a button, watches the progress and can delete any model at any time.
  */
 object NeedleModelManager {
 
     const val NEEDLE_FILE = "needle3.cact"
     const val WHISTLE_FILE = "whistle.cact"
+    const val MIRAGE_FILE = "mirage.cact"
 
     /** Live download progress shown in the settings UI (null when idle). */
     data class DownloadUi(
@@ -40,6 +41,7 @@ object NeedleModelManager {
     private const val PREFS = "needle_prefs"
     private const val KEY_ASSISTANT_ENABLED = "assistant_enabled"
     private const val KEY_WHISTLE_DICTATION = "whistle_dictation_enabled"
+    private const val KEY_MIRAGE_VISION = "mirage_vision_enabled"
 
     private val downloadFlow = MutableStateFlow<DownloadUi?>(null)
     val downloadState: StateFlow<DownloadUi?> = downloadFlow
@@ -61,12 +63,15 @@ object NeedleModelManager {
 
     fun needleFile(context: Context): File = File(NeedleRuntime.modelsDir(context), NEEDLE_FILE)
     fun whistleFile(context: Context): File = File(NeedleRuntime.modelsDir(context), WHISTLE_FILE)
+    fun mirageFile(context: Context): File = File(NeedleRuntime.modelsDir(context), MIRAGE_FILE)
 
     fun isNeedleDownloaded(context: Context): Boolean = needleFile(context).exists()
     fun isWhistleDownloaded(context: Context): Boolean = whistleFile(context).exists()
+    fun isMirageDownloaded(context: Context): Boolean = mirageFile(context).exists()
 
     fun needleFileBytes(context: Context): Long = needleFile(context).takeIf { it.exists() }?.length() ?: 0L
     fun whistleFileBytes(context: Context): Long = whistleFile(context).takeIf { it.exists() }?.length() ?: 0L
+    fun mirageFileBytes(context: Context): Long = mirageFile(context).takeIf { it.exists() }?.length() ?: 0L
 
     // ------------------------------------------------------------------
     // Preference switches
@@ -90,13 +95,22 @@ object NeedleModelManager {
             .edit().putBoolean(KEY_WHISTLE_DICTATION, enabled).apply()
     }
 
+    fun isMirageVisionEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_MIRAGE_VISION, true)
+
+    fun setMirageVisionEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_MIRAGE_VISION, enabled).apply()
+    }
+
     // ------------------------------------------------------------------
     // Loading
     // ------------------------------------------------------------------
 
     /** Loads the models from disk when present (idempotent). */
     suspend fun ensureLoaded(context: Context) {
-        if (isNeedleDownloaded(context) || isWhistleDownloaded(context)) {
+        if (isNeedleDownloaded(context) || isWhistleDownloaded(context) || isMirageDownloaded(context)) {
             NeedleRuntime.loadFromDisk(context)
         }
     }
@@ -116,13 +130,17 @@ object NeedleModelManager {
      */
     suspend fun download(context: Context, model: String): Boolean = mutex.withLock {
         cancelRequested = false
-        val isNeedle = model == NEEDLE_FILE
-        val url = if (isNeedle) {
-            "https://huggingface.co/Cactus-Compute/needle3/resolve/main/needle3.cact"
-        } else {
-            "https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact"
+        val url = when (model) {
+            NEEDLE_FILE -> "https://huggingface.co/Cactus-Compute/needle3/resolve/main/needle3.cact"
+            WHISTLE_FILE -> "https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact"
+            MIRAGE_FILE -> "https://huggingface.co/Cactus-Compute/mirage/resolve/main/mirage.cact"
+            else -> return@withLock false
         }
-        val target = if (isNeedle) needleFile(context) else whistleFile(context)
+        val target = when (model) {
+            NEEDLE_FILE -> needleFile(context)
+            WHISTLE_FILE -> whistleFile(context)
+            else -> mirageFile(context)
+        }
         val tmp = File(target.parentFile, "${target.name}.tmp")
 
         withContext(Dispatchers.IO) {
@@ -207,20 +225,22 @@ object NeedleModelManager {
         }
     }
 
-    /** Deletes one (or both, when model is null) model files and unloads. */
+    /** Deletes one (or all, when model is null) model files and unloads. */
     suspend fun delete(context: Context, model: String?) = mutex.withLock {
         val dir = NeedleRuntime.modelsDir(context)
         if (model == null || model == NEEDLE_FILE) File(dir, NEEDLE_FILE).delete()
         if (model == null || model == WHISTLE_FILE) File(dir, WHISTLE_FILE).delete()
+        if (model == null || model == MIRAGE_FILE) File(dir, MIRAGE_FILE).delete()
         File(dir, "$NEEDLE_FILE.tmp").delete()
         File(dir, "$WHISTLE_FILE.tmp").delete()
+        File(dir, "$MIRAGE_FILE.tmp").delete()
         downloadFlow.value = null
         NeedleRuntime.reset()
-        // Reload whatever is still on disk (e.g. whistle after needle delete).
+        // Reload whatever is still on disk.
         NeedleRuntime.loadFromDisk(context)
     }
 
-    /** Human-readable size, e.g. "35,4 MB". */
+    /** Human-readable size, e.g. "21,6 MB". */
     fun formatBytes(bytes: Long): String =
         String.format(java.util.Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
 }

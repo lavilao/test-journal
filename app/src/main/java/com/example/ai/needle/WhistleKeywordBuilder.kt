@@ -122,6 +122,23 @@ object WhistleKeywordBuilder {
         return formatKeywordList(items)
     }
 
+    /** Keywords biased toward Mirage visual OCR/naming (saved places + entry context). */
+    fun forMirage(context: Context, extraKeywords: List<String> = emptyList()): String? {
+        val items = LinkedHashSet<String>()
+        items.add("Mnemosyne")
+        extraKeywords.forEach { kw ->
+            val clean = kw.trim()
+            if (clean.length in 2..40) items.add(clean)
+        }
+        try {
+            SmartPlaces.places(context).forEach { place ->
+                place.name.trim().takeIf { it.length in 2..40 }?.let { items.add(it) }
+            }
+        } catch (_: Exception) {
+        }
+        return formatKeywordList(items)
+    }
+
     internal fun formatKeywordList(candidates: Iterable<String>, limit: Int = MAX_KEYWORDS): String? {
         val seenLower = HashSet<String>()
         val result = ArrayList<String>(limit)

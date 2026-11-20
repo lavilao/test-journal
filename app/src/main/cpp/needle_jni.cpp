@@ -7,13 +7,13 @@
 #include <vector>
 
 #if NEEDLE_AVAILABLE
-#include "needle.h"
+#include "cactus.h"
 #endif
 
-#define LOG_TAG "MnemosyneNeedle"
+#define LOG_TAG "MnemosyneCactus"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// The needle engine keeps one process-global model per kind (text / speech)
+// The Cactus engine keeps one process-global model per kind (text / speech / vision)
 // and is not thread-safe: every call goes through this mutex.
 static std::mutex g_needle_mutex;
 
@@ -23,6 +23,7 @@ static std::mutex g_needle_mutex;
 static std::vector<std::vector<unsigned char>> g_model_buffers;
 
 static constexpr int kOutCapacity = 64 * 1024;
+static constexpr int kVisionOutCapacity = 512 * 1024;
 
 static jbyteArray toJByteArray(JNIEnv *env, const char *data, int len) {
     if (data == nullptr || len <= 0) return nullptr;
@@ -46,10 +47,9 @@ Java_com_example_ai_needle_NeedleRuntime_nativeAvailable(JNIEnv *env, jobject th
 }
 
 /**
- * Loads one .cact file (a text model such as needle3.cact or a speech model
- * such as whistle.cact — the engine tells them apart itself). Returns the
- * bitmask of loaded model kinds after the call (1 = text, 2 = speech, 3 =
- * both) or -1 on failure.
+ * Loads one .cact file (needle3.cact, whistle.cact, or mirage.cact — the
+ * Cactus engine tells them apart by kind). Returns the bitmask of loaded
+ * model kinds after the call (1 = text, 2 = speech, 4 = vision) or -1.
  */
 JNIEXPORT jint JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeLoadModel(JNIEnv *env, jobject thiz, jstring path) {
@@ -87,14 +87,13 @@ Java_com_example_ai_needle_NeedleRuntime_nativeLoadModel(JNIEnv *env, jobject th
     const unsigned char *buf = g_model_buffers.back().data();
     unsigned long long n = static_cast<unsigned long long>(g_model_buffers.back().size());
 
-    int rc = needle_load(buf, n);
+    int rc = cactus_load(buf, n);
     if (rc != 0) {
-        LOGE("needle_load failed: rc=%d err=%s", rc, needle_last_error());
-        // Drop the buffer we just added: the engine rejected it.
+        LOGE("cactus_load failed: rc=%d err=%s", rc, cactus_last_error());
         if (!g_model_buffers.empty()) g_model_buffers.pop_back();
         return -1;
     }
-    return needle_models();
+    return cactus_models();
 #else
     (void)env;
     (void)path;
@@ -102,14 +101,14 @@ Java_com_example_ai_needle_NeedleRuntime_nativeLoadModel(JNIEnv *env, jobject th
 #endif
 }
 
-/** Bitmask of the model kinds currently loaded (1 = text, 2 = speech). */
+/** Bitmask of the model kinds currently loaded (1 = text, 2 = speech, 4 = vision). */
 JNIEXPORT jint JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeModels(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
 #if NEEDLE_AVAILABLE
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    return needle_models();
+    return cactus_models();
 #else
     return 0;
 #endif
@@ -133,11 +132,11 @@ Java_com_example_ai_needle_NeedleRuntime_nativeInit(JNIEnv *env, jobject thiz,
         return -1;
     }
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    int rc = needle_init(sys, tools, nullptr);
+    int rc = cactus_init(sys, tools, nullptr);
     env->ReleaseStringUTFChars(system_prompt, sys);
     env->ReleaseStringUTFChars(tools_json, tools);
     if (rc < 0) {
-        LOGE("needle_init failed: rc=%d err=%s", rc, needle_last_error());
+        LOGE("cactus_init failed: rc=%d err=%s", rc, cactus_last_error());
     }
     return rc;
 #else
@@ -159,10 +158,10 @@ Java_com_example_ai_needle_NeedleRuntime_nativeCompleteText(JNIEnv *env, jobject
     if (cinput == nullptr) return nullptr;
     std::vector<char> out(kOutCapacity);
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    int rc = needle_complete(cinput, nullptr, 0, max_new_tokens, out.data(), kOutCapacity);
+    int rc = cactus_complete(cinput, nullptr, 0, max_new_tokens, out.data(), kOutCapacity);
     env->ReleaseStringUTFChars(input, cinput);
     if (rc < 0) {
-        LOGE("needle_complete(text) failed: rc=%d err=%s", rc, needle_last_error());
+        LOGE("cactus_complete(text) failed: rc=%d err=%s", rc, cactus_last_error());
         return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
@@ -200,14 +199,14 @@ Java_com_example_ai_needle_NeedleRuntime_nativeCompleteAudio(JNIEnv *env, jobjec
     int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        needle_set_audio(lang, kwArg, 0);
-        rc = needle_complete(nullptr, audio.data(), samples, max_new_tokens,
+        cactus_set_audio(lang, kwArg, 0);
+        rc = cactus_complete(nullptr, audio.data(), samples, max_new_tokens,
                              out.data(), kOutCapacity);
     }
     if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
     if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
     if (rc < 0) {
-        LOGE("needle_complete(audio) failed: rc=%d err=%s", rc, needle_last_error());
+        LOGE("cactus_complete(audio) failed: rc=%d err=%s", rc, cactus_last_error());
         return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
@@ -243,13 +242,13 @@ Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject t
     int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        rc = needle_transcribe(audio.data(), samples, lang, kwArg, 0,
+        rc = cactus_transcribe(audio.data(), samples, lang, kwArg, 0,
                                out.data(), kOutCapacity);
     }
     if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
     if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
     if (rc < 0) {
-        LOGE("needle_transcribe failed: rc=%d err=%s", rc, needle_last_error());
+        LOGE("cactus_transcribe failed: rc=%d err=%s", rc, cactus_last_error());
         return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
@@ -264,10 +263,88 @@ Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject t
 }
 
 /**
+ * Vision understanding with Mirage (mirage.cact): takes packed RGB uint8 bytes
+ * (width * height * 3), JSON options string, language code, and newline-separated
+ * biasing keywords. Returns raw JSON (description, objects, text, relations, form).
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_example_ai_needle_NeedleRuntime_nativeDescribeImage(JNIEnv *env, jobject thiz,
+                                                             jbyteArray rgb,
+                                                             jint width,
+                                                             jint height,
+                                                             jstring options_json,
+                                                             jstring language,
+                                                             jstring keywords) {
+    (void)thiz;
+#if NEEDLE_AVAILABLE
+    if (rgb == nullptr || width <= 0 || height <= 0) return nullptr;
+    const jsize expectedLen = static_cast<jsize>(width) * static_cast<jsize>(height) * 3;
+    if (env->GetArrayLength(rgb) != expectedLen) {
+        LOGE("cactus_describe bad RGB byte length %d != %d", env->GetArrayLength(rgb), expectedLen);
+        return nullptr;
+    }
+    std::vector<unsigned char> pixels(static_cast<size_t>(expectedLen));
+    env->GetByteArrayRegion(rgb, 0, expectedLen, reinterpret_cast<jbyte *>(pixels.data()));
+
+    const char *opts = options_json != nullptr ? env->GetStringUTFChars(options_json, nullptr) : nullptr;
+    const char *optsArg = (opts != nullptr && opts[0] != '\0') ? opts : "{}";
+    const char *lang = language != nullptr ? env->GetStringUTFChars(language, nullptr) : nullptr;
+    const char *langArg = (lang != nullptr && lang[0] != '\0') ? lang : nullptr;
+    const char *kw = keywords != nullptr ? env->GetStringUTFChars(keywords, nullptr) : nullptr;
+    const char *kwArg = (kw != nullptr && kw[0] != '\0') ? kw : nullptr;
+
+    std::vector<char> out(kVisionOutCapacity);
+    int rc = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_needle_mutex);
+        rc = cactus_describe(
+            pixels.data(),
+            width,
+            height,
+            optsArg,
+            langArg,
+            kwArg,
+            out.data(),
+            kVisionOutCapacity
+        );
+    }
+    if (opts != nullptr) env->ReleaseStringUTFChars(options_json, opts);
+    if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
+    if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
+
+    if (rc < 0) {
+        LOGE("cactus_describe failed: rc=%d err=%s", rc, cactus_last_error());
+        return nullptr;
+    }
+    return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kVisionOutCapacity)));
+#else
+    (void)env;
+    (void)rgb;
+    (void)width;
+    (void)height;
+    (void)options_json;
+    (void)language;
+    (void)keywords;
+    return nullptr;
+#endif
+}
+
+/** Sets CPU thread count (0 = automatic). */
+JNIEXPORT void JNICALL
+Java_com_example_ai_needle_NeedleRuntime_nativeSetThreads(JNIEnv *env, jobject thiz, jint threads) {
+    (void)env;
+    (void)thiz;
+#if NEEDLE_AVAILABLE
+    std::lock_guard<std::mutex> lock(g_needle_mutex);
+    cactus_set_threads(threads);
+#else
+    (void)threads;
+#endif
+}
+
+/**
  * TEXT EMBEDDING with the loaded Needle model: returns the embedding vector
- * for a sentence (used by the semantic search / RAG layer). The first C call
- * with a null output returns the float count without computing, so the buffer
- * is sized exactly before the second call computes it.
+ * for a sentence (used by the semantic search / RAG layer).
  */
 JNIEXPORT jfloatArray JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeEmbedText(JNIEnv *env, jobject thiz,
@@ -279,17 +356,17 @@ Java_com_example_ai_needle_NeedleRuntime_nativeEmbedText(JNIEnv *env, jobject th
     if (cinput == nullptr) return nullptr;
 
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    int dims = needle_embed(cinput, nullptr, 0, nullptr, 0);
+    int dims = cactus_embed(cinput, nullptr, 0, nullptr, 0);
     if (dims <= 0) {
-        LOGE("needle_embed(size) failed: rc=%d err=%s", dims, needle_last_error());
+        LOGE("cactus_embed(size) failed: rc=%d err=%s", dims, cactus_last_error());
         env->ReleaseStringUTFChars(input, cinput);
         return nullptr;
     }
     std::vector<float> vec(static_cast<size_t>(dims));
-    int written = needle_embed(cinput, nullptr, 0, vec.data(), dims);
+    int written = cactus_embed(cinput, nullptr, 0, vec.data(), dims);
     env->ReleaseStringUTFChars(input, cinput);
     if (written != dims) {
-        LOGE("needle_embed(compute) failed: rc=%d err=%s", written, needle_last_error());
+        LOGE("cactus_embed(compute) failed: rc=%d err=%s", written, cactus_last_error());
         return nullptr;
     }
     jfloatArray out = env->NewFloatArray(dims);
@@ -327,13 +404,13 @@ Java_com_example_ai_needle_NeedleRuntime_nativeStreamProcess(JNIEnv *env, jobjec
     int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        rc = needle_stream_transcribe_process(audio.data(), samples, lang, kwArg,
+        rc = cactus_stream_transcribe_process(audio.data(), samples, lang, kwArg,
                                               out.data(), kOutCapacity);
     }
     if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
     if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
     if (rc < 0) {
-        LOGE("needle_stream_transcribe_process failed: rc=%d err=%s", rc, needle_last_error());
+        LOGE("cactus_stream_transcribe_process failed: rc=%d err=%s", rc, cactus_last_error());
         return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
@@ -356,9 +433,9 @@ Java_com_example_ai_needle_NeedleRuntime_nativeStreamStop(JNIEnv *env, jobject t
     std::vector<char> out(kOutCapacity);
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        int rc = needle_stream_transcribe_stop(out.data(), kOutCapacity);
+        int rc = cactus_stream_transcribe_stop(out.data(), kOutCapacity);
         if (rc < 0) {
-            LOGE("needle_stream_transcribe_stop failed: rc=%d err=%s", rc, needle_last_error());
+            LOGE("cactus_stream_transcribe_stop failed: rc=%d err=%s", rc, cactus_last_error());
             return nullptr;
         }
     }
@@ -374,7 +451,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeLastError(JNIEnv *env, jobject th
     (void)thiz;
 #if NEEDLE_AVAILABLE
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    const char *err = needle_last_error();
+    const char *err = cactus_last_error();
     if (err == nullptr) return nullptr;
     return toJByteArray(env, err, static_cast<int>(strlen(err)));
 #else
@@ -389,7 +466,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeReset(JNIEnv *env, jobject thiz) 
     (void)thiz;
 #if NEEDLE_AVAILABLE
     std::lock_guard<std::mutex> lock(g_needle_mutex);
-    needle_reset();
+    cactus_reset();
     g_model_buffers.clear();
 #endif
 }

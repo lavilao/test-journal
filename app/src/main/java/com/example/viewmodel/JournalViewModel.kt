@@ -816,6 +816,14 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun describePhotoWithMirage(mediaId: Long, entryId: Long, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = repository.describeMediaWithMirage(mediaId, entryId)
+            selectEntry(entryId)
+            onResult(ok)
+        }
+    }
+
     fun deletePhoto(mediaId: Long, entryId: Long) {
         viewModelScope.launch {
             repository.deletePhoto(mediaId)

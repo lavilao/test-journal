@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -77,6 +78,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -175,23 +177,31 @@ fun VoiceAndAssistantScreen(
     val needleRuntimeError = remember(needleTick) { NeedleRuntime.lastErrorMessage }
     val needleDownloaded = remember(needleTick) { NeedleModelManager.isNeedleDownloaded(context) }
     val whistleDownloaded = remember(needleTick) { NeedleModelManager.isWhistleDownloaded(context) }
+    val mirageDownloaded = remember(needleTick) { NeedleModelManager.isMirageDownloaded(context) }
     val needleLoaded = remember(needleTick) { NeedleRuntime.isTextModelLoaded() }
     val whistleLoaded = remember(needleTick) { NeedleRuntime.isSpeechModelLoaded() }
+    val mirageLoaded = remember(needleTick) { NeedleRuntime.isVisionModelLoaded() }
     var assistantAiChecked by remember(needleTick) {
         mutableStateOf(NeedleModelManager.isAssistantEnabled(context))
     }
     var whistleDictChecked by remember(needleTick) {
         mutableStateOf(NeedleModelManager.isWhistleDictationEnabled(context))
     }
+    var mirageVisionChecked by remember(needleTick) {
+        mutableStateOf(NeedleModelManager.isMirageVisionEnabled(context))
+    }
 
     LaunchedEffect(Unit) {
-        // PERF (regresión reportada): entrar aquí NO debe cargar los modelos.
-        // ensureLoaded() cargaba needle3+whistle y re-tokenizaba el catálogo
-        // completo — segundos de bloqueo, además encolado detrás del stream
-        // del hotword (1 pasada/s por el mismo hilo del motor). Ahora solo
-        // refrescamos el registro de herramientas personalizadas y leemos el
-        // estado ACTUAL; los self-tests cargan modelos bajo demanda.
         CustomToolRegistry.refresh(context)
+        if ((needleDownloaded && !needleLoaded) ||
+            (whistleDownloaded && !whistleLoaded) ||
+            (mirageDownloaded && !mirageLoaded)
+        ) {
+            try {
+                NeedleModelManager.ensureLoaded(context)
+            } catch (_: Exception) {
+            }
+        }
         needleTick++
     }
 
@@ -199,16 +209,19 @@ fun VoiceAndAssistantScreen(
     // their result callbacks (local functions must precede their first use).
     fun refreshAll() { refreshTick++ }
 
-    // ---- integrated self-tests (Needle / Whistle) ----
+    // ---- integrated self-tests (Needle / Whistle / Mirage) ----
     var needleTestState by remember { mutableStateOf<String?>(null) } // running|pass|fail
     var needleTestDetail by remember { mutableStateOf<String?>(null) }
     var whistleTestState by remember { mutableStateOf<String?>(null) }
     var whistleTestDetail by remember { mutableStateOf<String?>(null) }
+    var mirageTestState by remember { mutableStateOf<String?>(null) }
+    var mirageTestDetail by remember { mutableStateOf<String?>(null) }
     val whistleTestController = remember { WhistleDictationController() }
     val whistleTestRecording by whistleTestController.isRecording.collectAsState()
 
     // ---- model backup / restore via SAF ----
-    var transferAction by remember { mutableStateOf<String?>(null) }
+    var transferAction by rememberSaveable { mutableStateOf<String?>(null) }
+    var importBusy by remember { mutableStateOf(false) }
 
     fun handleTransferResult(result: ModelTransferManager.TransferResult) {
         Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
@@ -235,14 +248,16 @@ fun VoiceAndAssistantScreen(
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        val action = transferAction
+        val action = transferAction ?: ModelTransferManager.AUTO_MODEL
         transferAction = null
-        if (uri != null && action != null) {
+        if (uri != null) {
+            importBusy = true
             scope.launch {
                 val result = when (action) {
                     "import_voiceprint" -> ModelTransferManager.importVoicePrint(context, uri)
                     else -> ModelTransferManager.importModel(context, action, uri)
                 }
+                importBusy = false
                 handleTransferResult(result)
                 refreshAll()
             }
@@ -347,6 +362,60 @@ fun VoiceAndAssistantScreen(
                     beginWhistleTest()
                 } else {
                     whistleTestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+    }
+
+    fun runMirageTest() {
+        when {
+            !needleSupported -> {
+                mirageTestState = "fail"
+                mirageTestDetail = "Este teléfono no tiene motor nativo para el modelo."
+            }
+            !mirageDownloaded -> {
+                mirageTestState = "fail"
+                mirageTestDetail = "Descarga primero el modelo Mirage."
+            }
+            else -> {
+                mirageTestState = "running"
+                mirageTestDetail = "Cargando Mirage y evaluando escena de prueba…"
+                scope.launch {
+                    val started = System.currentTimeMillis()
+                    var pass = false
+                    var detail: String
+                    val bmp = android.graphics.Bitmap.createBitmap(128, 128, android.graphics.Bitmap.Config.ARGB_8888)
+                    try {
+                        val canvas = android.graphics.Canvas(bmp)
+                        canvas.drawColor(android.graphics.Color.rgb(34, 82, 58))
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            textSize = 22f
+                            isAntiAlias = true
+                        }
+                        canvas.drawCircle(64f, 52f, 20f, paint)
+                        canvas.drawText("TEST", 34f, 108f, paint)
+
+                        NeedleModelManager.ensureLoaded(context)
+                        val res = kotlinx.coroutines.withTimeoutOrNull(30_000) {
+                            NeedleRuntime.describeImage(bmp, language = "es")
+                        }
+                        val secs = (System.currentTimeMillis() - started) / 1000.0
+                        if (res != null) {
+                            pass = true
+                            val preview = res.description.take(48).ifBlank { "respuesta válida" }
+                            detail = "Escena: «$preview» · ${res.objects.size} elem. · ${"%.1f".format(secs)} s"
+                        } else {
+                            detail = NeedleRuntime.lastErrorMessage ?: "El motor no devolvió resultado."
+                        }
+                    } catch (t: Throwable) {
+                        detail = t.message ?: t.javaClass.simpleName
+                    } finally {
+                        if (!bmp.isRecycled) bmp.recycle()
+                    }
+                    mirageTestDetail = detail
+                    mirageTestState = if (pass) "pass" else "fail"
+                    needleTick++
                 }
             }
         }
@@ -768,7 +837,7 @@ fun VoiceAndAssistantScreen(
             }
         ) {
             ExpandableHint(
-                text = "Instala los modelos opcionales de lenguaje (35 MB) y voz (17 MB) para que tu asistente comprenda peticiones y transcriba notas de voz directamente en el teléfono, sin enviar nada a servidores externos.",
+                text = "Instala los modelos opcionales de lenguaje (35 MB), voz (17 MB) y visión (22 MB) para comprender peticiones, transcribir audio y describir fotos directamente en el teléfono, sin enviar nada a servidores externos.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -783,7 +852,11 @@ fun VoiceAndAssistantScreen(
             }
             needleDownload?.let { dl ->
                 Spacer(modifier = Modifier.height(10.dp))
-                val label = if (dl.model == NeedleModelManager.NEEDLE_FILE) "Needle 3" else "Whistle"
+                val label = when (dl.model) {
+                    NeedleModelManager.NEEDLE_FILE -> "Needle 3"
+                    NeedleModelManager.WHISTLE_FILE -> "Whistle"
+                    else -> "Mirage"
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -839,7 +912,13 @@ fun VoiceAndAssistantScreen(
                 ) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Modelo Needle 3 · 35 MB")
+                    Text(
+                        if (needleDownloaded) {
+                            "Needle 3 · listo (${NeedleModelManager.formatBytes(NeedleModelManager.needleFileBytes(context))})"
+                        } else {
+                            "Descargar Needle 3 · 35 MB"
+                        }
+                    )
                 }
             }
             Row(
@@ -858,14 +937,75 @@ fun VoiceAndAssistantScreen(
                 ) {
                     Icon(Icons.Default.Mic, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Whistle (voz a texto) · 17 MB")
+                    Text(
+                        if (whistleDownloaded) {
+                            "Whistle · listo (${NeedleModelManager.formatBytes(NeedleModelManager.whistleFileBytes(context))})"
+                        } else {
+                            "Descargar Whistle · 17 MB"
+                        }
+                    )
                 }
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val ok = NeedleModelManager.download(context, NeedleModelManager.MIRAGE_FILE)
+                            needleTick++
+                            if (!ok) Toast.makeText(context, "No se pudo descargar Mirage", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = needleSupported && !mirageDownloaded && needleDownload == null,
+                    modifier = Modifier.testTag("download_mirage_btn")
+                ) {
+                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        if (mirageDownloaded) {
+                            "Mirage · listo (${NeedleModelManager.formatBytes(NeedleModelManager.mirageFileBytes(context))})"
+                        } else {
+                            "Descargar Mirage · 22 MB"
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Button(
+                onClick = {
+                    transferAction = ModelTransferManager.AUTO_MODEL
+                    importLauncher.launch(arrayOf("*/*"))
+                },
+                enabled = !importBusy && needleDownload == null,
+                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                modifier = Modifier.fillMaxWidth().testTag("import_cact_auto_btn")
+            ) {
+                if (importBusy) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Validando e importando modelo…")
+                } else {
+                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Importar archivo .cact local (sin internet)")
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Si ya descargaste needle3.cact, whistle.cact o mirage.cact, selecciónalos aquí y la app los detectará automáticamente sin conexión.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (whistleDownloaded) {
+                Spacer(modifier = Modifier.height(4.dp))
                 ExpandableHint(
-                    text = "Whistle transcribe español en local; con él, el micrófono del " +
-                            "asistente va directo del audio a la acción sin pasar por el " +
-                            "reconocedor del sistema.",
+                    text = "Whistle transcribe español en local y alimenta directamente el micrófono del asistente.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -879,7 +1019,7 @@ fun VoiceAndAssistantScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Usar la IA local en el asistente", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = if (needleLoaded) "Modelo cargado y listo" else "Se activa al descargar el modelo",
+                        text = if (needleLoaded) "Modelo cargado y listo" else "Se activa al descargar o importar Needle 3",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -901,7 +1041,7 @@ fun VoiceAndAssistantScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Dictado del asistente con Whistle", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = if (whistleLoaded) "Modelo de voz cargado" else "Requiere descargar Whistle",
+                        text = if (whistleLoaded) "Modelo de voz cargado" else "Requiere descargar o importar Whistle",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -915,6 +1055,29 @@ fun VoiceAndAssistantScreen(
                     enabled = whistleDownloaded
                 )
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Describir fotos del diario con Mirage", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (mirageLoaded) "Modelo de visión cargado" else "Requiere descargar o importar Mirage",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = mirageVisionChecked,
+                    onCheckedChange = {
+                        mirageVisionChecked = it
+                        NeedleModelManager.setMirageVisionEnabled(context, it)
+                    },
+                    enabled = mirageDownloaded,
+                    modifier = Modifier.testTag("mirage_vision_switch")
+                )
+            }
             needleRuntimeError?.let { err ->
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -923,7 +1086,7 @@ fun VoiceAndAssistantScreen(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            if (needleDownloaded || whistleDownloaded) {
+            if (needleDownloaded || whistleDownloaded || mirageDownloaded) {
                 TextButton(
                     onClick = {
                         scope.launch {
@@ -934,76 +1097,100 @@ fun VoiceAndAssistantScreen(
                 ) {
                     Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Eliminar modelos descargados")
+                    Text("Eliminar modelos del dispositivo")
                 }
+            }
 
-                var showModelBackup by remember { mutableStateOf(false) }
-                Spacer(modifier = Modifier.height(4.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showModelBackup = !showModelBackup }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Copia de seguridad de archivos (.cact)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Icon(
-                        imageVector = if (showModelBackup) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = ForestPrimary
-                    )
-                }
-                AnimatedVisibility(visible = showModelBackup) {
-                    Column {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    transferAction = NeedleModelManager.NEEDLE_FILE
-                                    exportModelLauncher.launch("needle3.cact")
-                                },
-                                enabled = needleDownloaded,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Exportar Needle", fontSize = 11.sp)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    transferAction = NeedleModelManager.NEEDLE_FILE
-                                    importLauncher.launch(arrayOf("*/*"))
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Importar Needle", fontSize = 11.sp)
-                            }
+            var showModelBackup by remember { mutableStateOf(false) }
+            Spacer(modifier = Modifier.height(4.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showModelBackup = !showModelBackup }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Importar o exportar por modelo (.cact)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = if (showModelBackup) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = ForestPrimary
+                )
+            }
+            AnimatedVisibility(visible = showModelBackup) {
+                Column {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.NEEDLE_FILE
+                                exportModelLauncher.launch("needle3.cact")
+                            },
+                            enabled = needleDownloaded,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Exportar Needle", fontSize = 11.sp)
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    transferAction = NeedleModelManager.WHISTLE_FILE
-                                    exportModelLauncher.launch("whistle.cact")
-                                },
-                                enabled = whistleDownloaded,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Exportar Whistle", fontSize = 11.sp)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    transferAction = NeedleModelManager.WHISTLE_FILE
-                                    importLauncher.launch(arrayOf("*/*"))
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Importar Whistle", fontSize = 11.sp)
-                            }
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.NEEDLE_FILE
+                                importLauncher.launch(arrayOf("*/*"))
+                            },
+                            enabled = !importBusy,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Importar Needle", fontSize = 11.sp)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.WHISTLE_FILE
+                                exportModelLauncher.launch("whistle.cact")
+                            },
+                            enabled = whistleDownloaded,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Exportar Whistle", fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.WHISTLE_FILE
+                                importLauncher.launch(arrayOf("*/*"))
+                            },
+                            enabled = !importBusy,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Importar Whistle", fontSize = 11.sp)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.MIRAGE_FILE
+                                exportModelLauncher.launch("mirage.cact")
+                            },
+                            enabled = mirageDownloaded,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Exportar Mirage", fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                transferAction = NeedleModelManager.MIRAGE_FILE
+                                importLauncher.launch(arrayOf("*/*"))
+                            },
+                            enabled = !importBusy,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Importar Mirage", fontSize = 11.sp)
                         }
                     }
                 }
@@ -1175,6 +1362,25 @@ fun VoiceAndAssistantScreen(
                             OutlinedButton(
                                 onClick = { runWhistleTest() },
                                 modifier = Modifier.testTag("whistle_selftest_btn")
+                            ) {
+                                Text("Probar", fontSize = 12.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Visión en el dispositivo (Mirage)", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = mirageTestDetail ?: "Describe una escena de prueba en local",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TestStateChip(mirageTestState)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { runMirageTest() },
+                                modifier = Modifier.testTag("mirage_selftest_btn")
                             ) {
                                 Text("Probar", fontSize = 12.sp)
                             }

@@ -640,7 +640,9 @@ fun EntryDetailScreen(
                     )
                 }
             }
-                if (media != null && (media.labelsJson.isNotBlank() || media.faceCount > 0 || media.ocrText.isNotBlank())) {
+                val mirageAvailable = NeedleModelManager.isMirageDownloaded(context)
+                var mirageAnalyzing by remember(media?.id) { mutableStateOf(false) }
+                if (media != null && (media.caption.isNotBlank() || media.labelsJson.isNotBlank() || media.faceCount > 0 || media.ocrText.isNotBlank() || mirageAvailable)) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
@@ -648,12 +650,55 @@ fun EntryDetailScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Inteligencia visual local",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                if (mirageAvailable) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            mirageAnalyzing = true
+                                            viewModel.describePhotoWithMirage(media.id, entry.id) { ok ->
+                                                mirageAnalyzing = false
+                                                if (!ok) {
+                                                    Toast.makeText(context, "No se pudo describir la foto con Mirage", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        enabled = !mirageAnalyzing,
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp).testTag("mirage_describe_photo_btn")
+                                    ) {
+                                        if (mirageAnalyzing) {
+                                            CircularProgressIndicator(modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Analizando…", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                        } else {
+                                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                if (media.caption.isBlank()) "Describir con Mirage" else "Reanalizar con Mirage",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (media.caption.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Inteligencia de visión local (ML Kit)",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    text = media.caption,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
