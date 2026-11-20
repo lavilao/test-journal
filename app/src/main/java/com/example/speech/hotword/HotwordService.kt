@@ -405,8 +405,9 @@ class HotwordService : Service(), RecognitionListener {
                 val pcm = if (off == chunk.size) floatChunk else floatChunk.copyOf(off)
                 streamAudioMs += (off.toLong() * 1000L) / sampleRate
 
+                val hotwordKeywords = com.example.ai.needle.WhistleKeywordBuilder.forHotword(this, wakeWord())
                 val json = try {
-                    runBlocking { NeedleRuntime.streamProcess(pcm, "es") }
+                    runBlocking { NeedleRuntime.streamProcess(pcm, "es", hotwordKeywords) }
                 } catch (_: Throwable) {
                     null
                 }

@@ -77,11 +77,22 @@ object NeedleRuntime {
         pcm: FloatArray,
         samples: Int,
         language: String?,
+        keywords: String?,
         maxNewTokens: Int
     ): ByteArray?
-    private external fun nativeTranscribe(pcm: FloatArray, samples: Int, language: String?): ByteArray?
+    private external fun nativeTranscribe(
+        pcm: FloatArray,
+        samples: Int,
+        language: String?,
+        keywords: String?
+    ): ByteArray?
     private external fun nativeEmbedText(input: String): FloatArray?
-    private external fun nativeStreamProcess(pcm: FloatArray, samples: Int, language: String?): ByteArray?
+    private external fun nativeStreamProcess(
+        pcm: FloatArray,
+        samples: Int,
+        language: String?,
+        keywords: String?
+    ): ByteArray?
     private external fun nativeStreamStop(): ByteArray?
     private external fun nativeLastError(): ByteArray?
     private external fun nativeReset()
@@ -149,6 +160,7 @@ object NeedleRuntime {
      * set, so the assistant never ends up without tools.
      */
     suspend fun applyToolGating(context: Context): Boolean = apiMutex.withLock {
+        WhistleKeywordBuilder.invalidate()
         initialized = false
         declareTools(context)
     }
@@ -205,24 +217,88 @@ object NeedleRuntime {
     suspend fun completeAudio(
         pcm: FloatArray,
         language: String? = null,
-        maxNewTokens: Int = 320
+        maxNewTokens: Int = 320,
+        keywords: String? = null
     ): String? = apiMutex.withLock {
         if (!isReady() || !isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
         withContext(needleDispatcher) {
-            val bytes = nativeCompleteAudio(pcm, pcm.size, language, maxNewTokens)
+            val bytes = nativeCompleteAudio(pcm, pcm.size, language, keywords, maxNewTokens)
             bytes?.toString(Charsets.UTF_8)
         }
     }
 
-    /** Local transcription of 16 kHz mono float PCM via Whistle. */
-    suspend fun transcribe(pcm: FloatArray, language: String? = null): String? =
-        apiMutex.withLock {
-            if (!isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
-            withContext(needleDispatcher) {
-                val bytes = nativeTranscribe(pcm, pcm.size, language)
-                bytes?.toString(Charsets.UTF_8)
-            }
+    /** Local transcription of 16 kHz mono float PCM via Whistle (single <=30s window). */
+    suspend fun transcribe(
+        pcm: FloatArray,
+        language: String? = null,
+        keywords: String? = null
+    ): String? = apiMutex.withLock {
+        if (!isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
+        withContext(needleDispatcher) {
+            val bytes = nativeTranscribe(pcm, pcm.size, language, keywords)
+            bytes?.toString(Charsets.UTF_8)
         }
+    }
+
+    /**
+     * Transcribes audio of any practical length by splitting recordings longer
+     * than 28 seconds into overlapping 26-second windows (2-second overlap) and
+     * deduplicating boundary words cleanly.
+     */
+    suspend fun transcribeLongAudio(
+        pcm: FloatArray,
+        language: String? = null,
+        keywords: String? = null,
+        onChunkProgress: ((currentChunk: Int, totalChunks: Int) -> Unit)? = null
+    ): WhistleResult? {
+        if (!isSpeechModelLoaded() || pcm.isEmpty()) return null
+        val sampleRate = 16_000
+        val singleCallThreshold = 28 * sampleRate
+        if (pcm.size <= singleCallThreshold) {
+            onChunkProgress?.invoke(1, 1)
+            val raw = transcribe(pcm, language, keywords)
+            return WhistleResult.parse(raw)
+        }
+
+        val windowSamples = 26 * sampleRate
+        val stepSamples = 24 * sampleRate
+        val starts = ArrayList<Int>()
+        var offset = 0
+        while (offset < pcm.size) {
+            starts.add(offset)
+            if (offset + windowSamples >= pcm.size) break
+            offset += stepSamples
+        }
+
+        var mergedText = ""
+        var detectedLang: String? = null
+        val ttftValues = ArrayList<Double>()
+        val tpsValues = ArrayList<Double>()
+
+        for ((index, start) in starts.withIndex()) {
+            onChunkProgress?.invoke(index + 1, starts.size)
+            val end = minOf(pcm.size, start + windowSamples)
+            val slice = pcm.copyOfRange(start, end)
+            val raw = transcribe(slice, language, keywords)
+            val parsed = WhistleResult.parse(raw) ?: continue
+            if (parsed.text.isNotBlank()) {
+                mergedText = WhistleKeywordBuilder.mergeChunkTranscripts(mergedText, parsed.text)
+            }
+            if (detectedLang == null && !parsed.language.isNullOrBlank()) {
+                detectedLang = parsed.language
+            }
+            parsed.ttftMs?.let { ttftValues.add(it) }
+            parsed.decodeTps?.let { tpsValues.add(it) }
+        }
+
+        if (mergedText.isBlank()) return null
+        return WhistleResult(
+            text = mergedText,
+            language = detectedLang ?: language,
+            ttftMs = ttftValues.takeIf { it.isNotEmpty() }?.average(),
+            decodeTps = tpsValues.takeIf { it.isNotEmpty() }?.average()
+        )
+    }
 
     /**
      * TRUE text embedding with the loaded Needle model: a vector for a
@@ -244,18 +320,21 @@ object NeedleRuntime {
      * stream and returns the JSON with the words this pass committed plus
      * the unconfirmed tail. Only for the speech model.
      */
-    suspend fun streamProcess(pcm: FloatArray, language: String? = null): String? =
-        apiMutex.withLock {
-            if (!isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
-            withContext(needleDispatcher) {
-                try {
-                    val bytes = nativeStreamProcess(pcm, pcm.size, language)
-                    bytes?.toString(Charsets.UTF_8)
-                } catch (_: Throwable) {
-                    null
-                }
+    suspend fun streamProcess(
+        pcm: FloatArray,
+        language: String? = null,
+        keywords: String? = null
+    ): String? = apiMutex.withLock {
+        if (!isSpeechModelLoaded() || pcm.isEmpty()) return@withLock null
+        withContext(needleDispatcher) {
+            try {
+                val bytes = nativeStreamProcess(pcm, pcm.size, language, keywords)
+                bytes?.toString(Charsets.UTF_8)
+            } catch (_: Throwable) {
+                null
             }
         }
+    }
 
     /** Ends the live stream; JSON with the final committed words. */
     suspend fun streamStop(): String? = apiMutex.withLock {

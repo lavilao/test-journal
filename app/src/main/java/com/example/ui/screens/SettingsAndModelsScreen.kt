@@ -8,6 +8,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +37,8 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import com.example.data.AppInterfaceMode
 import com.example.ui.components.GoogleBlue
 import com.example.ui.components.ExpandableHint
@@ -205,69 +209,23 @@ fun SettingsAndModelsScreen(
         ) {
             androidx.compose.material3.IconButton(
                 onClick = onBack,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Regresar",
+                    contentDescription = "Volver",
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "Ajustes del Sistema",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                text = "Ajustes",
+                style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
         }
 
         Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: Experiencia Unificada NowBrief + Búsqueda Universal
-        Text(
-            text = "Experiencia Liquid Glass Unificada",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Base visual Samsung Now brief combinada con el buscador universal, noticias enriquecidas y gestos del modo Google.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Now brief Unificado Activo",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Incluye tarjetas Liquid Glass sobre fondo Aurora, anillos de vitales, clima de la semana, alertas de alarma/batería, buscador en todo el teléfono y feed Noticias/Memorias con selección múltiple.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(22.dp))
 
         // SECTION: Weather city
         Text(
@@ -425,7 +383,7 @@ fun SettingsAndModelsScreen(
 
         // Local Storage & Knowledge Stats
         Text(
-            text = "Knowledge Base Storage",
+            text = "Resumen del diario",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -436,7 +394,7 @@ fun SettingsAndModelsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Total Journal Entries:", style = MaterialTheme.typography.bodyMedium)
+                    Text("Memorias guardadas:", style = MaterialTheme.typography.bodyMedium)
                     Text("${entries.size}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -444,7 +402,7 @@ fun SettingsAndModelsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Extracted Entities & Concepts:", style = MaterialTheme.typography.bodyMedium)
+                    Text("Personas, lugares y conceptos:", style = MaterialTheme.typography.bodyMedium)
                     Text("${entities.size}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -452,7 +410,7 @@ fun SettingsAndModelsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Grouped Episodes / Events:", style = MaterialTheme.typography.bodyMedium)
+                    Text("Episodios agrupados:", style = MaterialTheme.typography.bodyMedium)
                     Text("${events.size}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -460,8 +418,8 @@ fun SettingsAndModelsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Database Engine:", style = MaterialTheme.typography.bodyMedium)
-                    Text("SQLite / Room v2", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = ForestPrimary))
+                    Text("Almacenamiento:", style = MaterialTheme.typography.bodyMedium)
+                    Text("100% privado en el dispositivo", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = ForestPrimary))
                 }
             }
         }
@@ -470,13 +428,13 @@ fun SettingsAndModelsScreen(
 
         // On-Device ML Kit Model Management
         Text(
-            text = "On-Device ML Kit Models",
+            text = "Idiomas y modelos sin conexión",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Download offline models once over Wi-Fi. Models execute locally without internet.",
+            text = "Descarga paquetes de idioma una vez con Wi-Fi para traducir y analizar notas sin internet.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -486,23 +444,23 @@ fun SettingsAndModelsScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 // Built-in models
                 ModelStatusRow(
-                    title = "Language Identification",
-                    subtitle = "Detects journal language in milliseconds",
-                    statusText = "Built-in / Active",
+                    title = "Detección de idioma",
+                    subtitle = "Identifica el idioma de tus notas al instante",
+                    statusText = "Activo",
                     isReady = true
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 ModelStatusRow(
-                    title = "Vision, Face & OCR Recognition",
-                    subtitle = "Labels attached images and extracts text",
-                    statusText = "Built-in / Active",
+                    title = "Visión, rostros y OCR",
+                    subtitle = "Etiqueta tus fotos y extrae texto automáticamente",
+                    statusText = "Activo",
                     isReady = true
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 ModelStatusRow(
-                    title = "MindForger Semantic Engine",
-                    subtitle = "TF-IDF, BM25, and autolink association",
-                    statusText = "Active (Zero overhead)",
+                    title = "Índice semántico",
+                    subtitle = "Relaciona personas, temas y recuerdos similares",
+                    statusText = "Activo",
                     isReady = true
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -514,9 +472,9 @@ fun SettingsAndModelsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Reconocimiento de Entidades", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                        Text("Extracción avanzada de entidades", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                         Text(
-                            if (isEntityModelDownloaded) "Motor neuronal ML Kit activo en dispositivo" else "Motor en dispositivo activo (ML Kit opcional)",
+                            if (isEntityModelDownloaded) "Modelo neuronal activo en el dispositivo" else "Motor base activo (paquete adicional opcional)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -525,7 +483,7 @@ fun SettingsAndModelsScreen(
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ForestPrimary)
                     } else if (isEntityModelDownloaded) {
                         Surface(color = ForestPrimary.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
-                            Text("ML Kit Activo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            Text("Activo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                         }
                     } else {
                         OutlinedButton(
@@ -535,21 +493,21 @@ fun SettingsAndModelsScreen(
                                     val success = MlKitAnalyzer.downloadEntityModel()
                                     isDownloadingEntityModel = false
                                     isEntityModelDownloaded = success
-                                    Toast.makeText(context, if (success) "Modelo ML Kit listo" else "Motor local sigue activo", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (success) "Modelo listo ✓" else "El motor local sigue activo", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.testTag("download_entity_model_button")
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Descargar ML Kit", style = MaterialTheme.typography.labelSmall)
+                            Text("Descargar", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = "Offline Translation Language Packs:",
+                    text = "Idiomas para traducción sin conexión:",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -569,7 +527,7 @@ fun SettingsAndModelsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(lang.displayName, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (isDownloaded) "Downloaded for offline use" else "Available on-demand (~30MB)",
+                                if (isDownloaded) "Descargado para uso sin conexión" else "Disponible (~30 MB)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (isDownloaded) ForestPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -583,7 +541,7 @@ fun SettingsAndModelsScreen(
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = "Ready",
+                                    text = "Listo",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     color = ForestPrimary,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -598,7 +556,7 @@ fun SettingsAndModelsScreen(
                                         downloadedModels[lang.code] = success
                                         Toast.makeText(
                                             context,
-                                            if (success) "${lang.displayName} model downloaded!" else "Download failed. Check connection.",
+                                            if (success) "${lang.displayName} descargado ✓" else "No se pudo descargar. Revisa tu conexión.",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -607,7 +565,7 @@ fun SettingsAndModelsScreen(
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Download", style = MaterialTheme.typography.labelSmall)
+                                Text("Descargar", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -615,19 +573,13 @@ fun SettingsAndModelsScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = "Copia de seguridad de los modelos ML Kit:",
+                    text = "Copia de seguridad de idiomas y visión:",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 ExpandableHint(
-                    text = "Exporta los modelos descargados (traducción incluida) a un zip y " +
-                            "reimpórtalos cuando quieras — otro teléfono o una reinstalación sin " +
-                            "volver a bajar ~30 MB por idioma. Desde v1.5.2 la importación restaura " +
-                            "cada archivo en su ubicación original (files/no_backup) para que ML Kit " +
-                            "los reconozca de verdad; los zips antiguos se restauran en ambas " +
-                            "ubicaciones. Lo que Google guarde fuera del almacenamiento de la app " +
-                            "no aparece aquí: se muestra exactamente lo encontrado.",
+                    text = "Exporta tus paquetes de idioma descargados a un archivo ZIP para restaurarlos en otro teléfono o tras reinstalar la app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -807,11 +759,6 @@ fun SettingsAndModelsScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // On-Device ML Kit & Model Diagnosis
-        MlKitDiagnosticsCard()
-
-        Spacer(modifier = Modifier.height(20.dp))
-
         // Camera Lens & Scanner (on-device ML Kit vision)
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -835,7 +782,7 @@ fun SettingsAndModelsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Lens de cámara y escáner",
+                            text = "Cámara inteligente y escáner",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -856,11 +803,7 @@ fun SettingsAndModelsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 ExpandableHint(
-                    text = "El Lens (botón de cámara de la app) ejecuta en tu teléfono: reconocimiento " +
-                            "de texto (OCR), traducción con cámara, códigos QR y de barras, etiquetado " +
-                            "de objetos y escaneo de documentos con limpieza de página. Los modelos " +
-                            "de OCR, códigos y etiquetado van incluidos en la app; el modelo de " +
-                            "traducción de cada idioma se descarga una vez y luego funciona sin internet.",
+                    text = "Reconoce texto impreso (OCR), traduce con la cámara, lee códigos QR y escanea documentos directamente en tu dispositivo.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -871,13 +814,13 @@ fun SettingsAndModelsScreen(
 
         // Storage & Cache Management
         Text(
-            text = "Storage & Regenerable Cache",
+            text = "Almacenamiento y caché",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         ExpandableHint(
-            text = "Inspect local device storage usage. OCR cache and semantic indices can be safely pruned and regenerated anytime.",
+            text = "Consulta el espacio que ocupa tu diario. La caché de OCR e índices puede limpiarse y reconstruirse cuando lo necesites.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -900,7 +843,7 @@ fun SettingsAndModelsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Total Storage Used", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("Espacio total usado", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                     Text(fmt(totalBytes), style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
                 }
 
@@ -909,12 +852,12 @@ fun SettingsAndModelsScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 val items = listOf<Pair<String, Long>>(
-                    "Journal Text (${breakdown.entryCount} entries, ${breakdown.pageCount} pages)" to breakdown.textEstimatedBytes,
-                    "Photos & Media (${breakdown.photoCount} photos)" to breakdown.photoBytes,
-                    "Voice Notes (${breakdown.audioCount} recordings)" to breakdown.audioBytes,
-                    "OCR Cache (${breakdown.ocrCharCount} chars extracted)" to (breakdown.ocrCharCount * 2L),
-                    "Semantic Graph (${breakdown.entityCount} entities, ${breakdown.relationshipCount} links)" to (breakdown.entityCount * 64L + breakdown.relationshipCount * 32L),
-                    "SQLite Database" to breakdown.databaseBytes
+                    "Texto del diario (${breakdown.entryCount} notas, ${breakdown.pageCount} páginas)" to breakdown.textEstimatedBytes,
+                    "Fotos y multimedia (${breakdown.photoCount} archivos)" to breakdown.photoBytes,
+                    "Notas de voz (${breakdown.audioCount} grabaciones)" to breakdown.audioBytes,
+                    "Caché OCR (${breakdown.ocrCharCount} caracteres)" to (breakdown.ocrCharCount * 2L),
+                    "Conexiones del diario (${breakdown.entityCount} entidades, ${breakdown.relationshipCount} enlaces)" to (breakdown.entityCount * 64L + breakdown.relationshipCount * 32L),
+                    "Base de datos local" to breakdown.databaseBytes
                 )
 
                 items.forEach { (label, bytes) ->
@@ -932,14 +875,14 @@ fun SettingsAndModelsScreen(
                 OutlinedButton(
                     onClick = {
                         viewModel.clearOcrCache {
-                            Toast.makeText(context, "OCR cache cleared! Can be regenerated anytime.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Caché OCR limpiada ✓", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("clear_ocr_cache_button")
                 ) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Clear OCR Cache (Safe)")
+                    Text("Limpiar caché OCR")
                 }
             }
         }
@@ -948,13 +891,13 @@ fun SettingsAndModelsScreen(
 
         // Rebuild Semantic Layer
         Text(
-            text = "Rebuild Semantic Metadata",
+            text = "Reconstruir índice semántico",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         ExpandableHint(
-            text = "Re-indexes all journal entries, re-derives entities, offsets, and relationships from original notes.",
+            text = "Vuelve a indexar todas las memorias, personas, lugares y conexiones a partir de tus notas originales.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -967,8 +910,8 @@ fun SettingsAndModelsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Re-index & Re-derive", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Text("Original journal writing remains untouched", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Reindexar notas", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("Tus notas originales no se modifican", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 if (isRebuilding) {
@@ -977,7 +920,7 @@ fun SettingsAndModelsScreen(
                     Button(
                         onClick = {
                             viewModel.rebuildAllSemanticMetadata {
-                                Toast.makeText(context, "Semantic metadata re-derived successfully!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Índice reconstruido ✓", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
@@ -985,7 +928,7 @@ fun SettingsAndModelsScreen(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Rebuild")
+                        Text("Reindexar")
                     }
                 }
             }
@@ -1213,7 +1156,7 @@ fun SettingsAndModelsScreen(
 
         // Open Data Export & Backup (Zero Lock-In)
         Text(
-            text = "Data Sovereignty & Export",
+            text = "Exportación y copia de datos",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -1222,7 +1165,7 @@ fun SettingsAndModelsScreen(
         EditorialCard {
             Column(modifier = Modifier.padding(16.dp)) {
                 ExpandableHint(
-                    text = "Export your entire journal and knowledge graph without vendor lock-in. Compatible with Obsidian, Logseq, and external backup tools.",
+                    text = "Exporta todo tu diario y grafo de memorias en formatos abiertos compatibles con Obsidian, Logseq o copias de seguridad.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1235,7 +1178,7 @@ fun SettingsAndModelsScreen(
                     Button(
                         onClick = {
                             scope.launch {
-                                exportDialogTitle = "Markdown PKM Export"
+                                exportDialogTitle = "Exportación Markdown"
                                 exportDialogContent = viewModel.getExportMarkdown()
                             }
                         },
@@ -1244,13 +1187,13 @@ fun SettingsAndModelsScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Export Markdown")
+                        Text("Markdown")
                     }
 
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                exportDialogTitle = "JSON Data Export"
+                                exportDialogTitle = "Exportación JSON"
                                 exportDialogContent = viewModel.getExportJson()
                             }
                         },
@@ -1258,7 +1201,7 @@ fun SettingsAndModelsScreen(
                     ) {
                         Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Export JSON")
+                        Text("JSON")
                     }
                 }
             }
@@ -1347,17 +1290,17 @@ fun SettingsAndModelsScreen(
         }
 
         // =============================================================
-        // EXPERIMENTAL: dynamic sun background (Samsung mode)
+        // Apariencia y fondo dinámico
         // =============================================================
         Spacer(modifier = Modifier.height(22.dp))
         Text(
-            text = "Experimental",
+            text = "Apariencia y fondo dinámico",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Pruebas en desarrollo: actívalas, pruébalas y decide si se quedan.",
+            text = "Adapta la atmósfera visual de tu pantalla principal según la hora del día y el clima.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1647,9 +1590,55 @@ fun SettingsAndModelsScreen(
         }
 
         // =============================================================
-        // Acerca de (real in-app versioning)
+        // Diagnóstico avanzado (colapsable)
         // =============================================================
         Spacer(modifier = Modifier.height(22.dp))
+        var showAdvancedDiagnostics by remember { mutableStateOf(false) }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showAdvancedDiagnostics = !showAdvancedDiagnostics }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Diagnóstico avanzado",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Comprobar rendimiento de los modelos locales",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showAdvancedDiagnostics) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (showAdvancedDiagnostics) "Ocultar diagnóstico" else "Mostrar diagnóstico",
+                        tint = ForestPrimary
+                    )
+                }
+                AnimatedVisibility(visible = showAdvancedDiagnostics) {
+                    Column {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        MlKitDiagnosticsCard()
+                    }
+                }
+            }
+        }
+
+        // =============================================================
+        // Acerca de
+        // =============================================================
+        Spacer(modifier = Modifier.height(18.dp))
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
@@ -1659,31 +1648,19 @@ fun SettingsAndModelsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Mnemosyne · v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    text = "Mnemosyne · v${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                ExpandableHint(
-                    text = "Diario semántico 100% en el dispositivo. Las versiones se firmarán con la misma clave para poder actualizarse sin perder datos.",
+                Text(
+                    text = "Diario semántico privado y 100% en tu dispositivo.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(onClick = {
-                    try {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/lavilao/test-journal/releases"))
-                        )
-                    } catch (_: Exception) {
-                        Toast.makeText(context, "No pude abrir el navegador", Toast.LENGTH_SHORT).show()
-                    }
-                }) {
-                    Text("Buscar actualizaciones (Releases)", color = ForestPrimary)
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(104.dp))
+        Spacer(modifier = Modifier.navigationBarsPadding().height(96.dp))
     }
 
     // Export Result Dialog
@@ -1705,18 +1682,18 @@ fun SettingsAndModelsScreen(
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("Mnemosyne Export", content))
-                        Toast.makeText(context, "Export copied to clipboard!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Copiado al portapapeles ✓", Toast.LENGTH_SHORT).show()
                         exportDialogContent = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                     modifier = Modifier.testTag("copy_export_button")
                 ) {
-                    Text("Copy to Clipboard")
+                    Text("Copiar")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { exportDialogContent = null }) {
-                    Text("Close")
+                    Text("Cerrar")
                 }
             }
         )

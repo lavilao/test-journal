@@ -118,7 +118,7 @@ import com.example.media.SubjectSegmentationManager
 import com.example.media.AudioDecode
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
-import com.example.ai.needle.WhistleResult
+import com.example.ai.needle.WhistleKeywordBuilder
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
@@ -184,21 +184,19 @@ fun EntryDetailScreen(
         }
         scope.launch {
             transcribingIds = transcribingIds + record.id
-            try { com.example.ai.needle.NeedleModelManager.ensureLoaded(context) } catch (_: Exception) {}
-            val pcm = com.example.media.AudioDecode.decodeToPcm16kMono(record.filePath)
-            val raw = if (pcm != null && pcm.isNotEmpty()) {
-                withTimeoutOrNull(90_000) { NeedleRuntime.transcribe(pcm, "es") }
+            try { NeedleModelManager.ensureLoaded(context) } catch (_: Exception) {}
+            val pcm = AudioDecode.decodeToPcm16kMono(record.filePath)
+            val entityNames = itemWithRelations?.entities?.map { it.displayName }.orEmpty()
+            val keywords = WhistleKeywordBuilder.forJournal(context, entityNames)
+            val parsed = if (pcm != null && pcm.isNotEmpty()) {
+                withTimeoutOrNull(120_000) {
+                    NeedleRuntime.transcribeLongAudio(pcm, "es", keywords)
+                }
             } else null
-            val parsed = WhistleResult.parse(raw)
             transcribingIds = transcribingIds - record.id
             if (parsed != null && parsed.text.isNotBlank()) {
                 viewModel.updateAudioTranscript(record.id, entryId, parsed.text)
-                val stats = parsed.statsLine()
-                Toast.makeText(
-                    context,
-                    if (stats != null) "Transcrito con IA local ✓ ($stats)" else "Transcrito con IA local ✓",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(context, "Nota de voz transcrita ✓", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "No pude transcribir este audio (¿silencio o formato?).", Toast.LENGTH_LONG).show()
             }
@@ -296,11 +294,11 @@ fun EntryDetailScreen(
         if (granted) {
             viewModel.startVoiceRecordingWithDictation()
         } else {
-            Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Se necesita permiso de micrófono para grabar notas de voz", Toast.LENGTH_SHORT).show()
         }
     }
 
-    val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy • h:mm a", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("EEEE, d 'de' MMMM yyyy • H:mm", Locale.getDefault())
 
     val entry = itemWithRelations?.entry
 
@@ -317,7 +315,7 @@ fun EntryDetailScreen(
                 title = { Text("Detalle de la memoria", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("detail_back_button")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                     }
                 },
                 actions = {
@@ -325,19 +323,19 @@ fun EntryDetailScreen(
                         onClick = { showTranslateSheet = true },
                         modifier = Modifier.testTag("detail_translate_button")
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Offline Translation", tint = ForestPrimary)
+                        Icon(Icons.Default.Translate, contentDescription = "Traducir memoria", tint = ForestPrimary)
                     }
                     IconButton(
                         onClick = { onEdit(entry.id) },
                         modifier = Modifier.testTag("detail_edit_button")
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Entry")
+                        Icon(Icons.Default.Edit, contentDescription = "Editar nota")
                     }
                     IconButton(
                         onClick = { showDeleteConfirm = true },
                         modifier = Modifier.testTag("detail_delete_button")
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Entry", tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Default.Delete, contentDescription = "Eliminar nota", tint = MaterialTheme.colorScheme.error)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -402,7 +400,7 @@ fun EntryDetailScreen(
 
             // Title
             Text(
-                text = entry.title.ifBlank { "Untitled Note" },
+                text = entry.title.ifBlank { "Nota sin título" },
                 style = MaterialTheme.typography.displayLarge.copy(fontSize = 28.sp),
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -432,7 +430,7 @@ fun EntryDetailScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Translate Memory",
+                        text = "Traducir",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = ForestPrimary
                     )
@@ -458,12 +456,12 @@ fun EntryDetailScreen(
                     ) {
                         Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Record Voice", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TerracottaAccent)
+                        Text("Grabar voz", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TerracottaAccent)
                     }
                 } else {
                     Button(
                         onClick = {
-                            viewModel.stopVoiceRecording(entryId, title = "Voice Note (${entry.title.ifBlank { "Memory" }})")
+                            viewModel.stopVoiceRecording(entryId, title = "Nota de voz (${entry.title.ifBlank { "Memoria" }})")
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
                         shape = RoundedCornerShape(8.dp),
@@ -472,7 +470,7 @@ fun EntryDetailScreen(
                     ) {
                         Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Stop & Transcribe", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                        Text("Detener y guardar", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
                     }
                 }
 
@@ -805,7 +803,7 @@ fun EntryDetailScreen(
                     Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Voice Journal (${audioRecords.size})",
+                        text = "Notas de voz (${audioRecords.size})",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -830,7 +828,7 @@ fun EntryDetailScreen(
                         ) {
                             Icon(Icons.Default.Mic, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Record Note", style = MaterialTheme.typography.labelSmall)
+                            Text("Grabar", style = MaterialTheme.typography.labelSmall)
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         OutlinedButton(
@@ -840,13 +838,13 @@ fun EntryDetailScreen(
                         ) {
                             Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Dictate Note", style = MaterialTheme.typography.labelSmall)
+                            Text("Dictar", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 } else {
                     Button(
                         onClick = {
-                            viewModel.stopVoiceRecording(entryId, title = "Voice Note (${entry.title.ifBlank { "Memory" }})")
+                            viewModel.stopVoiceRecording(entryId, title = "Nota de voz (${entry.title.ifBlank { "Memoria" }})")
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = TerracottaAccent),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
@@ -854,7 +852,7 @@ fun EntryDetailScreen(
                     ) {
                         Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Stop Recording", style = MaterialTheme.typography.labelSmall)
+                        Text("Detener", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -873,7 +871,7 @@ fun EntryDetailScreen(
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = TerracottaAccent, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Recording voice reflection... Tap Stop when done to save and transcribe.",
+                            text = "Grabando nota de voz… Pulsa Detener para guardarla.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TerracottaAccent
                         )
@@ -888,7 +886,7 @@ fun EntryDetailScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "No audio reflections recorded for this memory yet. Tap 'Record Note' to record audio or 'Dictate Note' to transcribe speech on-device.",
+                        text = "Todavía no hay grabaciones en esta memoria. Pulsa «Grabar» para capturar audio o «Dictar» para transcribir al instante.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)
@@ -906,12 +904,12 @@ fun EntryDetailScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = record.title.ifBlank { "Voice Note" },
+                                        text = record.title.ifBlank { "Nota de voz" },
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                     )
                                     val durationSec = record.durationMs / 1000
                                     Text(
-                                        text = "${durationSec / 60}m ${durationSec % 60}s • Local audio recording",
+                                        text = "${durationSec / 60}m ${durationSec % 60}s • Audio local",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -930,7 +928,7 @@ fun EntryDetailScreen(
                                         ) {
                                             Icon(
                                                 imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                contentDescription = if (isThisPlaying) "Pause" else "Play",
+                                                contentDescription = if (isThisPlaying) "Pausar" else "Reproducir",
                                                 tint = ForestPrimary,
                                                 modifier = Modifier.size(28.dp)
                                             )
@@ -942,7 +940,7 @@ fun EntryDetailScreen(
                                     ) {
                                         Icon(
                                             imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.EditNote,
-                                            contentDescription = "Transcribe / Dictate",
+                                            contentDescription = "Transcribir o dictar",
                                             tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary,
                                             modifier = Modifier.size(26.dp)
                                         )
@@ -953,7 +951,7 @@ fun EntryDetailScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete",
+                                            contentDescription = "Eliminar audio",
                                             tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                                             modifier = Modifier.size(20.dp)
                                         )
@@ -974,7 +972,7 @@ fun EntryDetailScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "On-Device Transcription:",
+                                                text = "Transcripción:",
                                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                                 color = ForestPrimary
                                             )
@@ -985,7 +983,7 @@ fun EntryDetailScreen(
                                             ) {
                                                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
                                                 Spacer(modifier = Modifier.width(3.dp))
-                                                Text("Edit", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                                Text("Editar", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
                                             }
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
@@ -1014,16 +1012,16 @@ fun EntryDetailScreen(
                                                 strokeWidth = 2.dp
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Transcribiendo con IA local…", style = MaterialTheme.typography.labelSmall)
+                                            Text("Transcribiendo…", style = MaterialTheme.typography.labelSmall)
                                         } else {
                                             Icon(Icons.Default.RecordVoiceOver, contentDescription = null, modifier = Modifier.size(15.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Transcribir con IA local (1 toque)", style = MaterialTheme.typography.labelSmall)
+                                            Text("Transcribir nota de voz", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "O toca el icono para dictar encima / editar a mano.",
+                                        text = "O toca el icono superior para dictar o editar el texto.",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1035,7 +1033,7 @@ fun EntryDetailScreen(
                                     ) {
                                         Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = TerracottaAccent, modifier = Modifier.size(15.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Transcribe Audio (Speech-to-Text / Edit)", style = MaterialTheme.typography.labelSmall)
+                                        Text("Transcribir o editar", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
@@ -1140,11 +1138,6 @@ fun EntryDetailScreen(
                                 )
                             }
                         }
-                        Text(
-                            text = "Similitud por embeddings de Needle (el aviso de duplicado exige también ≥60% de vocabulario común, porque el modelo pequeño inflaba la similitud de notas no relacionadas).",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -1163,7 +1156,7 @@ fun EntryDetailScreen(
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Suggested Topics (Auto-detected)",
+                                text = "Temas sugeridos",
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -1211,7 +1204,7 @@ fun EntryDetailScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Discovered Entities & Concepts",
+                    text = "Personas, lugares y conceptos",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1234,7 +1227,7 @@ fun EntryDetailScreen(
             if (!itemWithRelations?.tags.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Tags",
+                    text = "Etiquetas",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1256,7 +1249,7 @@ fun EntryDetailScreen(
                 }
             }
 
-            // Explainable Semantic Connections (MindForger / PKM inspired)
+            // Semantic Connections
             Spacer(modifier = Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
             Spacer(modifier = Modifier.height(14.dp))
@@ -1270,7 +1263,7 @@ fun EntryDetailScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Explainable Related Memories (${relatedEntries.size})",
+                    text = "Memorias conectadas (${relatedEntries.size})",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1280,7 +1273,7 @@ fun EntryDetailScreen(
 
             if (relatedEntries.isEmpty()) {
                 Text(
-                    text = "No semantic links found above threshold yet. As you write more entries, associations will automatically form.",
+                    text = "Aún no hay conexiones con otras memorias. Aparecerán automáticamente conforme añadas más notas.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1299,7 +1292,7 @@ fun EntryDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = relDetail.entry.title.ifBlank { "Untitled" },
+                                    text = relDetail.entry.title.ifBlank { "Sin título" },
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f)
@@ -1309,7 +1302,7 @@ fun EntryDetailScreen(
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = "${(relDetail.relationship.score * 100).toInt()}% match",
+                                        text = "${(relDetail.relationship.score * 100).toInt()}% afín",
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                         color = ForestPrimary,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1341,10 +1334,10 @@ fun EntryDetailScreen(
             title = { Text("Vincular rostro con persona") },
             text = {
                 Column {
-                    Text("Select a known person entity to associate with this face:", style = MaterialTheme.typography.bodySmall)
+                    Text("Elige una persona conocida para asociarla con este rostro:", style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(10.dp))
                     if (people.isEmpty()) {
-                        Text("No person entities detected yet.", style = MaterialTheme.typography.bodySmall)
+                        Text("Aún no hay personas registradas en tus notas.", style = MaterialTheme.typography.bodySmall)
                     } else {
                         people.forEach { person ->
                             TextButton(
@@ -1363,7 +1356,7 @@ fun EntryDetailScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { faceToLinkIndex = null }) {
-                    Text("Cancel")
+                    Text("Cancelar")
                 }
             }
         )
@@ -1465,7 +1458,7 @@ fun EntryDetailScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("¿Eliminar esta memoria?") },
-            text = { Text("This will permanently delete this journal entry and remove all its associations from the knowledge graph.") },
+            text = { Text("Esta acción eliminará permanentemente esta entrada y sus conexiones en tu diario.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1475,12 +1468,12 @@ fun EntryDetailScreen(
                     },
                     modifier = Modifier.testTag("confirm_delete_button")
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text("Eliminar", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel")
+                    Text("Cancelar")
                 }
             }
         )
@@ -1502,13 +1495,13 @@ fun EntryDetailScreen(
                     Icon(Icons.Default.Translate, contentDescription = null, tint = ForestPrimary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "On-Device Offline Translation",
+                        text = "Traducción sin conexión",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Powered by Google ML Kit. Models execute entirely locally on-device without internet once downloaded.",
+                    text = "Traduce directamente en tu teléfono sin necesidad de internet una vez descargado el idioma.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1527,7 +1520,7 @@ fun EntryDetailScreen(
                         value = selectedLangName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Translate into") },
+                        label = { Text("Traducir a") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1566,16 +1559,16 @@ fun EntryDetailScreen(
                     if (translationState.isTranslating) {
                         CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Translating On-Device...")
+                        Text("Traduciendo…")
                     } else {
-                        Text("Translate Offline")
+                        Text("Traducir")
                     }
                 }
 
                 if (translationState.errorMessage != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Notice: ${translationState.errorMessage}. Language pack can be downloaded in Settings.",
+                        text = "Aviso: ${translationState.errorMessage}. Puedes descargar este idioma en Ajustes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -1590,7 +1583,7 @@ fun EntryDetailScreen(
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(
-                                text = "Translated Text ($selectedLangName):",
+                                text = "Traducción ($selectedLangName):",
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = ForestPrimary
                             )
@@ -1612,20 +1605,20 @@ fun EntryDetailScreen(
     if (showAddSectionDialog) {
         AlertDialog(
             onDismissRequest = { showAddSectionDialog = false },
-            title = { Text("Añadir sección / página") },
+            title = { Text("Añadir sección") },
             text = {
                 Column {
                     androidx.compose.material3.OutlinedTextField(
                         value = newSectionTitle,
                         onValueChange = { newSectionTitle = it },
-                        label = { Text("Section Title (e.g. Day 2, Quotes)") },
+                        label = { Text("Título (ej. Día 2, Citas)") },
                         modifier = Modifier.fillMaxWidth().testTag("new_section_title_input")
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     androidx.compose.material3.OutlinedTextField(
                         value = newSectionBody,
                         onValueChange = { newSectionBody = it },
-                        label = { Text("Content") },
+                        label = { Text("Contenido") },
                         minLines = 4,
                         modifier = Modifier.fillMaxWidth().testTag("new_section_body_input")
                     )
@@ -1645,18 +1638,18 @@ fun EntryDetailScreen(
                             newSectionTitle = ""
                             newSectionBody = ""
                             showAddSectionDialog = false
-                            Toast.makeText(context, "Section added to memory!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Sección añadida ✓", Toast.LENGTH_SHORT).show()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
                     modifier = Modifier.testTag("confirm_add_section_btn")
                 ) {
-                    Text("Add")
+                    Text("Añadir")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddSectionDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancelar")
                 }
             }
         )
@@ -1664,7 +1657,7 @@ fun EntryDetailScreen(
 
     if (transcribingRecord != null) {
         VoiceTranscriptionModal(
-            title = "Transcribe Voice Note",
+            title = "Transcribir nota de voz",
             initialTranscript = transcribingRecord?.transcript.orEmpty(),
             audioFilePath = transcribingRecord?.filePath,
             durationMs = transcribingRecord?.durationMs ?: 0L,
@@ -1673,7 +1666,7 @@ fun EntryDetailScreen(
             onSaveTranscript = { newTranscript ->
                 transcribingRecord?.let { rec ->
                     viewModel.updateAudioTranscript(rec.id, entryId, newTranscript)
-                    Toast.makeText(context, "Transcript saved and knowledge connections updated!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Transcripción guardada ✓", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -1681,7 +1674,7 @@ fun EntryDetailScreen(
 
     if (showDictateNoteDialog) {
         VoiceTranscriptionModal(
-            title = "Dictate Spoken Reflection",
+            title = "Dictar reflexión",
             initialTranscript = "",
             audioFilePath = null,
             durationMs = 0L,
@@ -1691,13 +1684,13 @@ fun EntryDetailScreen(
                 if (newTranscript.isNotBlank()) {
                     viewModel.addAudioRecord(
                         entryId = entryId,
-                        title = "Dictated Thought",
+                        title = "Reflexión dictada",
                         filePath = "",
                         durationMs = 0L,
                         transcript = newTranscript,
                         status = "COMPLETED",
                         onDone = {
-                            Toast.makeText(context, "Dictated reflection saved and linked in knowledge graph!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Reflexión guardada ✓", Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
@@ -1752,10 +1745,9 @@ private fun AutolinkedText(
 
     ClickableText(
         text = annotatedString,
-        style = TextStyle(
+        style = MaterialTheme.typography.bodyLarge.copy(
             fontSize = 17.sp,
             lineHeight = 28.sp,
-            fontFamily = FontFamily.SansSerif,
             color = MaterialTheme.colorScheme.onSurface
         ),
         onClick = { offset ->

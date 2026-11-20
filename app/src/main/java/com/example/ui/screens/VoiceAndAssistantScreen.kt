@@ -12,6 +12,9 @@ import com.example.ai.needle.NeedleTools
 import com.example.ai.needle.CustomToolRegistry
 import com.example.data.model.CustomTool
 import com.example.ai.needle.WhistleDictationController
+import com.example.ai.needle.WhistleKeywordBuilder
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +38,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
@@ -308,8 +314,7 @@ fun VoiceAndAssistantScreen(
                 needleTick++
                 return@launch
             }
-            whistleTestDetail = "Modelo cargado ✔ (máscara ${NeedleRuntime.loadedModels()}). " +
-                    "Grabando 3 s — habla ahora…"
+            whistleTestDetail = "Modelo de voz listo ✔. Grabando 3 segundos — habla ahora…"
             whistleTestController.start()
         }
     }
@@ -365,7 +370,7 @@ fun VoiceAndAssistantScreen(
                 }
             }
             val raw = kotlinx.coroutines.withTimeoutOrNull(30_000) {
-                NeedleRuntime.transcribe(pcm, "es")
+                NeedleRuntime.transcribe(pcm, "es", WhistleKeywordBuilder.forJournal(context))
             }
             ticker.cancel()
             val parsed = raw?.let { r ->
@@ -373,18 +378,14 @@ fun VoiceAndAssistantScreen(
             }
             val text = parsed?.optString("text")?.trim() ?: ""
             val lang = parsed?.optString("language")?.trim() ?: ""
-            val ttft = parsed?.optDouble("ttft_ms", 0.0) ?: 0.0
-            val tps = parsed?.optDouble("decode_tps", 0.0) ?: 0.0
             val secs = (System.currentTimeMillis() - started) / 1000.0
             whistleTestDetail = when {
                 raw == null ->
-                    "El motor no respondió en 30 s (móvil muy lento o motor ocupado). " +
-                            "Reintenta con la app recién abierta."
+                    "El motor no respondió en 30 s. Intenta de nuevo en unos instantes."
                 text.isBlank() ->
-                    "El motor respondió (${"%.1f".format(secs)} s) pero no detectó voz: " +
-                            "habla más fuerte y repite."
+                    "No se detectó voz (${"%.1f".format(secs)} s). Acércate al micrófono e inténtalo de nuevo."
                 else ->
-                    "Escuchado: «$text» · idioma ${lang.ifBlank { "?" }} · 1ª palabra ${"%.2f".format(ttft / 1000.0)} s · ${"%.0f".format(tps)} tok/s · total ${"%.1f".format(secs)} s"
+                    "Escuchado: «$text» · idioma ${lang.ifBlank { "es" }} · ${"%.1f".format(secs)} s"
             }
             // PASS = the engine ran end-to-end on this device; an empty
             // transcript is reported honestly rather than scored as success.
@@ -605,36 +606,39 @@ fun VoiceAndAssistantScreen(
                 .padding(vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.size(48.dp)
+            ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
             }
             Spacer(modifier = Modifier.width(4.dp))
             Column {
                 Text(
                     text = "Voz y asistente",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.headlineMedium
                 )
-                ExpandableHint(
-                        text = "Motor, modelos sin conexión, hotword y Voice Match",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Text(
+                    text = "Motores sin conexión, activación y perfil de voz",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
         // ============ 1. Recognition engine ============
         SettingsCard(
             icon = { Icon(Icons.Default.RecordVoiceOver, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "Motor de reconocimiento",
+            title = "Servicio de dictado del sistema",
             badge = {
                 BadgePill(text = resolvedEngine.label, color = GoogleGreen)
             }
         ) {
             ExpandableHint(
-                    text = "El dictado usa el motor que elijas aquí. En los Samsung el predeterminado del sistema es «Samsung Voice Input», el mismo motor que usa el teclado de voz de Gboard — por eso las voces sonaban a Gboard. Si quieres las voces de Google, elige «Speech Services by Google»; si prefieres las de Samsung, elige el suyo. «Automático» prioriza el motor en el dispositivo y luego el de Google.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                text = "Elige el servicio que usará el dictado estándar del sistema (Google, Samsung o Automático). Si descargas el módulo sin conexión más abajo, el micrófono del asistente funcionará de forma totalmente privada sin depender de terceros.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedButton(
                 onClick = { showEngineDialog = true },
@@ -739,41 +743,40 @@ fun VoiceAndAssistantScreen(
             }
             Spacer(modifier = Modifier.height(8.dp))
             ExpandableHint(
-                    text = "¿Se pueden descargar los modelos de Google desde la app? En Android 13+ SÍ: el botón «Descargar» se lo pide directamente al motor. En Android 12 o menos solo se puede desde el ajuste del sistema. Sobre tu caso: los modelos offline pertenecen a «Servicios de Voz de Google»; cuando la app de Google se actualiza puede retirar los modelos de la versión anterior (por eso dejaban de funcionar tras actualizar y solo volvían al desinstalar actualizaciones). Volver a descargarlos — desde aquí o desde el ajuste del sistema — los deja disponibles de nuevo sin desinstalar nada.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                text = "En Android 13 o superior puedes solicitar la descarga del idioma sin conexión directamente aquí. En versiones anteriores, usa el botón de Ajustes del sistema.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             TextButton(onClick = { checkOfflineSupport() }) {
                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Reconsultar")
+                Text("Actualizar estado")
             }
         }
 
-        // ============ 2.5 Local AI (Cactus Needle 3, optional download) ============
+        // ============ 2.5 Local AI ============
         SettingsCard(
             icon = { Icon(Icons.Default.AutoAwesome, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "IA local opcional — Cactus Needle 3",
+            title = "IA privada en el dispositivo",
             badge = {
                 when {
-                    !needleSupported -> BadgePill("No soportado", Color(0xFFB3261E))
+                    !needleSupported -> BadgePill("No compatible", Color(0xFFB3261E))
                     needleDownloaded && needleLoaded -> BadgePill("Activa", GoogleGreen)
                     needleDownloaded -> BadgePill("Descargado", GoogleGreen)
-                    else -> BadgePill("No instalado", MaterialTheme.colorScheme.outline)
+                    else -> BadgePill("Opcional", MaterialTheme.colorScheme.outline)
                 }
             }
         ) {
             ExpandableHint(
-                    text = "Needle 3 es un modelo de IA de 35 MB hecho para móviles: entiende lo que pides, elige la herramienta correcta del asistente y rellena los argumentos — todo dentro del teléfono, sin nube. Es opcional: descárgalo con el botón y pruébalo; el asistente funciona igual sin él (con el analizador de reglas). Coste real: ~80 MB de RAM mientras responde y de 1 a 8 s por respuesta según el teléfono. Nada se descarga solo ni se envía nada afuera.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                text = "Instala los modelos opcionales de lenguaje (35 MB) y voz (17 MB) para que tu asistente comprenda peticiones y transcriba notas de voz directamente en el teléfono, sin enviar nada a servidores externos.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (!needleSupported) {
                 Spacer(modifier = Modifier.height(6.dp))
                 ExpandableHint(
-                    text = "Este procesador no tiene motor nativo disponible (el motor de " +
-                            "Cactus se compila para ARM de 32 y 64 bits). " +
-                            (needleSupportError ?: ""),
+                    text = "Este dispositivo no es compatible con la aceleración nativa local. " +
+                        (needleSupportError ?: ""),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -931,119 +934,181 @@ fun VoiceAndAssistantScreen(
                 ) {
                     Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Borrar los modelos descargados")
+                    Text("Eliminar modelos descargados")
                 }
-                Spacer(modifier = Modifier.height(6.dp))
+
+                var showModelBackup by remember { mutableStateOf(false) }
+                Spacer(modifier = Modifier.height(4.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(6.dp))
-                ExpandableHint(
-                    text = "Copia de seguridad local: exporta los archivos del modelo y " +
-                            "reimpórtalos cuando quieras (otro teléfono, o si el servidor " +
-                            "retirara las descargas). Los archivos no caducan.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            transferAction = NeedleModelManager.NEEDLE_FILE
-                            exportModelLauncher.launch("needle3.cact")
-                        },
-                        enabled = needleDownloaded,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Exportar Needle", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            transferAction = NeedleModelManager.NEEDLE_FILE
-                            importLauncher.launch(arrayOf("*/*"))
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Importar Needle", fontSize = 11.sp)
-                    }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showModelBackup = !showModelBackup }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Copia de seguridad de archivos (.cact)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Icon(
+                        imageVector = if (showModelBackup) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = ForestPrimary
+                    )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            transferAction = NeedleModelManager.WHISTLE_FILE
-                            exportModelLauncher.launch("whistle.cact")
-                        },
-                        enabled = whistleDownloaded,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Exportar Whistle", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            transferAction = NeedleModelManager.WHISTLE_FILE
-                            importLauncher.launch(arrayOf("*/*"))
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Importar Whistle", fontSize = 11.sp)
+                AnimatedVisibility(visible = showModelBackup) {
+                    Column {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    transferAction = NeedleModelManager.NEEDLE_FILE
+                                    exportModelLauncher.launch("needle3.cact")
+                                },
+                                enabled = needleDownloaded,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Exportar Needle", fontSize = 11.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    transferAction = NeedleModelManager.NEEDLE_FILE
+                                    importLauncher.launch(arrayOf("*/*"))
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Importar Needle", fontSize = 11.sp)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    transferAction = NeedleModelManager.WHISTLE_FILE
+                                    exportModelLauncher.launch("whistle.cact")
+                                },
+                                enabled = whistleDownloaded,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Exportar Whistle", fontSize = 11.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    transferAction = NeedleModelManager.WHISTLE_FILE
+                                    importLauncher.launch(arrayOf("*/*"))
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Importar Whistle", fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // ============ 2.55 Assistant tools (per-tool gating) ============
-        SettingsCard(
-            icon = { Icon(Icons.Default.Tune, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "Herramientas del asistente",
-            badge = {
-                val active = remember(needleTick) {
+        // ============ 2.55 Advanced assistant tools & self-tests (collapsible) ============
+        var showAdvancedTools by remember { mutableStateOf(false) }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .clickable { showAdvancedTools = !showAdvancedTools }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                val activeCount = remember(needleTick) {
                     NeedleTools.TOOL_CATALOG.count { NeedleTools.isToolEnabled(context, it.id) }
                 }
-                BadgePill("$active / ${NeedleTools.TOOL_CATALOG.size}", ForestPrimary)
-            }
-        ) {
-            ExpandableHint(
-                    text = "Needle es un modelo pequeño y su ventana de contexto es limitada: cada herramienta activa ocupa tokens de esa ventana (el «context bloat» que también degrada a los modelos grandes). Las herramientas desactivadas NO se le declaran: el enrutador gana precisión y velocidad. Enciende lo que uses, apaga lo que no.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            Spacer(modifier = Modifier.height(8.dp))
-            if (needleDownloaded) {
-                Text(
-                    text = if (NeedleRuntime.staticPrefixTokens > 0) {
-                        "Prefijo estático medido por el motor: ${NeedleRuntime.staticPrefixTokens} tokens."
-                    } else {
-                        "El motor medirá el prefijo al inicializar."
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            // Optimistic overrides: the switch moves INSTANTLY; the engine
-            // re-declares the catalogue in the background (it may queue
-            // behind the hotword stream — that used to make the switches
-            // look dead for seconds).
-            var toolOverrides by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
-            NeedleTools.TOOL_CATALOG.forEach { spec ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(spec.label, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            spec.hint,
-                            style = MaterialTheme.typography.labelSmall,
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Tune, null, tint = ForestPrimary, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Herramientas y diagnóstico avanzado",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "$activeCount de ${NeedleTools.TOOL_CATALOG.size} acciones activas · pruebas de motor",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = if (showAdvancedTools) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (showAdvancedTools) "Ocultar opciones" else "Mostrar opciones",
+                        tint = ForestPrimary
+                    )
+                }
+
+                AnimatedVisibility(visible = showAdvancedTools) {
+                    Column {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        ExpandableHint(
+                            text = "Activa solo las acciones que necesites para que el asistente sea más rápido y preciso.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-                    Switch(
-                        checked = toolOverrides[spec.id]
-                            ?: NeedleTools.isToolEnabled(context, spec.id),
-                        onCheckedChange = { checked ->
-                            toolOverrides = toolOverrides + (spec.id to checked)
-                            NeedleTools.setToolEnabled(context, spec.id, checked)
-                            needleTick++ // instant UI feedback
+                        Spacer(modifier = Modifier.height(8.dp))
+                        var toolOverrides by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+                        NeedleTools.TOOL_CATALOG.forEach { spec ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(spec.label, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        spec.hint,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = toolOverrides[spec.id]
+                                        ?: NeedleTools.isToolEnabled(context, spec.id),
+                                    onCheckedChange = { checked ->
+                                        toolOverrides = toolOverrides + (spec.id to checked)
+                                        NeedleTools.setToolEnabled(context, spec.id, checked)
+                                        WhistleKeywordBuilder.invalidate()
+                                        needleTick++
+                                        scope.launch {
+                                            try {
+                                                NeedleRuntime.applyToolGating(context)
+                                            } catch (_: Exception) {
+                                            }
+                                            needleTick++
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        needleRuntimeError?.let { err ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Aviso del motor: $err",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        TextButton(onClick = {
+                            NeedleTools.resetGating(context)
+                            WhistleKeywordBuilder.invalidate()
+                            toolOverrides = emptyMap()
+                            needleTick++
                             scope.launch {
                                 try {
                                     NeedleRuntime.applyToolGating(context)
@@ -1051,33 +1116,71 @@ fun VoiceAndAssistantScreen(
                                 }
                                 needleTick++
                             }
+                        }) {
+                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restaurar valores por defecto")
                         }
-                    )
-                }
-            }
-            needleRuntimeError?.let { err ->
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Aviso del motor: $err",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-            TextButton(onClick = {
-                NeedleTools.resetGating(context)
-                toolOverrides = emptyMap()
-                needleTick++
-                scope.launch {
-                    try {
-                        NeedleRuntime.applyToolGating(context)
-                    } catch (_: Exception) {
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Science, null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Pruebas de diagnóstico", fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        @Composable
+                        fun TestStateChip(state: String?) {
+                            when (state) {
+                                "running" -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                "pass" -> BadgePill("OK", GoogleGreen)
+                                "fail" -> BadgePill("Revisar", MaterialTheme.colorScheme.error)
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Enrutador de acciones (Needle)", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = needleTestDetail ?: "Prueba con «enciende la linterna»",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TestStateChip(needleTestState)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { runNeedleTest() },
+                                modifier = Modifier.testTag("needle_selftest_btn")
+                            ) {
+                                Text("Probar", fontSize = 12.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Voz a texto local (Whistle)", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = whistleTestDetail ?: "Graba 3 s y transcribe en el dispositivo",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TestStateChip(whistleTestState)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { runWhistleTest() },
+                                modifier = Modifier.testTag("whistle_selftest_btn")
+                            ) {
+                                Text("Probar", fontSize = 12.sp)
+                            }
+                        }
                     }
-                    needleTick++
                 }
-            }) {
-                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Restaurar los valores por defecto")
             }
         }
 
@@ -1087,6 +1190,7 @@ fun VoiceAndAssistantScreen(
             scope = scope,
             needleTick = needleTick,
             onChanged = {
+                WhistleKeywordBuilder.invalidate()
                 scope.launch {
                     CustomToolRegistry.refresh(context)
                     try {
@@ -1097,77 +1201,6 @@ fun VoiceAndAssistantScreen(
                 }
             }
         )
-
-        // ============ 2.6 Integrated self-tests ============
-        SettingsCard(
-            icon = { Icon(Icons.Default.Science, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "Pruebas integradas de la IA local",
-            badge = {
-                val anyFail = needleTestState == "fail" || whistleTestState == "fail"
-                val allPass = needleTestState == "pass" || whistleTestState == "pass"
-                when {
-                    anyFail -> BadgePill("Revisar", MaterialTheme.colorScheme.error)
-                    allPass -> BadgePill("OK", GoogleGreen)
-                    else -> BadgePill("Sin correr", MaterialTheme.colorScheme.outline)
-                }
-            }
-        ) {
-            ExpandableHint(
-                    text = "Comprueba que Needle y Whistle funcionan DE VERDAD en este teléfono, con una prueba reproducible: el router debe devolver la herramienta correcta para «enciende la linterna», y Whistle debe transcribir 3 segundos de tu voz sin pasar por Google ni Gboard.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            Spacer(modifier = Modifier.height(10.dp))
-
-            @Composable
-            fun TestStateChip(state: String?) {
-                when (state) {
-                    "running" -> {
-                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    }
-                    "pass" -> BadgePill("CORRECTO", GoogleGreen)
-                    "fail" -> BadgePill("FALLÓ", MaterialTheme.colorScheme.error)
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Needle 3 (router de herramientas)", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = needleTestDetail ?: "Envía «enciende la linterna» al modelo local",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TestStateChip(needleTestState)
-                Spacer(modifier = Modifier.width(8.dp))
-                OutlinedButton(
-                    onClick = { runNeedleTest() },
-                    modifier = Modifier.testTag("needle_selftest_btn")
-                ) {
-                    Text("Probar", fontSize = 12.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Whistle (voz a texto local)", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = whistleTestDetail ?: "Graba 3 s de tu voz y transcribe en local",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TestStateChip(whistleTestState)
-                Spacer(modifier = Modifier.width(8.dp))
-                OutlinedButton(
-                    onClick = { runWhistleTest() },
-                    modifier = Modifier.testTag("whistle_selftest_btn")
-                ) {
-                    Text("Probar", fontSize = 12.sp)
-                }
-            }
-        }
 
         // ============ 3. Hotword ============
         SettingsCard(
@@ -1301,26 +1334,26 @@ fun VoiceAndAssistantScreen(
             HorizontalDivider()
             Spacer(modifier = Modifier.height(10.dp))
             ExpandableHint(
-                    text = "Límites honestos: el hotword de bajo consumo tipo «Hey Google» corre en el chip DSP con APIs privilegiadas que Android YA NO expone a apps de terceros (AlwaysOnHotwordDetector salió del SDK público). Este hotword es por software: escucha mientras el servicio esté vivo y Android permita el micrófono (consume más batería). Con la pantalla apagada, algunas ROMs lo pausan.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                text = "La escucha continua mantiene activo el micrófono mientras el servicio esté encendido, por lo que puede incrementar ligeramente el consumo de batería.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         // ============ 4. Voice Match ============
         SettingsCard(
             icon = { Icon(Icons.Default.Fingerprint, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
-            title = "Voice Match (huella de voz propia)",
+            title = "Perfil de voz (Voice Match)",
             badge = {
                 if (enrolled) BadgePill("Inscrito · $sampleCount muestras", GoogleGreen)
                 else BadgePill("Sin inscribir", MaterialTheme.colorScheme.outline)
             }
         ) {
             ExpandableHint(
-                    text = "La huella de voz de Google («Hey Google») es privilegiada y no está disponible para terceros. Esta es NUESTRA huella on-device: 12 coeficientes MFCC por tramo sonoro → embedding que se compara por similitud coseno. Es más débil que un modelo neuronal, pero es real y local: tras detectar el hotword se te pedirá repetir tu frase y solo tu voz ejecutará el comando.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                text = "Registra muestras de tu voz en el dispositivo para que los comandos por voz solo se ejecuten cuando te reconozca.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(10.dp))
 
             if (enrollPhase == null) {
@@ -1501,16 +1534,7 @@ fun VoiceAndAssistantScreen(
             }
         }
 
-        // ============ 5. System assistant role — REMOVED (v1.5.2) ============
-        // The user's final decision after the v1.5.0 reboot-loop incident:
-        // Mnemosyne will NEVER integrate with the Android system assistant.
-        // No role requests, no "App de asistencia" nudging, no ACTION_ASSIST
-        // handling anywhere in the app. The in-app assistant (Needle +
-        // Whistle, hotword, voice notes, share intake) is the ONLY assistant
-        // surface this app exposes — it cannot crash the system because the
-        // system never binds to it.
-
-        Spacer(modifier = Modifier.height(30.dp))
+        Spacer(modifier = Modifier.navigationBarsPadding().height(36.dp))
     }
 
     // ------------------------------------------------------------------

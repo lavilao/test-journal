@@ -184,6 +184,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeCompleteAudio(JNIEnv *env, jobjec
                                                              jfloatArray pcm,
                                                              jint samples,
                                                              jstring language,
+                                                             jstring keywords,
                                                              jint max_new_tokens) {
     (void)thiz;
 #if NEEDLE_AVAILABLE
@@ -192,18 +193,22 @@ Java_com_example_ai_needle_NeedleRuntime_nativeCompleteAudio(JNIEnv *env, jobjec
     env->GetFloatArrayRegion(pcm, 0, samples, audio.data());
 
     const char *lang = language != nullptr ? env->GetStringUTFChars(language, nullptr) : nullptr;
+    const char *kw = keywords != nullptr ? env->GetStringUTFChars(keywords, nullptr) : nullptr;
+    const char *kwArg = (kw != nullptr && kw[0] != '\0') ? kw : nullptr;
 
     std::vector<char> out(kOutCapacity);
+    int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        needle_set_audio(lang, nullptr, 0);
-        int rc = needle_complete(nullptr, audio.data(), samples, max_new_tokens,
-                                 out.data(), kOutCapacity);
-        if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
-        if (rc < 0) {
-            LOGE("needle_complete(audio) failed: rc=%d err=%s", rc, needle_last_error());
-            return nullptr;
-        }
+        needle_set_audio(lang, kwArg, 0);
+        rc = needle_complete(nullptr, audio.data(), samples, max_new_tokens,
+                             out.data(), kOutCapacity);
+    }
+    if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
+    if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
+    if (rc < 0) {
+        LOGE("needle_complete(audio) failed: rc=%d err=%s", rc, needle_last_error());
+        return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
 #else
@@ -211,6 +216,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeCompleteAudio(JNIEnv *env, jobjec
     (void)pcm;
     (void)samples;
     (void)language;
+    (void)keywords;
     (void)max_new_tokens;
     return nullptr;
 #endif
@@ -221,7 +227,8 @@ JNIEXPORT jbyteArray JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject thiz,
                                                           jfloatArray pcm,
                                                           jint samples,
-                                                          jstring language) {
+                                                          jstring language,
+                                                          jstring keywords) {
     (void)thiz;
 #if NEEDLE_AVAILABLE
     if (pcm == nullptr || samples <= 0) return nullptr;
@@ -229,17 +236,21 @@ Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject t
     env->GetFloatArrayRegion(pcm, 0, samples, audio.data());
 
     const char *lang = language != nullptr ? env->GetStringUTFChars(language, nullptr) : nullptr;
+    const char *kw = keywords != nullptr ? env->GetStringUTFChars(keywords, nullptr) : nullptr;
+    const char *kwArg = (kw != nullptr && kw[0] != '\0') ? kw : nullptr;
 
     std::vector<char> out(kOutCapacity);
+    int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        int rc = needle_transcribe(audio.data(), samples, lang, nullptr, 0,
-                                   out.data(), kOutCapacity);
-        if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
-        if (rc < 0) {
-            LOGE("needle_transcribe failed: rc=%d err=%s", rc, needle_last_error());
-            return nullptr;
-        }
+        rc = needle_transcribe(audio.data(), samples, lang, kwArg, 0,
+                               out.data(), kOutCapacity);
+    }
+    if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
+    if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
+    if (rc < 0) {
+        LOGE("needle_transcribe failed: rc=%d err=%s", rc, needle_last_error());
+        return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
 #else
@@ -247,6 +258,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeTranscribe(JNIEnv *env, jobject t
     (void)pcm;
     (void)samples;
     (void)language;
+    (void)keywords;
     return nullptr;
 #endif
 }
@@ -299,7 +311,8 @@ JNIEXPORT jbyteArray JNICALL
 Java_com_example_ai_needle_NeedleRuntime_nativeStreamProcess(JNIEnv *env, jobject thiz,
                                                               jfloatArray pcm,
                                                               jint samples,
-                                                              jstring language) {
+                                                              jstring language,
+                                                              jstring keywords) {
     (void)thiz;
 #if NEEDLE_AVAILABLE
     if (pcm == nullptr || samples <= 0) return nullptr;
@@ -307,17 +320,21 @@ Java_com_example_ai_needle_NeedleRuntime_nativeStreamProcess(JNIEnv *env, jobjec
     env->GetFloatArrayRegion(pcm, 0, samples, audio.data());
 
     const char *lang = language != nullptr ? env->GetStringUTFChars(language, nullptr) : nullptr;
+    const char *kw = keywords != nullptr ? env->GetStringUTFChars(keywords, nullptr) : nullptr;
+    const char *kwArg = (kw != nullptr && kw[0] != '\0') ? kw : nullptr;
 
     std::vector<char> out(kOutCapacity);
+    int rc = 0;
     {
         std::lock_guard<std::mutex> lock(g_needle_mutex);
-        int rc = needle_stream_transcribe_process(audio.data(), samples, lang, nullptr,
-                                                  out.data(), kOutCapacity);
-        if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
-        if (rc < 0) {
-            LOGE("needle_stream_transcribe_process failed: rc=%d err=%s", rc, needle_last_error());
-            return nullptr;
-        }
+        rc = needle_stream_transcribe_process(audio.data(), samples, lang, kwArg,
+                                              out.data(), kOutCapacity);
+    }
+    if (lang != nullptr) env->ReleaseStringUTFChars(language, lang);
+    if (kw != nullptr) env->ReleaseStringUTFChars(keywords, kw);
+    if (rc < 0) {
+        LOGE("needle_stream_transcribe_process failed: rc=%d err=%s", rc, needle_last_error());
+        return nullptr;
     }
     return toJByteArray(env, out.data(), static_cast<int>(strnlen(out.data(), kOutCapacity)));
 #else
@@ -325,6 +342,7 @@ Java_com_example_ai_needle_NeedleRuntime_nativeStreamProcess(JNIEnv *env, jobjec
     (void)pcm;
     (void)samples;
     (void)language;
+    (void)keywords;
     return nullptr;
 #endif
 }

@@ -57,7 +57,7 @@ import androidx.core.content.ContextCompat
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.ai.needle.WhistleDictationController
-import com.example.ai.needle.WhistleResult
+import com.example.ai.needle.WhistleKeywordBuilder
 import com.example.media.AudioDecode
 import com.example.media.PlaybackState
 import com.example.ui.theme.ForestPrimary
@@ -106,29 +106,30 @@ fun VoiceTranscriptionModal(
         aiTick++
     }
 
-    /** Whistle stats of the last transcription (honest telemetry, small). */
-    var whistleStats by remember { mutableStateOf<String?>(null) }
+    var chunkProgressText by remember { mutableStateOf<String?>(null) }
 
     fun transcribeWhistle() {
         val pcm = whistleController.stop()
         if (pcm.isEmpty()) {
-            Toast.makeText(context, "No capté audio", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "No se detectó audio", Toast.LENGTH_SHORT).show()
             return
         }
         whistleTranscribing = true
+        chunkProgressText = null
         scope.launch {
-            val raw = kotlinx.coroutines.withTimeoutOrNull(30_000) {
-                NeedleRuntime.transcribe(pcm, "es")
+            val keywords = WhistleKeywordBuilder.forJournal(context)
+            val parsed = kotlinx.coroutines.withTimeoutOrNull(90_000) {
+                NeedleRuntime.transcribeLongAudio(pcm, "es", keywords) { cur, total ->
+                    chunkProgressText = if (total > 1) "Transcribiendo ($cur/$total)…" else null
+                }
             }
-            // Parse the engine JSON — the user sees TEXT, not {"text":…}.
-            val parsed = WhistleResult.parse(raw)
             whistleTranscribing = false
+            chunkProgressText = null
             aiTick++
-            whistleStats = parsed?.statsLine()
             if (parsed == null || parsed.text.isBlank()) {
                 Toast.makeText(
                     context,
-                    "Whistle no devolvió texto (¿silencio o ruido?). Intenta de nuevo.",
+                    "No se detectó voz en el audio. Intenta de nuevo.",
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
@@ -148,23 +149,28 @@ fun VoiceTranscriptionModal(
             return
         }
         whistleTranscribing = true
+        chunkProgressText = null
         scope.launch {
             try {
                 NeedleModelManager.ensureLoaded(context)
             } catch (_: Exception) {
             }
             val pcm = AudioDecode.decodeToPcm16kMono(path)
-            val raw = if (pcm != null && pcm.isNotEmpty()) {
-                kotlinx.coroutines.withTimeoutOrNull(90_000) { NeedleRuntime.transcribe(pcm, "es") }
+            val keywords = WhistleKeywordBuilder.forJournal(context)
+            val parsed = if (pcm != null && pcm.isNotEmpty()) {
+                kotlinx.coroutines.withTimeoutOrNull(120_000) {
+                    NeedleRuntime.transcribeLongAudio(pcm, "es", keywords) { cur, total ->
+                        chunkProgressText = if (total > 1) "Transcribiendo ($cur/$total)…" else null
+                    }
+                }
             } else null
-            val parsed = WhistleResult.parse(raw)
             whistleTranscribing = false
+            chunkProgressText = null
             aiTick++
-            whistleStats = parsed?.statsLine()
             if (parsed == null || parsed.text.isBlank()) {
                 Toast.makeText(
                     context,
-                    "No pude transcribir este audio (¿silencio, ruido o formato?).",
+                    "No pude transcribir este audio (¿silencio o ruido?).",
                     Toast.LENGTH_LONG
                 ).show()
             } else {
@@ -246,9 +252,9 @@ fun VoiceTranscriptionModal(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when {
-                    whistleUsable -> "Motor: Whistle 100% local (IA en el dispositivo) — sin Google, sin Gboard."
-                    dictationAvailable -> "Motor: reconocedor del sistema (elige otro en Voz y asistente). Habla y el texto aparecerá; también puedes editarlo a mano."
-                    else -> "Este dispositivo no tiene servicio de reconocimiento de voz y Whistle no está descargado. Escribe directamente."
+                    whistleUsable -> "Dictado privado directamente en tu teléfono."
+                    dictationAvailable -> "Habla y el texto aparecerá al instante; también puedes editarlo."
+                    else -> "El dictado por voz no está disponible ahora. Puedes escribir directamente."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -321,7 +327,7 @@ fun VoiceTranscriptionModal(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Transcribiendo con IA local…",
+                                text = chunkProgressText ?: "Transcribiendo…",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = TerracottaAccent
                             )
@@ -333,7 +339,7 @@ fun VoiceTranscriptionModal(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Escuchando (IA local)…",
+                                text = "Escuchando…",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = TerracottaAccent
                             )
@@ -353,7 +359,7 @@ fun VoiceTranscriptionModal(
                             Icon(Icons.Default.Mic, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (whistleUsable) "Dictado local (Whistle)" else "Dictado en vivo",
+                                text = if (whistleUsable) "Dictado sin conexión" else "Dictado en vivo",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = ForestPrimary
                             )
@@ -421,15 +427,6 @@ fun VoiceTranscriptionModal(
                     .fillMaxWidth()
                     .testTag("modal_transcript_text_input")
             )
-
-            if (whistleStats != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Whistle: $whistleStats",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

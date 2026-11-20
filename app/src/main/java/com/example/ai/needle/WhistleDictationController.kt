@@ -30,8 +30,8 @@ class WhistleDictationController {
 
     val sampleRate: Int = 16_000
 
-    /** Maximum useful duration: the speech model handles ~30 s per call. */
-    private val maxSamples: Int = sampleRate * 29
+    /** Maximum single-take voice memo duration (processed in 26s overlapping windows). */
+    private val maxSamples: Int = sampleRate * 120
 
     companion object {
         fun hasMicrophonePermission(context: android.content.Context): Boolean =

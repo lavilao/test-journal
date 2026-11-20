@@ -422,9 +422,12 @@ fun AssistantScreen(
             var transcript = ""
             var calls: List<AssistantIntent> = emptyList()
 
+            val keywords = com.example.ai.needle.WhistleKeywordBuilder.forAssistant(context)
             if (NeedleRuntime.isReady()) {
                 // Audio → tool calls (both models loaded).
-                val raw = withTimeoutOrNull(45_000) { NeedleRuntime.completeAudio(pcm, "es") }
+                val raw = withTimeoutOrNull(45_000) {
+                    NeedleRuntime.completeAudio(pcm, "es", keywords = keywords)
+                }
                 val parsed = raw?.let { NeedleTools.parseResponse(it) }
                 transcript = parsed?.audioText.orEmpty()
                 calls = parsed
@@ -433,11 +436,10 @@ fun AssistantScreen(
                     .orEmpty()
             } else {
                 // Whistle-only install: transcribe locally, then route text.
-                val raw = withTimeoutOrNull(30_000) {
-                    NeedleRuntime.transcribe(pcm, "es")
+                val parsed = withTimeoutOrNull(60_000) {
+                    NeedleRuntime.transcribeLongAudio(pcm, "es", keywords = keywords)
                 }
-                // Parse the engine JSON — never show {"text":…} to the user.
-                transcript = com.example.ai.needle.WhistleResult.parse(raw)?.text.orEmpty()
+                transcript = parsed?.text.orEmpty()
             }
 
             if (transcript.isNotBlank()) {

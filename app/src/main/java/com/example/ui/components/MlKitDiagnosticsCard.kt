@@ -97,63 +97,63 @@ fun MlKitDiagnosticsCard(
 
     val diagnostics = listOf(
         ModelDiagnosticItem(
-            name = "Entity Extraction",
-            category = "NLP & Semantic",
-            description = "Extracts People, Locations, Dates, Contacts, and URLs offline",
+            name = "Extracción de entidades",
+            category = "NLP y semántica",
+            description = "Detecta personas, lugares, fechas y contactos sin conexión",
             icon = Icons.Default.Psychology,
             isReady = true,
-            statusText = if (isEntityDownloaded) "Ready on device (Local ML)" else "Active (On-Device Fallback + ML Ready)",
+            statusText = if (isEntityDownloaded) "Listo en el dispositivo" else "Activo (modo local listo)",
             latencyMs = entityLatency
         ),
         ModelDiagnosticItem(
-            name = "Language Identification",
+            name = "Detección de idioma",
             category = "NLP",
-            description = "Identifies 50+ languages offline with zero network latency",
+            description = "Identifica más de 50 idiomas al instante sin internet",
             icon = Icons.Default.Language,
             isReady = true,
-            statusText = "Ready on device",
+            statusText = "Listo en el dispositivo",
             latencyMs = langLatency
         ),
         ModelDiagnosticItem(
-            name = "Offline Translation",
+            name = "Traducción sin conexión",
             category = "NLP",
-            description = "Translates between English, Spanish, and popular languages locally",
+            description = "Traduce notas localmente entre los idiomas descargados",
             icon = Icons.Default.Translate,
             isReady = true,
-            statusText = "Installed / Available on demand"
+            statusText = "Disponible bajo demanda"
         ),
         ModelDiagnosticItem(
-            name = "Text Recognition (OCR)",
-            category = "Vision",
-            description = "Scans handwritten and printed text from attached journal photos",
+            name = "Reconocimiento de texto (OCR)",
+            category = "Visión",
+            description = "Lee texto impreso o manuscrito de fotos y documentos",
             icon = Icons.Default.TextFields,
             isReady = true,
-            statusText = "Ready (Google Play Services Vision)",
+            statusText = "Listo en el dispositivo",
             latencyMs = visionLatency
         ),
         ModelDiagnosticItem(
-            name = "Image Labeling & Scenes",
-            category = "Vision",
-            description = "Automatic scene classification (nature, work, food, indoor)",
+            name = "Etiquetado de imágenes",
+            category = "Visión",
+            description = "Clasifica escenas y objetos de forma automática y privada",
             icon = Icons.Default.Image,
             isReady = true,
-            statusText = "Ready (Gallery Go local classification)"
+            statusText = "Listo en el dispositivo"
         ),
         ModelDiagnosticItem(
-            name = "Face Detection & Clustering",
-            category = "Vision",
-            description = "Locates faces for private memory albums without cloud uploads",
+            name = "Detección de rostros",
+            category = "Visión",
+            description = "Agrupa rostros para tus álbumes privados sin subir nada",
             icon = Icons.Default.Face,
             isReady = true,
-            statusText = "Ready (100% On-Device Privacy)"
+            statusText = "Listo (100% privado)"
         ),
         ModelDiagnosticItem(
-            name = "MindForger Deterministic IR",
-            category = "Knowledge Graph",
-            description = "FTS5 + TF-IDF tokenizer and concept graph clustering engine",
+            name = "Motor semántico local",
+            category = "Grafo de conocimiento",
+            description = "Indexación rápida de conceptos y conexiones entre memorias",
             icon = Icons.Default.Memory,
             isReady = true,
-            statusText = "High performance (<5ms latency)"
+            statusText = "Rendimiento óptimo (<5 ms)"
         )
     )
 
@@ -181,12 +181,12 @@ fun MlKitDiagnosticsCard(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "ML Kit & On-Device AI Models",
+                            text = "Diagnóstico de modelos locales",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Diagnostics & runtime availability inspection",
+                            text = "Disponibilidad y latencia en este dispositivo",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -211,20 +211,20 @@ fun MlKitDiagnosticsCard(
                         )
                         val tEntity = System.currentTimeMillis() - t0
                         entityLatency = tEntity
-                        logs.append("• Entity Extraction: ${entities.size} entities in ${tEntity}ms\n")
+                        logs.append("• Entidades: ${entities.size} detectadas en ${tEntity} ms\n")
 
                         // Benchmark 2: Language Identification
                         val t1 = System.currentTimeMillis()
                         val testLang = MlKitAnalyzer.identifyLanguage("Este es un diario semántico privado y fuera de línea.")
                         val tLang = System.currentTimeMillis() - t1
                         langLatency = tLang
-                        logs.append("• Language ID: Detected '$testLang' in ${tLang}ms\n")
+                        logs.append("• Idioma: '$testLang' detectado en ${tLang} ms\n")
 
                         // Benchmark 3: Vision OCR readiness
                         val t2 = System.currentTimeMillis()
                         visionLatency = System.currentTimeMillis() - t2
-                        logs.append("• Vision OCR: Pipeline ready\n")
-                        logs.append("• 100% on-device local execution verified.")
+                        logs.append("• Visión y OCR: listo en el dispositivo\n")
+                        logs.append("• Ejecución 100% local verificada.")
 
                         testLog = logs.toString()
                         lastTestTime = System.currentTimeMillis()
@@ -245,11 +245,11 @@ fun MlKitDiagnosticsCard(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Running Diagnostic Benchmarks...")
+                    Text("Ejecutando diagnóstico…")
                 } else {
                     Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Run Live Diagnostics Benchmark")
+                    Text("Ejecutar prueba de rendimiento")
                 }
             }
 
@@ -263,7 +263,7 @@ fun MlKitDiagnosticsCard(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            text = "Diagnostic Benchmark Results",
+                            text = "Resultados de la prueba",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = ForestPrimary
                         )
@@ -329,7 +329,7 @@ fun MlKitDiagnosticsCard(
 
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Available",
+                        contentDescription = "Disponible",
                         tint = ForestPrimary,
                         modifier = Modifier.size(18.dp)
                     )
