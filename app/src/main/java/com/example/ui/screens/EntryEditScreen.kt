@@ -372,6 +372,49 @@ fun EntryEditScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            val suggestedTitle = remember(title, body) {
+                if (title.isBlank() && body.trim().length >= 35) {
+                    com.example.semantic.LocalTextIntelligence.suggestTitleIfBlank(body)
+                } else {
+                    ""
+                }
+            }
+            if (suggestedTitle.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                    ),
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { title = suggestedTitle }
+                        .testTag("suggest_title_chip")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Usar título sugerido: «$suggestedTitle»",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
             // Title: clean, borderless
             OutlinedTextField(
                 value = title,

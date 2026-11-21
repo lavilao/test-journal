@@ -630,4 +630,29 @@ object NeedleTools {
         val call = parsed.calls.firstOrNull { it.name == "resumen_semanal" } ?: return null
         return call.args.optString("texto").takeIf { it.isNotBlank() }
     }
+
+    /**
+     * Article summarization via Needle 3 using the already-declared
+     * consultar_diario tool (zero extra prompt/context bloat).
+     */
+    suspend fun summarizeArticle(title: String, body: String): List<String>? {
+        val clean = body.replace(Regex("\\s+"), " ").trim().take(1200)
+        if (clean.length < 120) return null
+        val turn = buildString {
+            append("Fragmentos del artículo «").append(title.take(80)).append("»:\n")
+            append(clean).append('\n')
+            append("Llama a consultar_diario con texto= resumen en 3 frases claras separadas por ' | ' usando SOLO este texto.")
+        }
+        val raw = NeedleRuntime.completeText(turn, 220) ?: return null
+        val parsed = parseResponse(raw) ?: return null
+        val call = parsed.calls.firstOrNull { it.name == "consultar_diario" } ?: return null
+        if (parsed.confidence < 0.35f) return null
+        val text = call.args.optString("texto").takeIf { it.isNotBlank() } ?: return null
+        val bullets = text.split(Regex("\\s*\\|\\s*|\\n+|[•\\-]\\s+"))
+            .map { it.trim().trimStart('•', '-', ' ').trim() }
+            .filter { it.length >= 16 }
+            .distinct()
+            .take(3)
+        return bullets.takeIf { it.size >= 2 }
+    }
 }

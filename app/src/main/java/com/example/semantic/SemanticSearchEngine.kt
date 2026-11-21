@@ -76,66 +76,161 @@ object SemanticSearchEngine {
             .filter { it.length >= 2 && it !in STOP }
 
     // ------------------------------------------------------------------
-    // Stage 1: lexical scoring
+    // Stage 1: lexical & multimodal scoring (notes + pages + audio + Mirage/OCR)
     // ------------------------------------------------------------------
 
     private data class ScoredEntry(
         val entry: EntryWithRelations,
         val score: Float,
-        val reason: String
+        val reason: String,
+        val matchSource: String = "texto"
     )
+
+    private data class MultimodalCorpus(
+        val allTokens: List<String>,
+        val visualText: String,
+        val ocrText: String,
+        val audioText: String,
+        val visualTokens: Set<String>,
+        val ocrTokens: Set<String>,
+        val audioTokens: Set<String>
+    )
+
+    private fun extractCorpus(e: EntryWithRelations): MultimodalCorpus {
+        val pageText = e.pages.joinToString(" ") { "${it.title} ${it.body}" }
+        val audioText = e.audioRecords.joinToString(" ") { it.transcript }
+        val visualText = e.mediaItems.joinToString(" ") { m ->
+            val labels = LocalTextIntelligence.parseJsonStringList(m.labelsJson).joinToString(" ")
+            "${m.caption} $labels"
+        }
+        val ocrText = e.mediaItems.joinToString(" ") { it.ocrText }
+
+        val coreTokens = tokenize("${e.entry.title} ${e.entry.title} ${e.entry.body} $pageText")
+        val tagTokens = e.tags.flatMap { tokenize(it.name) }
+        val visualTokList = tokenize(visualText)
+        val ocrTokList = tokenize(ocrText)
+        val audioTokList = tokenize(audioText)
+
+        return MultimodalCorpus(
+            allTokens = coreTokens + tagTokens + visualTokList + ocrTokList + audioTokList,
+            visualText = visualText,
+            ocrText = ocrText,
+            audioText = audioText,
+            visualTokens = visualTokList.toSet(),
+            ocrTokens = ocrTokList.toSet(),
+            audioTokens = audioTokList.toSet()
+        )
+    }
+
+    private fun bestSnippetFor(e: EntryWithRelations): String {
+        val raw = listOf(
+            e.entry.body,
+            e.mediaItems.firstOrNull { it.caption.isNotBlank() }?.caption.orEmpty(),
+            e.audioRecords.firstOrNull { it.transcript.isNotBlank() }?.transcript.orEmpty(),
+            e.mediaItems.firstOrNull { it.ocrText.isNotBlank() }?.ocrText.orEmpty(),
+            e.pages.firstOrNull { it.body.isNotBlank() }?.body.orEmpty()
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+
+        return raw
+            .replace(Regex("[#*_`>]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(140)
+    }
 
     private fun scoreLexically(query: String, entries: List<EntryWithRelations>): List<ScoredEntry> {
         val queryTokens = tokenize(query)
+        val corpusById = entries.associate { it.entry.id to extractCorpus(it) }
+
         if (queryTokens.isEmpty()) {
-            // Fallback to a plain accent-insensitive contains match.
+            // Fallback to a plain accent-insensitive contains match across text + multimodal fields.
             val q = normalize(query.trim())
             if (q.isBlank()) return emptyList()
             return entries.mapNotNull { e ->
+                val c = corpusById[e.entry.id]!!
                 val inTitle = normalize(e.entry.title).contains(q)
                 val inBody = normalize(e.entry.body).contains(q)
-                if (inTitle || inBody) {
-                    ScoredEntry(
-                        e,
-                        if (inTitle) 3f else 1.5f,
-                        if (inTitle) "título contiene «$q»" else "contenido contiene «$q»"
-                    )
-                } else null
+                val inVisual = normalize(c.visualText).contains(q)
+                val inOcr = normalize(c.ocrText).contains(q)
+                val inAudio = normalize(c.audioText).contains(q)
+                when {
+                    inTitle -> ScoredEntry(e, 3.0f, "título contiene «$q»", "título")
+                    inBody -> ScoredEntry(e, 1.8f, "contenido contiene «$q»", "texto")
+                    inVisual -> ScoredEntry(e, 1.7f, "foto / escena: «$q»", "foto")
+                    inOcr -> ScoredEntry(e, 1.5f, "texto en foto (OCR): «$q»", "ocr")
+                    inAudio -> ScoredEntry(e, 1.5f, "nota de voz: «$q»", "voz")
+                    else -> null
+                }
             }.sortedByDescending { it.score }
         }
 
-        val docTokens = entries.associate { e ->
-            e.entry.id to (
-                tokenize("${e.entry.title} ${e.entry.title} ${e.entry.body}") +
-                    e.tags.flatMap { tokenize(it.name) }
-                )
-        }
         val totalDocs = max(1, entries.size)
 
         return entries.map { e ->
-            val tokens = docTokens[e.entry.id] ?: emptyList()
+            val corpus = corpusById[e.entry.id]!!
+            val tokens = corpus.allTokens
             var score = 0f
             val matched = mutableListOf<String>()
+            var hitVisual = false
+            var hitOcr = false
+            var hitAudio = false
+
             queryTokens.forEach { qt ->
-                val tf = tokens.count { it == qt || (it.length > 4 && qt.length > 4 && (it.startsWith(qt) || qt.startsWith(it))) }
+                val tf = tokens.count {
+                    it == qt || (it.length > 4 && qt.length > 4 && (it.startsWith(qt) || qt.startsWith(it)))
+                }
                 if (tf > 0) {
                     val docsHaving = entries.count { other ->
-                        (docTokens[other.entry.id] ?: emptyList()).any { it == qt }
+                        (corpusById[other.entry.id]?.allTokens ?: emptyList()).any { it == qt }
                     }.coerceAtLeast(1)
                     val idf = ln(totalDocs.toDouble() / docsHaving) + 1.0
                     val isTag = e.tags.any { normalize(it.name).contains(qt) }
                     score += (tf * idf).toFloat() * if (isTag) 3f else 1f
+                    if (corpus.visualTokens.any { it == qt || it.startsWith(qt) || qt.startsWith(it) }) hitVisual = true
+                    if (corpus.ocrTokens.any { it == qt || it.startsWith(qt) || qt.startsWith(it) }) hitOcr = true
+                    if (corpus.audioTokens.any { it == qt || it.startsWith(qt) || qt.startsWith(it) }) hitAudio = true
                     if (matched.size < 3) matched.add(qt)
                 }
             }
             // Full query in title: strong signal.
             val normTitle = normalize(e.entry.title)
-            if (normalize(query.trim()).length >= 3 && normTitle.contains(normalize(query.trim()))) {
+            val normQuery = normalize(query.trim())
+            if (normQuery.length >= 3 && normTitle.contains(normQuery)) {
                 score += 4f
             }
-            ScoredEntry(e, score, if (matched.isEmpty()) "" else "coincide con: ${matched.joinToString()}")
+
+            val sourceHint = when {
+                hitVisual -> "foto"
+                hitOcr -> "ocr"
+                hitAudio -> "voz"
+                else -> "texto"
+            }
+            val reason = when {
+                matched.isEmpty() -> ""
+                hitVisual -> "foto / escena: ${matched.joinToString()}"
+                hitOcr -> "texto en foto (OCR): ${matched.joinToString()}"
+                hitAudio -> "nota de voz: ${matched.joinToString()}"
+                else -> "coincide con: ${matched.joinToString()}"
+            }
+            ScoredEntry(e, score, reason, sourceHint)
         }.filter { it.score > 0f }
             .sortedByDescending { it.score }
+    }
+
+    /** Fast synchronous multimodal lexical hits (useful while debounced Needle AI runs, and in tests). */
+    fun instantLexicalHits(query: String, entries: List<EntryWithRelations>, limit: Int = CANDIDATE_LIMIT): List<SemanticHit> {
+        if (query.isBlank() || entries.isEmpty()) return emptyList()
+        return scoreLexically(query, entries)
+            .take(limit)
+            .map { c ->
+                SemanticHit(
+                    entryId = c.entry.entry.id,
+                    title = c.entry.entry.title.ifBlank { "(sin título)" },
+                    snippet = bestSnippetFor(c.entry),
+                    score = c.score,
+                    reason = c.reason.ifBlank { "coincidencia de texto" }
+                )
+            }
     }
 
     // ------------------------------------------------------------------
@@ -147,11 +242,7 @@ object SemanticSearchEngine {
         sb.append("Consulta de búsqueda del usuario: «").append(query.trim()).append("».\n")
         sb.append("Candidatos (id | título | extracto):\n")
         candidates.take(CANDIDATE_LIMIT).forEach { c ->
-            val clean = c.entry.entry.body
-                .replace(Regex("[#*_`>\\[\\]]"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-                .take(140)
+            val clean = bestSnippetFor(c.entry).take(140)
             sb.append(c.entry.entry.id)
                 .append(" | ")
                 .append(c.entry.entry.title.ifBlank { "(sin título)" }.take(60))
@@ -280,11 +371,7 @@ object SemanticSearchEngine {
             SemanticHit(
                 entryId = c.entry.entry.id,
                 title = c.entry.entry.title.ifBlank { "(sin título)" },
-                snippet = c.entry.entry.body
-                    .replace(Regex("[#*_`>]"), " ")
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
-                    .take(120),
+                snippet = bestSnippetFor(c.entry).take(120),
                 score = c.score,
                 reason = if (viaNeedle && c.entry.entry.id in needleRanking) {
                     if (viaEmbeddings) "IA local: responde a la intención (embeddings)" else "IA local: responde a la intención"

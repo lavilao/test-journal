@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -30,6 +34,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -61,12 +69,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.ai.needle.NeedleTools
 import com.example.ai.needle.WhistleDictationController
 import com.example.assistant.AssistantIntent
 import com.example.assistant.AssistantParser
+import com.example.semantic.MlKitAnalyzer
+import com.example.semantic.NeedleEmbeddings
+import com.example.semantic.SemanticSearchEngine
 import com.example.ui.components.GlassTopBar
 import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.viewmodel.JournalViewModel
@@ -77,19 +89,23 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** One exchange in the assistant conversation log. */
 data class AssistantMessage(
     val isUser: Boolean,
-    val text: String
+    val text: String,
+    val imageUri: String? = null,
+    val saveTitle: String? = null,
+    val saveBody: String? = null,
+    val saveImageUri: String? = null
 )
 
 /**
  * The on-device Assistant: speak or type a command in Spanish and it is
- * parsed and executed locally against phone capabilities and the semantic journal.
+ * parsed and executed locally against phone capabilities, Mirage vision, and the semantic journal.
  */
 @Composable
 fun AssistantScreen(
     viewModel: JournalViewModel,
     onBack: () -> Unit,
     onOpenLens: () -> Unit,
-    @Suppress("UNUSED_PARAMETER") onNavigateToDetail: (Long) -> Unit = {}
+    onNavigateToDetail: (Long) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -127,6 +143,100 @@ fun AssistantScreen(
 
     fun post(message: AssistantMessage) {
         messages = messages + message
+    }
+
+    fun analyzePhoto(uri: Uri) {
+        scope.launch {
+            val persistedUri = viewModel.persistImageToLocalStorage(uri)
+            post(AssistantMessage(true, "Analiza esta foto", imageUri = persistedUri))
+            thinking = true
+            try {
+                if (NeedleModelManager.isMirageDownloaded(context)) {
+                    NeedleModelManager.ensureLoaded(context)
+                }
+                val mirage = if (NeedleRuntime.isVisionModelLoaded()) {
+                    withTimeoutOrNull(25_000L) {
+                        NeedleRuntime.describeImageFromUri(
+                            context = context,
+                            uri = Uri.parse(persistedUri),
+                            language = "es"
+                        )
+                    }
+                } else null
+                val ml = MlKitAnalyzer.analyzeImageFromUri(context, Uri.parse(persistedUri))
+
+                val reply = buildString {
+                    if (mirage != null && !mirage.isEmpty()) {
+                        if (mirage.description.isNotBlank()) {
+                            append(mirage.description.trim())
+                        }
+                        val objs = mirage.mergedLabels(6)
+                        if (objs.isNotEmpty()) {
+                            if (isNotEmpty()) append("\n\n")
+                            append("Objetos detectados: ").append(objs.joinToString(", "))
+                        }
+                        if (mirage.relations.isNotEmpty()) {
+                            if (isNotEmpty()) append("\n")
+                            append("Escena: ").append(mirage.relations.take(3).joinToString(" · "))
+                        }
+                        val ocr = mirage.mergedOcrText().ifBlank { ml.ocrText }
+                        if (ocr.isNotBlank()) {
+                            if (isNotEmpty()) append("\n")
+                            append("Texto leído (OCR): ").append(ocr.take(260))
+                        }
+                        if (ml.faceCount > 0) {
+                            if (isNotEmpty()) append("\n")
+                            append("Rostros: ${ml.faceCount}")
+                        }
+                        append("\n\n· Mirage (visión local)")
+                    } else {
+                        val hasMl = ml.labels.isNotEmpty() || ml.ocrText.isNotBlank() || ml.faceCount > 0
+                        if (hasMl) {
+                            if (ml.labels.isNotEmpty()) {
+                                append("Elementos detectados: ").append(ml.labels.joinToString(", "))
+                            }
+                            if (ml.ocrText.isNotBlank()) {
+                                if (isNotEmpty()) append("\n")
+                                append("Texto leído (OCR): ").append(ml.ocrText.take(260))
+                            }
+                            if (ml.faceCount > 0) {
+                                if (isNotEmpty()) append("\n")
+                                append("Rostros detectados: ${ml.faceCount}")
+                            }
+                            append("\n\n· Visión local (ML Kit)")
+                        } else {
+                            append("No detecté texto ni objetos claros en esa imagen.")
+                        }
+                    }
+                }
+
+                val title = mirage?.mergedLabels(2)?.firstOrNull()
+                    ?.replaceFirstChar { it.uppercase() }
+                    ?.let { "Foto: $it" }
+                    ?: "Análisis visual"
+
+                post(
+                    AssistantMessage(
+                        isUser = false,
+                        text = reply,
+                        saveTitle = title,
+                        saveBody = reply.substringBeforeLast("\n\n· ").trim(),
+                        saveImageUri = persistedUri
+                    )
+                )
+            } catch (_: Exception) {
+                post(AssistantMessage(false, "No pude analizar esa imagen en este momento."))
+            } finally {
+                needleTick++
+                thinking = false
+            }
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) analyzePhoto(uri)
     }
 
     val whistlePermissionLauncher = rememberLauncherForActivityResult(
@@ -325,24 +435,52 @@ fun AssistantScreen(
     }
 
     suspend fun tryAnswerFromJournal(command: String): String? {
-        val text = command.lowercase(java.util.Locale.getDefault())
-        val triggers = listOf(
+        val text = command.lowercase(java.util.Locale.getDefault()).trim()
+        val explicitTriggers = listOf(
             "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
-            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "qué recuerdo",
-            "que recuerdo", "qué sé sobre", "que se sobre"
+            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "mis notas sobre",
+            "qué recuerdo", "que recuerdo", "qué sé sobre", "que se sobre", "busca en mi diario"
         )
-        if (triggers.none { text.contains(it) }) return null
-        if (!com.example.semantic.NeedleEmbeddings.isAvailable(context)) return null
+        val isExplicit = explicitTriggers.any { text.contains(it) }
+        val isNaturalQuestion = (text.contains('?') ||
+            text.startsWith("qué ") || text.startsWith("que ") ||
+            text.startsWith("cuándo ") || text.startsWith("cuando ") ||
+            text.startsWith("dónde ") || text.startsWith("donde ") ||
+            text.startsWith("quién ") || text.startsWith("quien ") ||
+            text.startsWith("cómo ") || text.startsWith("como ") ||
+            text.startsWith("cuál ") || text.startsWith("cual ")) &&
+            AssistantParser.parse(command) is AssistantIntent.Unknown
+
+        if (!isExplicit && !isNaturalQuestion) return null
         return try {
             val entries = viewModel.repository.allEntriesWithRelations.first().take(600)
             if (entries.isEmpty()) return null
-            val fragments = com.example.semantic.NeedleEmbeddings.ragFragments(
-                context, command, entries, k = 3
-            )
-            if (fragments.isEmpty()) return null
-            withTimeoutOrNull(25_000) {
-                NeedleTools.answerFromJournal(command, fragments)
-            } ?: "Encontré ${fragments.size} entradas relacionadas en tu diario; ábrelas desde la búsqueda."
+
+            if (NeedleEmbeddings.isAvailable(context)) {
+                val vectorHits = NeedleEmbeddings.search(context, command, entries, topK = 3)
+                val bestCosine = vectorHits.firstOrNull()?.second ?: 0f
+                if (vectorHits.isNotEmpty() && (isExplicit || bestCosine >= 0.78f)) {
+                    val fragments = NeedleEmbeddings.ragFragments(context, command, entries, k = 3)
+                    if (fragments.isNotEmpty()) {
+                        val aiAnswer = withTimeoutOrNull(25_000) {
+                            NeedleTools.answerFromJournal(command, fragments)
+                        }
+                        if (!aiAnswer.isNullOrBlank()) return aiAnswer
+                        return "Encontré esto en tu diario:\n${fragments.take(2).joinToString("\n• ", prefix = "• ")}"
+                    }
+                }
+            }
+
+            if (isExplicit) {
+                val lexical = SemanticSearchEngine.instantLexicalHits(command, entries, limit = 2)
+                if (lexical.isNotEmpty()) {
+                    return lexical.joinToString("\n• ", prefix = "En tus notas encontré:\n• ") { hit ->
+                        val snippet = hit.snippet.ifBlank { hit.reason }
+                        "«${hit.title}» — ${snippet.take(120)}"
+                    }
+                }
+            }
+            null
         } catch (_: Exception) {
             null
         }
@@ -466,7 +604,21 @@ fun AssistantScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(messages) { message ->
-                MessageBubble(message)
+                MessageBubble(
+                    message = message,
+                    onSaveMemory = { title, body, imgUri ->
+                        viewModel.saveEntry(
+                            id = 0L,
+                            title = title,
+                            body = body,
+                            attachedImageUri = imgUri?.let { Uri.parse(it) },
+                            onComplete = { newId ->
+                                Toast.makeText(context, "Guardado en tu diario", Toast.LENGTH_SHORT).show()
+                                onNavigateToDetail(newId)
+                            }
+                        )
+                    }
+                )
             }
             if (thinking) {
                 item {
@@ -569,6 +721,11 @@ fun AssistantScreen(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    SuggestionChip("Analizar foto") {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }
                     SuggestionChip("¿Qué tiempo hace?") { submit(it) }
                     SuggestionChip("Abre la linterna") { submit(it) }
                     SuggestionChip("Batería") { submit(it) }
@@ -583,6 +740,24 @@ fun AssistantScreen(
                         .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(
+                        onClick = {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        enabled = !thinking,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("assistant_pick_photo")
+                    ) {
+                        Icon(
+                            Icons.Default.AddPhotoAlternate,
+                            contentDescription = "Analizar foto con Mirage",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
                     OutlinedTextField(
                         value = typedInput,
                         onValueChange = { typedInput = it },
@@ -699,7 +874,10 @@ fun AssistantScreen(
 }
 
 @Composable
-private fun MessageBubble(message: AssistantMessage) {
+private fun MessageBubble(
+    message: AssistantMessage,
+    onSaveMemory: (title: String, body: String, imageUri: String?) -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
@@ -724,16 +902,51 @@ private fun MessageBubble(message: AssistantMessage) {
             tonalElevation = if (message.isUser) 0.dp else 1.dp,
             modifier = Modifier.widthIn(max = 320.dp)
         ) {
-            Text(
-                text = message.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (message.isUser) {
-                    MaterialTheme.colorScheme.onPrimary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-            )
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                if (!message.imageUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = message.imageUri,
+                        contentDescription = "Foto analizada",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Text(
+                    text = message.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (message.isUser) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                if (!message.isUser && !message.saveBody.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    TextButton(
+                        onClick = {
+                            onSaveMemory(
+                                message.saveTitle ?: "Análisis visual",
+                                message.saveBody,
+                                message.saveImageUri
+                            )
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.BookmarkAdd,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Guardar en diario", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }

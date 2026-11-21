@@ -1,10 +1,11 @@
 package com.example.ui.components
 
 import android.content.Intent
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RssFeed
@@ -32,12 +34,14 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.rss.RssArticle
-import com.example.ui.theme.ForestPrimary
+import com.example.semantic.ArticleSummary
+import com.example.semantic.LocalTextIntelligence
+import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.ui.theme.tabular
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,12 +69,21 @@ fun RssOfflineReaderModal(
     onFetchFullText: (suspend (RssArticle) -> String)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var fullBodyText by remember {
-        mutableStateOf(if (article.fullContent.length > article.description.length) article.fullContent else article.description)
+    var fullBodyText by remember(article.id) {
+        mutableStateOf(
+            if (article.fullContent.length > article.description.length) article.fullContent else article.description
+        )
     }
-    var isLoadingFullText by remember { mutableStateOf(false) }
+    var isLoadingFullText by remember(article.id) { mutableStateOf(false) }
+    var isSummarizing by remember(article.id) { mutableStateOf(false) }
+    var summary by remember(article.id) { mutableStateOf<ArticleSummary?>(null) }
+
+    val readingMinutes = remember(fullBodyText) {
+        LocalTextIntelligence.estimateReadingMinutes(fullBodyText)
+    }
 
     LaunchedEffect(article.id) {
         if (onFetchFullText != null && fullBodyText.length < 250) {
@@ -76,7 +93,8 @@ fun RssOfflineReaderModal(
                 if (fetched.isNotBlank()) {
                     fullBodyText = fetched
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
             isLoadingFullText = false
         }
     }
@@ -100,15 +118,25 @@ fun RssOfflineReaderModal(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = ForestPrimary.copy(alpha = 0.12f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    ) {
+                        Text(
+                            text = "Lectura sin conexión",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
                     Text(
-                        text = "Artículo Completo",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = ForestPrimary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        text = "$readingMinutes min lectura",
+                        style = MaterialTheme.typography.labelSmall.tabular,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -137,14 +165,14 @@ fun RssOfflineReaderModal(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = CircleShape,
-                    color = GoogleRed.copy(alpha = 0.15f),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
                     modifier = Modifier.size(24.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.RssFeed,
                             contentDescription = null,
-                            tint = GoogleRed,
+                            tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(14.dp)
                         )
                     }
@@ -152,7 +180,7 @@ fun RssOfflineReaderModal(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "${article.sourceTitle} • ${article.pubDate}",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.labelMedium.tabular.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -170,6 +198,122 @@ fun RssOfflineReaderModal(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // On-device AI Summary Action Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        if (summary != null) {
+                            summary = null
+                        } else {
+                            scope.launch {
+                                isSummarizing = true
+                                summary = LocalTextIntelligence.summarizeArticle(
+                                    context = context,
+                                    title = article.title,
+                                    body = fullBodyText
+                                )
+                                isSummarizing = false
+                            }
+                        }
+                    },
+                    enabled = !isSummarizing && fullBodyText.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("rss_summarize_ai_button")
+                ) {
+                    if (isSummarizing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Resumiendo…", style = MaterialTheme.typography.labelMedium)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = NowBriefVitalsGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (summary == null) "Resumir puntos clave" else "Ocultar resumen",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = summary != null && summary?.bullets?.isNotEmpty() == true) {
+                summary?.let { s ->
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
+                        LiquidGlassCard(
+                            cornerRadius = 16.dp,
+                            contentPadding = 14.dp,
+                            containerColor = NowBriefVitalsGreen.copy(alpha = 0.08f),
+                            borderColor = NowBriefVitalsGreen.copy(alpha = 0.30f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("rss_ai_summary_card")
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = NowBriefVitalsGreen,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (s.viaNeedle) "Puntos clave · IA local" else "Puntos clave · local",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = NowBriefVitalsGreen
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            val formatted = buildString {
+                                                append("## Puntos clave\n")
+                                                s.bullets.forEach { b -> append("• ").append(b).append('\n') }
+                                                append("\n---\n\n")
+                                                append(fullBodyText)
+                                            }
+                                            onSaveToNotes(article.copy(fullContent = formatted))
+                                            onDismiss()
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Guardar resumen", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                s.bullets.forEach { bullet ->
+                                    Text(
+                                        text = "• $bullet",
+                                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
             // Full Article Body
@@ -178,9 +322,17 @@ fun RssOfflineReaderModal(
                     modifier = Modifier.padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = ForestPrimary)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Cargando texto completo del artículo...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Cargando texto completo del artículo...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -204,13 +356,13 @@ fun RssOfflineReaderModal(
                         onSaveToNotes(article.copy(fullContent = fullBodyText))
                         onDismiss()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Guardar Artículo en Notas", fontSize = 13.sp)
+                    Text("Guardar en Notas", fontSize = 13.sp)
                 }
 
                 OutlinedButton(

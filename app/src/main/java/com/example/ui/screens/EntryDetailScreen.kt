@@ -1089,6 +1089,98 @@ fun EntryDetailScreen(
                 }
             }
 
+            // ---- Actionable tasks detected in note body / voice transcripts ----
+            val detectedActions = remember(entryId, entry.body, itemWithRelations?.audioRecords) {
+                com.example.semantic.LocalTextIntelligence.extractActionItems(
+                    title = entry.title,
+                    body = entry.body,
+                    transcripts = itemWithRelations?.audioRecords?.map { it.transcript }.orEmpty()
+                )
+            }
+            var addedActionKeys by remember(entryId) { mutableStateOf(setOf<String>()) }
+
+            if (detectedActions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(18.dp))
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 14.dp,
+                    containerColor = com.example.ui.theme.NowBriefVitalsGreen.copy(alpha = 0.08f),
+                    borderColor = com.example.ui.theme.NowBriefVitalsGreen.copy(alpha = 0.28f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("detected_actions_card")
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = com.example.ui.theme.NowBriefVitalsGreen,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Acciones detectadas en esta memoria",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = com.example.ui.theme.NowBriefVitalsGreen
+                            )
+                        }
+                        detectedActions.forEach { action ->
+                            val created = action.title in addedActionKeys
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = action.title,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    val hint = if (action.dueOffsetMinutes != null) {
+                                        val mins = action.dueOffsetMinutes
+                                        val whenText = if (mins >= 24 * 60) "mañana" else if (mins >= 60) "en ${mins / 60} h" else "en $mins min"
+                                        "Detectado en ${action.source} · $whenText"
+                                    } else {
+                                        "Detectado en ${action.source}"
+                                    }
+                                    Text(
+                                        text = hint,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        val offsetMs = (action.dueOffsetMinutes ?: 120) * 60_000L
+                                        viewModel.addReminder(
+                                            title = action.title,
+                                            category = "Nota",
+                                            dueTimestamp = System.currentTimeMillis() + offsetMs
+                                        )
+                                        addedActionKeys = addedActionKeys + action.title
+                                        Toast.makeText(context, "Tarea añadida a Recordatorios", Toast.LENGTH_SHORT).show()
+                                    },
+                                    enabled = !created,
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    if (created) {
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Añadida", style = MaterialTheme.typography.labelSmall)
+                                    } else {
+                                        Text("Crear tarea", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- Related entries via Needle embeddings (semantic neighbours) ----
             // Duplicate flagging needs LEXICAL corroboration: the small
             // model's raw embeddings are anisotropic (everything scores
@@ -1141,12 +1233,14 @@ fun EntryDetailScreen(
             }
             if (semanticNeighbours.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(18.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
-                    shape = RoundedCornerShape(12.dp),
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 14.dp,
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
                     modifier = Modifier.fillMaxWidth().testTag("semantic_related_card")
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -1193,12 +1287,14 @@ fun EntryDetailScreen(
             val pendingSuggested = suggestedTags.filter { it.status == "PENDING" }
             if (pendingSuggested.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(18.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = AmberNode.copy(alpha = 0.08f)),
-                    shape = RoundedCornerShape(12.dp),
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 14.dp,
+                    containerColor = AmberNode.copy(alpha = 0.08f),
+                    borderColor = AmberNode.copy(alpha = 0.28f),
                     modifier = Modifier.fillMaxWidth().testTag("suggested_tags_card")
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(6.dp))

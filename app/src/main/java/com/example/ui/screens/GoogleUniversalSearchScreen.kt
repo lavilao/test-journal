@@ -28,8 +28,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Mic
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -68,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.contacts.ContactsHelper
 import com.example.rss.RssArticle
+import com.example.semantic.SemanticSearchEngine
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.theme.NowBriefVitalsGreen
@@ -96,6 +100,7 @@ fun GoogleUniversalSearchScreen(
     val rssArticles by viewModel.rssArticles.collectAsState()
     val contactResults by viewModel.deviceContactsResults.collectAsState()
     val fileResults by viewModel.deviceFilesResults.collectAsState()
+    val semanticSearch by viewModel.semanticSearch.collectAsState()
 
     var activeReadingArticle by remember { mutableStateOf<RssArticle?>(null) }
 
@@ -113,17 +118,20 @@ fun GoogleUniversalSearchScreen(
 
     LaunchedEffect(searchQuery) {
         viewModel.searchDevice(searchQuery)
+        viewModel.onSemanticSearchChanged(searchQuery)
     }
 
-    val matchedNotes = remember(searchQuery, entries) {
+    val instantHits = remember(searchQuery, entries) {
         if (searchQuery.isBlank()) emptyList()
-        else {
-            val q = searchQuery.trim().lowercase()
-            entries.filter { item ->
-                item.entry.title.lowercase().contains(q) ||
-                    item.entry.body.lowercase().contains(q) ||
-                    item.tags.any { it.name.lowercase().contains(q) }
-            }
+        else SemanticSearchEngine.instantLexicalHits(searchQuery, entries)
+    }
+
+    val matchedNoteHits = remember(searchQuery, semanticSearch, instantHits) {
+        when {
+            searchQuery.isBlank() -> emptyList()
+            semanticSearch.query == searchQuery && semanticSearch.hits.isNotEmpty() -> semanticSearch.hits
+            semanticSearch.query == searchQuery && !semanticSearch.isSearching -> semanticSearch.hits
+            else -> instantHits
         }
     }
 
@@ -187,7 +195,7 @@ fun GoogleUniversalSearchScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Buscar contactos, archivos, notas...", fontSize = 15.sp) },
+                            placeholder = { Text("Buscar por significado, fotos, OCR, contactos...", fontSize = 14.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color.Transparent,
@@ -220,7 +228,7 @@ fun GoogleUniversalSearchScreen(
                             UniversalSearchTab.TODO -> "Todo"
                             UniversalSearchTab.CONTACTOS -> "Contactos (${contactResults.size})"
                             UniversalSearchTab.ARCHIVOS -> "Archivos (${fileResults.size})"
-                            UniversalSearchTab.NOTAS -> "Notas (${matchedNotes.size})"
+                            UniversalSearchTab.NOTAS -> "Notas (${matchedNoteHits.size})"
                             UniversalSearchTab.NOTICIAS -> "Noticias (${matchedNews.size})"
                         }
                         FilterChip(
@@ -256,11 +264,18 @@ fun GoogleUniversalSearchScreen(
                         contentPadding = 16.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "Escribe para buscar contactos en tu agenda, archivos guardados en el teléfono, notas personales o titulares descargados.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Búsqueda universal y multimodal",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Encuentra contactos, archivos del teléfono, noticias y notas por significado — incluido texto dentro de fotos (OCR), objetos detectados por Mirage y notas de voz.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             } else {
@@ -467,17 +482,47 @@ fun GoogleUniversalSearchScreen(
                     }
                 }
 
-                // SECTION: Notas
+                // SECTION: Notas (Búsqueda semántica, visual y de voz)
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.NOTAS) {
-                    if (matchedNotes.isNotEmpty()) {
+                    if (matchedNoteHits.isNotEmpty()) {
                         item {
-                            Text(
-                                "Notas y memorias",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Notas y memorias",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (semanticSearch.isSearching) {
+                                        CircularProgressIndicator(
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(13.dp),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    val aiActive = semanticSearch.viaNeedle || semanticSearch.viaEmbeddings
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = (if (aiActive) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary).copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = if (aiActive) "IA local · semántica" else "Semántica + multimedia",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (aiActive) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        items(matchedNotes, key = { "note_${it.entry.id}" }) { item ->
+                        items(matchedNoteHits, key = { "note_${it.entryId}" }) { hit ->
+                            val viaAi = semanticSearch.viaNeedle && hit.entryId in semanticSearch.needleRanking
+                            val tint = if (viaAi) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
                                 color = glassSurface,
@@ -485,18 +530,55 @@ fun GoogleUniversalSearchScreen(
                                 tonalElevation = 1.dp,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onNavigateToDetail(item.entry.id) }
+                                    .clickable { onNavigateToDetail(hit.entryId) }
                             ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(item.entry.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        item.entry.body,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = tint.copy(alpha = 0.14f),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (viaAi) Icons.Default.AutoAwesome else Icons.Default.Description,
+                                                contentDescription = null,
+                                                tint = tint,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = hit.title,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (hit.snippet.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Text(
+                                                text = hit.snippet,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (hit.reason.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = hit.reason,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = tint,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

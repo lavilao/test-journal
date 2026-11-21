@@ -61,6 +61,37 @@ object NeedleEmbeddings {
             }
         }
 
+    private fun composeRichBody(e: EntryWithRelations): String = buildString {
+        if (e.entry.body.isNotBlank()) append(e.entry.body.trim())
+        e.pages.forEach { p ->
+            if (p.title.isNotBlank() || p.body.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append(p.title.trim()).append(' ').append(p.body.trim())
+            }
+        }
+        e.audioRecords.forEach { a ->
+            if (a.transcript.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append("Voz: ").append(a.transcript.trim())
+            }
+        }
+        e.mediaItems.forEach { m ->
+            if (m.caption.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append("Foto: ").append(m.caption.trim())
+            }
+            val labels = LocalTextIntelligence.parseJsonStringList(m.labelsJson)
+            if (labels.isNotEmpty()) {
+                if (isNotEmpty()) append('\n')
+                append("Objetos: ").append(labels.joinToString(", "))
+            }
+            if (m.ocrText.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append("OCR: ").append(m.ocrText.trim())
+            }
+        }
+    }
+
     /**
      * Backfills missing/stale vectors for the given entries (bounded, so a
      * search never spends minutes embedding a huge journal). Returns how
@@ -85,7 +116,7 @@ object NeedleEmbeddings {
             val current = stored[entry.id]
             val stale = current == null || current.updatedAt < (entry.updatedAt ?: entry.createdAt)
             if (stale) {
-                if (upsertEntry(context, entry.id, entry.title, entry.body)) written++
+                if (upsertEntry(context, entry.id, entry.title, composeRichBody(e))) written++
             }
         }
         written
@@ -180,7 +211,7 @@ object NeedleEmbeddings {
         hits.mapNotNull { (id, _) ->
             val e = byId[id] ?: return@mapNotNull null
             val title = e.entry.title.ifBlank { "(sin título)" }
-            val excerpt = e.entry.body.replace(Regex("[#*_`>]"), " ")
+            val excerpt = composeRichBody(e).replace(Regex("[#*_`>]"), " ")
                 .replace(Regex("\\s+"), " ").trim().take(220)
             "«$title» — $excerpt"
         }
