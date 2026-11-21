@@ -101,6 +101,25 @@ class MirageVisionTest {
     }
 
     @Test
+    fun parseJson_ignoresNullLiteralsAndSupportsCaptionFallback() {
+        val sample = """
+            [debug] ok
+            {
+              "description": null,
+              "caption": "Cuaderno abierto junto a una taza",
+              "detected_objects": ["cuaderno", "taza"],
+              "language": null
+            }
+        """.trimIndent()
+        val result = MirageVision.parseJson(sample)
+        assertNotNull(result)
+        result!!
+        assertEquals("Cuaderno abierto junto a una taza", result.description)
+        assertEquals(listOf("cuaderno", "taza"), result.mergedLabels())
+        assertNull(result.language)
+    }
+
+    @Test
     fun bitmapToPackedRgb_packsRgbChannelOrderCorrectly() {
         val bmp = Bitmap.createBitmap(2, 1, Bitmap.Config.ARGB_8888)
         bmp.setPixel(0, 0, Color.rgb(12, 34, 56))

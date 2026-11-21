@@ -43,8 +43,8 @@ fun NowBriefAppBackground(
     weatherCode: Int? = null
 ) {
     val context = LocalContext.current
-    val dynamicEnabled = remember { SunCycle.isDynamicAtmosphereEnabled(context) }
-    val resolvedCode = weatherCode ?: remember { SunCycle.lastWeatherCode(context) }
+    val dynamicEnabled = remember(weatherCode) { SunCycle.isDynamicAtmosphereEnabled(context) }
+    val resolvedCode = weatherCode ?: SunCycle.lastWeatherCode(context)
 
     if (dynamicEnabled) {
         SunGradientBackground(
@@ -336,7 +336,9 @@ fun SunGradientBackground(
                 val cy = cloud.yFrac * h
                 val cw = cloud.widthFrac * w
                 val ch = cloud.heightFrac * h
-                val alpha = (cloud.alpha * cloudDensity).coerceIn(0f, 0.88f)
+                // Keep clouds behind the top header soft so hero text remains crisp.
+                val topDamping = if (cloud.yFrac < 0.28f) 0.72f else 1f
+                val alpha = (cloud.alpha * cloudDensity * topDamping).coerceIn(0f, 0.76f)
                 drawSoftCloudCluster(
                     center = Offset(cx, cy),
                     width = cw,
@@ -406,12 +408,30 @@ fun SunGradientBackground(
         // 6. Calm horizon blend so liquid-glass cards & bottom capsule remain crisp
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, palette.bottom.copy(alpha = 0.85f)),
+                colors = listOf(Color.Transparent, palette.bottom.copy(alpha = 0.82f)),
                 startY = h * 0.56f,
                 endY = h
             ),
             topLeft = Offset(0f, h * 0.56f),
             size = Size(w, h * 0.44f)
+        )
+
+        // 7. Adaptive header-contrast protective scrim so clock, greeting, and icons stay readable
+        val darkHeader = SunCycle.isDarkHeaderBackdrop(phase, weather, isDark)
+        val scrimColor = if (darkHeader) Color(0xFF061226) else Color(0xFFF3F6FA)
+        val scrimPeak = if (darkHeader) 0.40f else 0.44f
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    scrimColor.copy(alpha = scrimPeak),
+                    scrimColor.copy(alpha = scrimPeak * 0.48f),
+                    Color.Transparent
+                ),
+                startY = 0f,
+                endY = h * 0.30f
+            ),
+            topLeft = Offset.Zero,
+            size = Size(w, h * 0.30f)
         )
     }
 }
@@ -547,34 +567,34 @@ private fun paletteFor(
                 sunColor = Color(0xFFFFB25E)
             )
             Phase.MORNING -> SkyPalette(
-                top = Color(0xFF2E6EC7),
-                mid = Color(0xFF7BB3E8),
-                bottom = Color(0xFFF6E6D0),
-                glow = Color(0x55FFD699),
+                top = Color(0xFF235CB0),
+                mid = Color(0xFF6BA6DF),
+                bottom = Color(0xFFECDBC4),
+                glow = Color(0x44FFD699),
                 cloudTint = Color(0xFFFFFFFF),
                 sunColor = Color(0xFFFFD369)
             )
             Phase.MIDDAY -> SkyPalette(
-                top = Color(0xFF2375D6),
-                mid = Color(0xFF70B9F2),
-                bottom = Color(0xFFEAF4FB),
-                glow = Color(0x449CE0FF),
+                top = Color(0xFF1B64C2),
+                mid = Color(0xFF60ACE9),
+                bottom = Color(0xFFDCEBF7),
+                glow = Color(0x389CE0FF),
                 cloudTint = Color(0xFFFFFFFF),
                 sunColor = Color(0xFFFFF3B0)
             )
             Phase.AFTERNOON -> SkyPalette(
-                top = Color(0xFF2F6FC4),
-                mid = Color(0xFF8BB2DC),
-                bottom = Color(0xFFF7DFC2),
-                glow = Color(0x55FFC178),
+                top = Color(0xFF2460B2),
+                mid = Color(0xFF7CA7D4),
+                bottom = Color(0xFFEDD3B4),
+                glow = Color(0x44FFC178),
                 cloudTint = Color(0xFFFFF3E6),
                 sunColor = Color(0xFFFFC24D)
             )
             Phase.DUSK -> SkyPalette(
-                top = Color(0xFF2D2A5E),
-                mid = Color(0xFF994D6C),
-                bottom = Color(0xFFF2AA8A),
-                glow = Color(0x55FF845E),
+                top = Color(0xFF262354),
+                mid = Color(0xFF8A4462),
+                bottom = Color(0xFFE7A183),
+                glow = Color(0x48FF845E),
                 cloudTint = Color(0xFFF2B6A0),
                 sunColor = Color(0xFFFF8A50)
             )

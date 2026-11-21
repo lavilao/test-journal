@@ -108,6 +108,10 @@ object RoutineEngine {
         data object OpenAssistant : Action() {
             override val type get() = "open_assistant"
         }
+
+        data object OpenLens : Action() {
+            override val type get() = "open_lens"
+        }
     }
 
     data class UserRoutine(
@@ -183,6 +187,7 @@ object RoutineEngine {
                 )
                 "open_news" -> Action.OpenNews
                 "open_assistant" -> Action.OpenAssistant
+                "open_lens" -> Action.OpenLens
                 else -> return null
             }
             UserRoutine(
@@ -338,6 +343,11 @@ object RoutineEngine {
                 "Toca para hablar con Needle sin salir del teléfono",
                 openScreen = MainActivity.SCREEN_ASSISTANT
             )
+            is Action.OpenLens -> postNotification(
+                context, routine, "Cámara inteligente Lens",
+                "Toca para escanear texto, códigos o analizar escenas con Mirage",
+                openScreen = MainActivity.SCREEN_LENS
+            )
         }
     }
 
@@ -419,6 +429,7 @@ object RoutineEngine {
         is Action.CreateNote -> "crear nota «${a.title.ifBlank { r.name }}»"
         Action.OpenNews -> "abrir las noticias"
         Action.OpenAssistant -> "abrir el asistente"
+        Action.OpenLens -> "abrir Lens (cámara IA)"
     }
 
     fun lastFiredLabel(r: UserRoutine): String? =

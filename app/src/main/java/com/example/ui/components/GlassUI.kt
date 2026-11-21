@@ -128,8 +128,8 @@ fun LiquidGlassCard(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 20.dp,
     contentPadding: Dp = 16.dp,
-    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = 0.30f),
+    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
     onClick: (() -> Unit)? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
@@ -165,10 +165,10 @@ fun GlassTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
         ),
         modifier = modifier.fillMaxWidth()
     ) {
@@ -381,8 +381,8 @@ fun GlassBottomBar(
 ) {
     Surface(
         shape = RoundedCornerShape(30.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.38f)),
         shadowElevation = 10.dp,
         modifier = modifier
     ) {

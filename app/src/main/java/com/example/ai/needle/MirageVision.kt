@@ -75,10 +75,21 @@ object MirageVision {
     const val DEFAULT_OPTIONS_JSON =
         """{"sections":["scene","objects","text","relations"],"conf":0.30,"text_conf":0.30,"max_objects":16,"max_text_lines":24}"""
 
-    fun decodePackedRgbFromUri(context: Context, uri: Uri, maxDim: Int = 768): Triple<ByteArray, Int, Int>? {
-        val rawBitmap = decodeScaledBitmap(context, uri, maxDim) ?: return null
+    fun decodePackedRgbFromUri(context: Context, uri: Uri, maxDim: Int = 768): Triple<ByteArray, Int, Int>? =
+        decodePackedRgbFromUriWithError(context, uri, maxDim).first
+
+    fun decodePackedRgbFromUriWithError(
+        context: Context,
+        uri: Uri,
+        maxDim: Int = 768
+    ): Pair<Triple<ByteArray, Int, Int>?, String?> {
+        val (rawBitmap, err) = decodeScaledBitmap(context, uri, maxDim)
+        if (rawBitmap == null) return null to (err ?: "no se pudo decodificar la imagen")
         return try {
-            bitmapToPackedRgb(rawBitmap, maxDim)
+            val packed = bitmapToPackedRgb(rawBitmap, maxDim)
+            if (packed != null) packed to null else null to "dimensiones de imagen inválidas"
+        } catch (t: Throwable) {
+            null to (t.message ?: t.javaClass.simpleName)
         } finally {
             if (!rawBitmap.isRecycled) rawBitmap.recycle()
         }
@@ -122,37 +133,75 @@ object MirageVision {
         return Triple(rgb, w, h)
     }
 
-    private fun decodeScaledBitmap(context: Context, uri: Uri, maxDim: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, bounds)
-        } ?: return null
+    private fun openUriStream(context: Context, uri: Uri): java.io.InputStream? {
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == null || scheme == "file") {
+            val path = uri.path ?: uri.toString()
+            val file = java.io.File(path)
+            if (file.exists() && file.canRead()) {
+                return java.io.FileInputStream(file)
+            }
+        }
+        return context.contentResolver.openInputStream(uri)
+    }
 
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    private fun decodeScaledBitmap(context: Context, uri: Uri, maxDim: Int): Pair<Bitmap?, String?> {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            openUriStream(context, uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, bounds)
+            } ?: return null to "no se pudo abrir la imagen ($uri)"
+        } catch (t: Throwable) {
+            return null to "sin acceso a la imagen (${t.message ?: t.javaClass.simpleName})"
+        }
+
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null to "formato de imagen no compatible o archivo vacío"
+        }
         var inSampleSize = 1
         val longest = max(bounds.outWidth, bounds.outHeight)
         while (longest / (inSampleSize * 2) >= maxDim) {
             inSampleSize *= 2
         }
 
-        val decodeOpts = BitmapFactory.Options().apply {
-            this.inSampleSize = inSampleSize
-            inPreferredConfig = Bitmap.Config.ARGB_8888
+        var decoded: Bitmap? = null
+        var lastDecodeErr: String? = null
+        for (attempt in 0 until 3) {
+            val decodeOpts = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            try {
+                decoded = openUriStream(context, uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+                if (decoded != null) break
+                lastDecodeErr = "no se pudo decodificar la imagen"
+                break
+            } catch (_: OutOfMemoryError) {
+                inSampleSize *= 2
+                lastDecodeErr = "memoria insuficiente al decodificar la imagen"
+            } catch (t: Throwable) {
+                lastDecodeErr = t.message ?: t.javaClass.simpleName
+                break
+            }
         }
-        val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, decodeOpts)
-        } ?: return null
+        val bitmap = decoded ?: return null to (lastDecodeErr ?: "no se pudo decodificar la imagen")
 
         val rotation = readExifRotationDegrees(context, uri)
-        if (rotation == 0f) return decoded
-        val matrix = Matrix().apply { postRotate(rotation) }
-        val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        if (rotated !== decoded && !decoded.isRecycled) decoded.recycle()
-        return rotated
+        if (rotation == 0f) return bitmap to null
+        val rotated = try {
+            val matrix = Matrix().apply { postRotate(rotation) }
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (_: OutOfMemoryError) {
+            return bitmap to null
+        }
+        if (rotated !== bitmap && !bitmap.isRecycled) bitmap.recycle()
+        return rotated to null
     }
 
     private fun readExifRotationDegrees(context: Context, uri: Uri): Float = try {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
+        openUriStream(context, uri)?.use { stream ->
             when (ExifInterface(stream).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
                 ExifInterface.ORIENTATION_NORMAL
@@ -167,19 +216,33 @@ object MirageVision {
         0f
     }
 
+    private fun optCleanString(obj: JSONObject, key: String): String {
+        if (!obj.has(key) || obj.isNull(key)) return ""
+        val value = obj.opt(key) ?: return ""
+        val str = value.toString().trim()
+        return if (str.equals("null", ignoreCase = true)) "" else str
+    }
+
     fun parseJson(raw: String?): MirageResult? {
         val trimmed = raw?.trim().orEmpty()
-        if (trimmed.isEmpty() || !trimmed.startsWith("{")) return null
+        val jsonStart = trimmed.indexOf('{')
+        val jsonEnd = trimmed.lastIndexOf('}')
+        if (jsonStart < 0 || jsonEnd <= jsonStart) return null
+        val slice = trimmed.substring(jsonStart, jsonEnd + 1)
         return try {
-            val root = JSONObject(trimmed)
+            val root = JSONObject(slice)
             val sceneDesc = extractSceneDescription(root)
-            val objs = parseObjects(root.optJSONArray("objects"))
+            val objs = parseObjects(
+                root.optJSONArray("objects")
+                    ?: root.optJSONArray("detected_objects")
+                    ?: root.optJSONArray("labels")
+            )
             val texts = parseTexts(root)
             val relations = parseRelations(root.optJSONArray("relations"))
             val formMap = parseForm(root.optJSONObject("form"))
-            val ttft = if (root.has("ttft_ms")) root.optDouble("ttft_ms") else null
-            val tps = if (root.has("decode_tps")) root.optDouble("decode_tps") else null
-            val lang = root.optString("language").takeIf { it.isNotBlank() }
+            val ttft = if (root.has("ttft_ms") && !root.isNull("ttft_ms")) root.optDouble("ttft_ms") else null
+            val tps = if (root.has("decode_tps") && !root.isNull("decode_tps")) root.optDouble("decode_tps") else null
+            val lang = optCleanString(root, "language").takeIf { it.isNotBlank() }
 
             MirageResult(
                 description = sceneDesc,
@@ -190,7 +253,7 @@ object MirageVision {
                 language = lang,
                 ttftMs = ttft?.takeIf { !it.isNaN() },
                 decodeTps = tps?.takeIf { !it.isNaN() },
-                rawJson = trimmed
+                rawJson = slice
             )
         } catch (_: Throwable) {
             null
@@ -198,14 +261,15 @@ object MirageVision {
     }
 
     private fun extractSceneDescription(root: JSONObject): String {
-        val direct = root.optString("description").trim()
-        if (direct.isNotEmpty()) return direct
+        val direct = listOf("description", "caption", "summary")
+            .firstNotNullOfOrNull { key -> optCleanString(root, key).takeIf { it.isNotEmpty() } }
+        if (!direct.isNullOrEmpty()) return direct
         val sceneAny = root.opt("scene")
         return when (sceneAny) {
-            is String -> sceneAny.trim()
+            is String -> sceneAny.trim().takeUnless { it.equals("null", ignoreCase = true) }.orEmpty()
             is JSONObject -> {
                 listOf("description", "summary", "setting", "lighting", "surface")
-                    .mapNotNull { key -> sceneAny.optString(key).trim().takeIf { it.isNotEmpty() } }
+                    .mapNotNull { key -> optCleanString(sceneAny, key).takeIf { it.isNotEmpty() } }
                     .joinToString(". ")
             }
             else -> ""
@@ -221,10 +285,9 @@ object MirageVision {
                     list.add(MirageObject(name = it))
                 }
                 is JSONObject -> {
-                    val name = item.optString("name")
-                        .ifBlank { item.optString("label") }
-                        .ifBlank { item.optString("object") }
-                        .trim()
+                    val name = optCleanString(item, "name")
+                        .ifBlank { optCleanString(item, "label") }
+                        .ifBlank { optCleanString(item, "object") }
                     if (name.isEmpty()) continue
                     val score = when {
                         item.has("score") -> item.optDouble("score", 0.0).toFloat()

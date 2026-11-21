@@ -57,7 +57,6 @@ import com.example.health.HealthInsightsManager
 import com.example.ui.components.AppIconImage
 import com.example.ui.components.FileIconImage
 import com.example.ui.components.GlassTopBar
-import com.example.ui.components.GoogleRed
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.WeeklyHealthTrendsCard
 import com.example.ui.theme.NowBriefVitalsGreen
@@ -216,7 +215,7 @@ fun GoogleActivityScreen(
                         healthInsights.forEach { insight ->
                             val color = when (insight.severity) {
                                 "good" -> NowBriefVitalsGreen
-                                "warn" -> GoogleRed
+                                "warn" -> MaterialTheme.colorScheme.error
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                             Row(

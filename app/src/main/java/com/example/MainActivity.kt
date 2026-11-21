@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
         const val SCREEN_NEWS = "news"
         const val SCREEN_ASSISTANT = "assistant"
         const val SCREEN_ROUTINES = "routines"
+        const val SCREEN_LENS = "lens"
 
         /** Routine "note created" notifications deep-link to that note. */
         const val EXTRA_OPEN_DETAIL = "open_detail"
@@ -266,6 +267,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
             MainActivity.SCREEN_NEWS -> screenState = AppScreen.News
             MainActivity.SCREEN_ASSISTANT -> screenState = AppScreen.Assistant
             MainActivity.SCREEN_ROUTINES -> screenState = AppScreen.Routines
+            MainActivity.SCREEN_LENS -> screenState = AppScreen.Lens
         }
         if (openScreenRequest != null) {
             MainActivity.openScreenRequests.value = null

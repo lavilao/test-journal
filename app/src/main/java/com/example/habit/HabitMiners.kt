@@ -750,7 +750,12 @@ object HabitMiners {
      * function call carrying the narrative — never trust random free text.
      * Returns null when Needle is unusable (caller shows the template).
      */
-    suspend fun generateBriefNarrative(context: Context, digest: HabitDigest): String? {
+    suspend fun generateBriefNarrative(
+        context: Context,
+        digest: HabitDigest,
+        writingSummary: String? = null,
+        upcomingEventsCount: Int = 0
+    ): String? {
         val app = context.applicationContext
         val ready = try {
             NeedleRuntime.isReady() || (
@@ -764,7 +769,10 @@ object HabitMiners {
         if (!ready) return null
         return try {
             val raw = withTimeoutOrNull(30_000L) {
-                NeedleRuntime.completeText(buildBriefPrompt(digest), 420)
+                NeedleRuntime.completeText(
+                    buildBriefPrompt(digest, writingSummary, upcomingEventsCount),
+                    420
+                )
             } ?: return null
             val parsed = NeedleTools.parseResponse(raw) ?: return null
             val call = parsed.calls.firstOrNull { it.name == "resumen_habitos" } ?: return null
@@ -774,7 +782,11 @@ object HabitMiners {
         }
     }
 
-    private fun buildBriefPrompt(digest: HabitDigest): String {
+    private fun buildBriefPrompt(
+        digest: HabitDigest,
+        writingSummary: String? = null,
+        upcomingEventsCount: Int = 0
+    ): String {
         val lines = mutableListOf<String>()
         lines.add("Estadísticas reales de los últimos días (calculadas por la app, todo local):")
         lines.add("- Días observados: ${digest.daysObserved}")
@@ -819,6 +831,12 @@ object HabitMiners {
         }
         digest.steps?.let { lines.add("- Pasos: media de ${it.avgPerDay.roundToInt()} al día, hoy ${it.today}") }
         digest.rhythmChange?.let { lines.add("- Cambio detectado: ${it.shifts.joinToString("; ")}") }
+        writingSummary?.takeIf { it.isNotBlank() }?.let {
+            lines.add("- Diario personal: $it")
+        }
+        if (upcomingEventsCount > 0) {
+            lines.add("- Agenda: $upcomingEventsCount evento(s) próximo(s) en calendario")
+        }
 
         lines.add("")
         lines.add(
@@ -830,7 +848,11 @@ object HabitMiners {
     }
 
     /** Honest fallback brief built directly from the facts (no AI needed). */
-    fun templateBrief(digest: HabitDigest): String {
+    fun templateBrief(
+        digest: HabitDigest,
+        writingSummary: String? = null,
+        upcomingEventsCount: Int = 0
+    ): String {
         val parts = mutableListOf<String>()
         digest.sleep?.let { s ->
             val bed = s.typicalBedMinuteOfDay?.let { "Sueles acostarte hacia las ${formatMinuteOfDay(it)}" }
@@ -873,6 +895,15 @@ object HabitMiners {
             t.ignoreRate?.let { r ->
                 parts.add("${t.pkg} te interrumpe mucho y ignoras el ${(r * 100).roundToInt()}% de sus avisos.")
             }
+        }
+        if (upcomingEventsCount > 0) {
+            parts.add(
+                if (upcomingEventsCount == 1) "Tienes 1 evento próximo en tu agenda."
+                else "Tienes $upcomingEventsCount eventos próximos en tu agenda."
+            )
+        }
+        writingSummary?.takeIf { it.isNotBlank() && !it.startsWith("Aún no hay notas") }?.let {
+            parts.add("En tu diario: $it.")
         }
         if (parts.isEmpty()) parts.add("Aún estoy aprendiendo tus patrones; abre la app mañana para ver el primer resumen.")
         return parts.joinToString(" ")

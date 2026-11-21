@@ -116,18 +116,20 @@ import coil.compose.AsyncImage
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceCalendarEvent
 import com.example.data.model.EntryWithRelations
+import com.example.data.model.JournalEntry
+import com.example.habit.HabitEngine
 import com.example.habit.HabitMiners
 import com.example.rss.RssArticle
+import com.example.semantic.JournalInsights
 import com.example.telemetry.ForecastData
 import com.example.telemetry.RealWeatherData
 import com.example.telemetry.WeatherCity
 import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.GlassRing
-import com.example.ui.components.GoogleGreen
-import com.example.ui.components.GoogleRed
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
+import com.example.ui.theme.AmberNode
 import com.example.ui.theme.NowBriefNewsBlue
 import com.example.ui.theme.NowBriefPrimaryDark
 import com.example.ui.theme.NowBriefPrimaryLight
@@ -179,10 +181,12 @@ fun NowBriefHomeScreen(
     val nextReminder by viewModel.nextActiveReminder.collectAsState()
     val selectedCity by viewModel.selectedWeatherCity.collectAsState()
     val habitDigest by viewModel.habitDigest.collectAsState()
+    val onThisDayMemories by viewModel.onThisDayMemories.collectAsState()
     val deviceFiles by viewModel.deviceFilesResults.collectAsState()
     val deviceContacts by viewModel.deviceContactsResults.collectAsState()
     val semanticSearch by viewModel.semanticSearch.collectAsState()
     val hasStoragePermission by viewModel.hasStoragePermission.collectAsState()
+    val writingStats = remember(entries) { JournalInsights.computeWritingStats(entries) }
 
     var hasContactsPermission by remember {
         mutableStateOf(viewModel.deviceSearchManager.hasContactsPermission())
@@ -336,19 +340,19 @@ fun NowBriefHomeScreen(
         isDark
     }
     val heroColor = when {
-        !dynamicBgOn -> if (isDark) NowBriefPrimaryDark else NowBriefPrimaryLight
+        !dynamicBgOn -> if (isDark) NowBriefPrimaryDark else Color(0xFF1F2A38)
         useLightHeaderText -> Color.White
-        else -> Color(0xFF1F2A38)
+        else -> Color(0xFF132033)
     }
     val headerSecondaryColor = when {
         !dynamicBgOn -> MaterialTheme.colorScheme.onSurfaceVariant
-        useLightHeaderText -> Color.White.copy(alpha = 0.86f)
-        else -> Color(0xFF3A495C)
+        useLightHeaderText -> Color.White.copy(alpha = 0.90f)
+        else -> Color(0xFF2D3E52)
     }
     val headerAccentColor = when {
         !dynamicBgOn -> MaterialTheme.colorScheme.primary
         useLightHeaderText -> Color(0xFFFFD8A8)
-        else -> MaterialTheme.colorScheme.primary
+        else -> Color(0xFFB5511E)
     }
 
     val greeting = remember(nowMillis) {
@@ -562,42 +566,52 @@ fun NowBriefHomeScreen(
 
                     // Phone-wide search header + semantic AI indicator
                     item(key = "search_results_header") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "En este dispositivo",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (semanticSearch.isSearching) {
-                                    CircularProgressIndicator(
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(14.dp),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = (if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary)
-                                        .copy(alpha = 0.14f)
-                                ) {
-                                    Text(
-                                        text = if (semanticSearch.viaNeedle) "Semántica · IA local" else "Semántica",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(4.dp))
-                                TextButton(onClick = { homeSearchQuery = "" }) {
-                                    Text("Limpiar", fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "En este dispositivo",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (semanticSearch.isSearching) {
+                                        CircularProgressIndicator(
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(14.dp),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = (if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary)
+                                            .copy(alpha = 0.16f)
+                                    ) {
+                                        Text(
+                                            text = if (semanticSearch.viaNeedle) "Semántica · IA local" else "Semántica",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    TextButton(onClick = { homeSearchQuery = "" }) {
+                                        Text("Limpiar", fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
@@ -862,10 +876,23 @@ fun NowBriefHomeScreen(
                         )
                     }
 
-                    // Habit Engine Glass Card
+                    // On This Day ("Un día como hoy") Flashback Card
+                    if (onThisDayMemories.isNotEmpty()) {
+                        item(key = "on_this_day_card") {
+                            OnThisDayGlassCard(
+                                memory = onThisDayMemories.first(),
+                                totalCount = onThisDayMemories.size,
+                                onOpenMemory = { onNavigateToDetail(it.id) }
+                            )
+                        }
+                    }
+
+                    // Habit Engine + Proactive Daily Brief Glass Card
                     item(key = "habit_card") {
                         HabitGlassCard(
                             digest = habitDigest,
+                            writingStats = writingStats,
+                            upcomingEventsCount = calendarEvents.size,
                             context = context,
                             onOpenRoutines = onOpenRoutines
                         )
@@ -892,15 +919,16 @@ fun NowBriefHomeScreen(
                                     },
                                     label = { Text("Noticias") },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = NowBriefNewsBlue.copy(alpha = 0.22f),
+                                        selectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                                         selectedLabelColor = NowBriefNewsBlue,
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                        labelColor = MaterialTheme.colorScheme.onSurface
                                     ),
                                     border = FilterChipDefaults.filterChipBorder(
                                         enabled = true,
                                         selected = selectedFeedView == HomeFeedView.NOTICIAS,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.30f),
-                                        selectedBorderColor = NowBriefNewsBlue.copy(alpha = 0.50f)
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
+                                        selectedBorderColor = NowBriefNewsBlue.copy(alpha = 0.65f)
                                     )
                                 )
 
@@ -912,35 +940,62 @@ fun NowBriefHomeScreen(
                                     },
                                     label = { Text("Memorias (${entries.size})") },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                        selectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                                         selectedLabelColor = MaterialTheme.colorScheme.primary,
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                        labelColor = MaterialTheme.colorScheme.onSurface
                                     ),
                                     border = FilterChipDefaults.filterChipBorder(
                                         enabled = true,
                                         selected = selectedFeedView == HomeFeedView.MEMORIAS,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.30f),
-                                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
+                                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
                                     )
                                 )
                             }
 
                             if (selectedFeedView == HomeFeedView.NOTICIAS) {
-                                TextButton(onClick = onOpenNews) {
-                                    Text(
-                                        text = "Ver todas ›",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = NowBriefNewsBlue
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        0.8.dp,
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
                                     )
+                                ) {
+                                    TextButton(
+                                        onClick = onOpenNews,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Text(
+                                            text = "Ver todas ›",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = NowBriefNewsBlue
+                                        )
+                                    }
                                 }
                             } else {
-                                TextButton(onClick = onNavigateToNewEntry) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Escribir",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        0.8.dp,
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
                                     )
+                                ) {
+                                    TextButton(
+                                        onClick = onNavigateToNewEntry,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Escribir",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1017,8 +1072,8 @@ fun NowBriefHomeScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     cornerRadius = 18.dp,
                                     contentPadding = 10.dp,
-                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1333,7 +1388,7 @@ private fun GlassUniversalSearchBar(
 
             Surface(
                 shape = CircleShape,
-                color = GoogleRed.copy(alpha = 0.14f),
+                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
                 modifier = Modifier
                     .padding(start = 6.dp)
                     .size(40.dp)
@@ -1345,7 +1400,7 @@ private fun GlassUniversalSearchBar(
                     Icon(
                         imageVector = Icons.Default.CameraAlt,
                         contentDescription = "Lens / Cámara",
-                        tint = GoogleRed,
+                        tint = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1608,7 +1663,7 @@ private fun GlassMemoryCard(
                     if (hasAudio) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = GoogleRed.copy(alpha = 0.14f)
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
@@ -1617,7 +1672,7 @@ private fun GlassMemoryCard(
                                 Icon(
                                     imageVector = Icons.Default.Mic,
                                     contentDescription = "Audio",
-                                    tint = GoogleRed,
+                                    tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(10.dp)
                                 )
                                 Spacer(modifier = Modifier.width(2.dp))
@@ -1627,7 +1682,7 @@ private fun GlassMemoryCard(
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = GoogleRed
+                                    color = MaterialTheme.colorScheme.error
                                 )
                             }
                         }
@@ -2148,7 +2203,7 @@ private fun TodayGlassCard(
                 lowBatteryText?.let { batt ->
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = GoogleRed.copy(alpha = 0.14f)
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -2157,14 +2212,14 @@ private fun TodayGlassCard(
                             Icon(
                                 Icons.Default.BatteryAlert,
                                 contentDescription = null,
-                                tint = GoogleRed,
+                                tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = batt,
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = GoogleRed
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                     }
@@ -2175,14 +2230,148 @@ private fun TodayGlassCard(
 }
 
 @Composable
+private fun OnThisDayGlassCard(
+    memory: JournalEntry,
+    totalCount: Int,
+    onOpenMemory: (JournalEntry) -> Unit
+) {
+    val dateLabel = remember(memory.journalDate) {
+        SimpleDateFormat("d 'de' MMMM yyyy", Locale.getDefault()).format(Date(memory.journalDate))
+    }
+    val yearsAgo = remember(memory.journalDate) {
+        val nowCal = Calendar.getInstance()
+        val memCal = Calendar.getInstance().apply { timeInMillis = memory.journalDate }
+        (nowCal.get(Calendar.YEAR) - memCal.get(Calendar.YEAR)).coerceAtLeast(0)
+    }
+    val badgeText = when {
+        yearsAgo >= 2 -> "Hace $yearsAgo años"
+        yearsAgo == 1 -> "Hace 1 año"
+        else -> dateLabel
+    }
+
+    LiquidGlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("on_this_day_card"),
+        onClick = { onOpenMemory(memory) }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassLabel(text = "🕰 Un día como hoy", accent = AmberNode)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = AmberNode.copy(alpha = 0.16f)
+            ) {
+                Text(
+                    text = if (totalCount > 1) "$badgeText · +${totalCount - 1}" else badgeText,
+                    style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.SemiBold),
+                    color = AmberNode,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = memory.title.ifBlank { "Memoria del $dateLabel" },
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        val preview = remember(memory.body) {
+            memory.body.replace(Regex("[#*_~`]"), "").replace("\n", " ").trim()
+        }
+        if (preview.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun HabitGlassCard(
     digest: HabitMiners.HabitDigest?,
+    writingStats: JournalInsights.WritingStats,
+    upcomingEventsCount: Int,
     context: Context,
     onOpenRoutines: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val todayKey = remember { SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) }
+    var briefText by remember { mutableStateOf<String?>(null) }
+    var briefFromNeedle by remember { mutableStateOf(false) }
+    var generatingBrief by remember { mutableStateOf(false) }
+
+    LaunchedEffect(todayKey) {
+        val stored = HabitEngine.storedBrief(context)
+        if (stored != null && stored.first == todayKey) {
+            briefText = stored.second
+            briefFromNeedle = stored.third
+        }
+    }
+
     LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
-        GlassLabel(text = "🧠 Tus rutinas", accent = NowBriefNewsBlue)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassLabel(text = "🧠 Brief y rutinas", accent = NowBriefNewsBlue)
+            if (writingStats.streakDays >= 2 || writingStats.notesLast7Days > 0) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = NowBriefVitalsGreen.copy(alpha = 0.14f)
+                ) {
+                    Text(
+                        text = if (writingStats.streakDays >= 2) {
+                            "${writingStats.streakDays}d racha"
+                        } else {
+                            "${writingStats.notesLast7Days} notas/7d"
+                        },
+                        style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.SemiBold),
+                        color = NowBriefVitalsGreen,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(10.dp))
+
+        if (briefText != null) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("home_daily_brief_box")
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = briefText ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (briefFromNeedle) "Brief generado localmente · Needle 3" else "Brief local del día",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         val lines = buildList {
             digest?.sleep?.let { s ->
                 s.lastNight?.let { n ->
@@ -2224,35 +2413,87 @@ private fun HabitGlassCard(
                 }
             }
         }
-        if (lines.isEmpty()) {
-            Text(
-                text = if (digest == null) {
-                    "Aprendiendo de tu uso, sueño y lugares…"
-                } else {
-                    "Aprendiendo — necesito un par de días más de datos"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            lines.take(4).forEach { line ->
+        if (briefText == null) {
+            if (lines.isEmpty()) {
                 Text(
-                    text = line,
+                    text = if (digest == null) {
+                        "Aprendiendo de tu uso, sueño y lugares…"
+                    } else {
+                        "Aprendiendo — necesito un par de días más de datos"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(vertical = 2.dp)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else {
+                lines.take(4).forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = onOpenRoutines) {
-            Icon(
-                Icons.Default.AutoAwesome,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
+        if (writingStats.dominantMood != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = writingStats.summaryLine,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Ver rutinas aprendidas")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onOpenRoutines) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Ver rutinas aprendidas")
+            }
+            if (digest != null) {
+                TextButton(
+                    enabled = !generatingBrief,
+                    onClick = {
+                        generatingBrief = true
+                        scope.launch {
+                            val narrative = try {
+                                HabitMiners.generateBriefNarrative(
+                                    context = context,
+                                    digest = digest,
+                                    writingSummary = writingStats.summaryLine,
+                                    upcomingEventsCount = upcomingEventsCount
+                                )
+                            } catch (_: Exception) {
+                                null
+                            }
+                            val text = narrative ?: HabitMiners.templateBrief(
+                                digest = digest,
+                                writingSummary = writingStats.summaryLine,
+                                upcomingEventsCount = upcomingEventsCount
+                            )
+                            HabitEngine.saveBrief(context, text, fromNeedle = narrative != null)
+                            briefFromNeedle = narrative != null
+                            briefText = text
+                            generatingBrief = false
+                        }
+                    },
+                    modifier = Modifier.testTag("home_generate_brief_btn")
+                ) {
+                    if (generatingBrief) {
+                        CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(if (briefText == null) "Resumir día" else "Actualizar brief")
+                }
+            }
         }
     }
 }

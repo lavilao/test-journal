@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate
 import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
@@ -186,22 +189,47 @@ object SubjectSegmentationManager {
             SegResult.Success(outFile)
         }
 
-    /** True when the exception looks like "model not available (yet)". */
-    private fun isModelMissing(e: Throwable): Boolean {
+    /** True when the exception looks like "model / optional module not available (yet)". */
+    internal fun isModelMissing(e: Throwable): Boolean {
         var t: Throwable? = e
         var depth = 0
         while (t != null && depth < 6) {
-            val msg = t.message.orEmpty().lowercase()
-            if (
-                msg.contains("model") && (msg.contains("not") || msg.contains("unavailable") || msg.contains("missing")) ||
-                msg.contains("module") && msg.contains("install") ||
-                msg.contains("api_unavailable") ||
-                msg.contains("no api available")
-            ) return true
+            if (t is MlKitException && (
+                    t.errorCode == MlKitException.UNAVAILABLE ||
+                        t.errorCode == MlKitException.NOT_ENOUGH_SPACE ||
+                        t.errorCode == MlKitException.MODEL_INCOMPATIBLE_WITH_TFLITE
+                    )
+            ) {
+                return true
+            }
+            if (t is ApiException && (
+                    t.statusCode == CommonStatusCodes.API_NOT_CONNECTED ||
+                        t.statusCode == 17 /* API_UNAVAILABLE */ ||
+                        t.statusCode == CommonStatusCodes.SERVICE_VERSION_UPDATE_REQUIRED ||
+                        t.statusCode == 1 /* ConnectionResult.SERVICE_MISSING */
+                    )
+            ) {
+                return true
+            }
+            if (isModelMissingMessage(t.message.orEmpty())) return true
             t = t.cause
             depth++
         }
         return false
+    }
+
+    internal fun isModelMissingMessage(rawMessage: String): Boolean {
+        val msg = rawMessage.lowercase()
+        if (msg.isBlank()) return false
+        return msg.contains("optional module") ||
+            (msg.contains("waiting for") && (msg.contains("module") || msg.contains("segment") || msg.contains("download"))) ||
+            (msg.contains("module") && (msg.contains("install") || msg.contains("download") || msg.contains("unavailable") || msg.contains("not available") || msg.contains("wait"))) ||
+            (msg.contains("model") && (msg.contains("not") || msg.contains("unavailable") || msg.contains("missing") || msg.contains("download") || msg.contains("wait"))) ||
+            msg.contains("subject segmentation") ||
+            msg.contains("api_unavailable") ||
+            msg.contains("api is not available") ||
+            msg.contains("no api available") ||
+            msg.contains("not available on this device")
     }
 
     /** Loads a bitmap from a file:// or content:// uri, downscaled to MAX_SIDE. */
@@ -236,16 +264,15 @@ object SubjectSegmentationManager {
     }
 
     // ------------------------------------------------------------------
-    // Software fallback: border flood-fill matte (NO ML, always available)
+    // Software fallback: border flood-fill matte + inpaint (NO ML, always available)
     // ------------------------------------------------------------------
 
     /**
-     * Pure-Kotlin background removal: samples the image border to learn the
-     * background palette, flood-fills from every border pixel that matches
-     * it, then feathers the edge. Honest quality: great for objects on
-     * plain backgrounds, approximate elsewhere — the UI says so.
+     * Pure-Kotlin photo surgery fallback for both [Op.REMOVE_BACKGROUND] and
+     * [Op.REMOVE_SUBJECT] when the Play Services ML Kit optional module is
+     * missing or unavailable offline.
      */
-    suspend fun quickCutoutFallback(context: Context, sourceUri: Uri): File? =
+    suspend fun softwareFallback(context: Context, sourceUri: Uri, op: Op): File? =
         withContext(Dispatchers.IO) {
             val input = loadScaled(context, sourceUri) ?: return@withContext null
             try {
@@ -253,93 +280,132 @@ object SubjectSegmentationManager {
                 val h = input.height
                 val img = IntArray(w * h)
                 input.getPixels(img, 0, w, 0, 0, w, h)
+                val alpha = computeSoftwareForegroundAlpha(img, w, h)
 
-                // 1) Background palette: simple k-means (k=3) over border pixels.
-                val border = mutableListOf<Int>()
-                for (x in 0 until w step max(1, w / 64)) {
-                    border.add(img[x])
-                    border.add(img[(h - 1) * w + x])
-                }
-                for (y in 0 until h step max(1, h / 64)) {
-                    border.add(img[y * w])
-                    border.add(img[y * w + w - 1])
-                }
-                var centers = listOf(border.first(), border[border.size / 2], border.last())
-                for (iter in 0 until 6) {
-                    val buckets = List(3) { mutableListOf<Int>() }
-                    border.forEach { p ->
-                        val ci = centers.indices.minByOrNull { k -> colorDist(p, centers[k]) } ?: 0
-                        buckets[ci].add(p)
+                val outBitmap: Bitmap = when (op) {
+                    Op.REMOVE_BACKGROUND -> {
+                        val pixels = img.copyOf()
+                        for (i in pixels.indices) {
+                            val a = alpha[i].toInt() and 0xFF
+                            pixels[i] = (a shl 24) or (pixels[i] and 0x00FFFFFF)
+                        }
+                        Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
                     }
-                    centers = buckets.mapIndexed { k, b ->
-                        if (b.isEmpty()) centers[k] else b.reduce { acc, p -> avgColor(acc, p) }
-                    }
-                }
-
-                // 2) Flood fill from border pixels matching the palette.
-                val bg = BooleanArray(w * h)
-                val queue = ArrayDeque<Int>()
-                fun tryEnqueue(idx: Int) {
-                    if (!bg[idx]) {
-                        val p = img[idx]
-                        val matches = centers.any { c -> colorDist(p, c) < 52f }
-                        if (matches) {
-                            bg[idx] = true
-                            queue.add(idx)
+                    Op.REMOVE_SUBJECT -> {
+                        // Ensure there is a meaningful subject mask even on very cluttered edges.
+                        val fgCount = alpha.count { (it.toInt() and 0xFF) > 96 }
+                        val finalAlpha = if (fgCount >= (w * h) / 40) {
+                            alpha
+                        } else {
+                            // Center-focused fallback matte if border flood fill swallowed too much.
+                            ByteArray(w * h) { idx ->
+                                val x = idx % w
+                                val y = idx / w
+                                val nx = (x - w * 0.5f) / (w * 0.28f)
+                                val ny = (y - h * 0.48f) / (h * 0.30f)
+                                if (nx * nx + ny * ny <= 1.0f) 255.toByte() else 0
+                            }
+                        }
+                        val maskPixels = IntArray(w * h) { i ->
+                            val a = finalAlpha[i].toInt() and 0xFF
+                            a shl 24
+                        }
+                        val maskBmp = Bitmap.createBitmap(maskPixels, w, h, Bitmap.Config.ARGB_8888)
+                        try {
+                            inpaintSubject(input, maskBmp)
+                        } finally {
+                            maskBmp.recycle()
                         }
                     }
                 }
-                for (x in 0 until w) {
-                    tryEnqueue(x)
-                    tryEnqueue((h - 1) * w + x)
-                }
-                for (y in 0 until h) {
-                    tryEnqueue(y * w)
-                    tryEnqueue(y * w + w - 1)
-                }
-                while (queue.isNotEmpty()) {
-                    val idx = queue.removeFirst()
-                    val x = idx % w
-                    val y = idx / w
-                    if (x > 0) tryEnqueue(idx - 1)
-                    if (x < w - 1) tryEnqueue(idx + 1)
-                    if (y > 0) tryEnqueue(idx - w)
-                    if (y < h - 1) tryEnqueue(idx + w)
-                }
-
-                // 3) Feather alpha: one light box blur over the mask edge.
-                val alpha = ByteArray(w * h) { i -> if (bg[i]) 0 else 255.toByte() }
-                val blurred = alpha.copyOf()
-                for (y in 1 until h - 1) {
-                    for (x in 1 until w - 1) {
-                        val i = y * w + x
-                        val a = (alpha[i].toInt() and 0xFF)
-                        val n = ((alpha[i - 1].toInt() and 0xFF) + (alpha[i + 1].toInt() and 0xFF) +
-                            (alpha[i - w].toInt() and 0xFF) + (alpha[i + w].toInt() and 0xFF) +
-                            4 * a) / 8
-                        blurred[i] = n.toByte()
-                    }
-                }
-
-                // 4) Compose the output.
-                for (i in img.indices) {
-                    val a = blurred[i].toInt() and 0xFF
-                    img[i] = (a shl 24) or (img[i] and 0x00FFFFFF)
-                }
 
                 val dir = File(context.filesDir, "journal_images").apply { mkdirs() }
-                val outFile = File(dir, "recorte_rapido_${System.currentTimeMillis()}.png")
-                FileOutputStream(outFile).use {
-                    Bitmap.createBitmap(img, w, h, Bitmap.Config.ARGB_8888)
-                        .compress(Bitmap.CompressFormat.PNG, 95, it)
+                val prefix = if (op == Op.REMOVE_BACKGROUND) "recorte_rapido" else "sin_sujeto_local"
+                val outFile = File(dir, "${prefix}_${System.currentTimeMillis()}.png")
+                try {
+                    FileOutputStream(outFile).use { outBitmap.compress(Bitmap.CompressFormat.PNG, 95, it) }
+                } finally {
+                    if (outBitmap !== input && !outBitmap.isRecycled) outBitmap.recycle()
                 }
                 outFile
             } catch (_: Exception) {
                 null
             } finally {
-                input.recycle()
+                if (!input.isRecycled) input.recycle()
             }
         }
+
+    suspend fun quickCutoutFallback(context: Context, sourceUri: Uri): File? =
+        softwareFallback(context, sourceUri, Op.REMOVE_BACKGROUND)
+
+    private fun computeSoftwareForegroundAlpha(img: IntArray, w: Int, h: Int): ByteArray {
+        val border = mutableListOf<Int>()
+        for (x in 0 until w step max(1, w / 64)) {
+            border.add(img[x])
+            border.add(img[(h - 1) * w + x])
+        }
+        for (y in 0 until h step max(1, h / 64)) {
+            border.add(img[y * w])
+            border.add(img[y * w + w - 1])
+        }
+        if (border.isEmpty()) return ByteArray(w * h) { 255.toByte() }
+
+        var centers = listOf(border.first(), border[border.size / 2], border.last())
+        for (iter in 0 until 6) {
+            val buckets = List(3) { mutableListOf<Int>() }
+            border.forEach { p ->
+                val ci = centers.indices.minByOrNull { k -> colorDist(p, centers[k]) } ?: 0
+                buckets[ci].add(p)
+            }
+            centers = buckets.mapIndexed { k, b ->
+                if (b.isEmpty()) centers[k] else b.reduce { acc, p -> avgColor(acc, p) }
+            }
+        }
+
+        val bg = BooleanArray(w * h)
+        val queue = ArrayDeque<Int>()
+        fun tryEnqueue(idx: Int) {
+            if (!bg[idx]) {
+                val p = img[idx]
+                val matches = centers.any { c -> colorDist(p, c) < 52f }
+                if (matches) {
+                    bg[idx] = true
+                    queue.add(idx)
+                }
+            }
+        }
+        for (x in 0 until w) {
+            tryEnqueue(x)
+            tryEnqueue((h - 1) * w + x)
+        }
+        for (y in 0 until h) {
+            tryEnqueue(y * w)
+            tryEnqueue(y * w + w - 1)
+        }
+        while (queue.isNotEmpty()) {
+            val idx = queue.removeFirst()
+            val x = idx % w
+            val y = idx / w
+            if (x > 0) tryEnqueue(idx - 1)
+            if (x < w - 1) tryEnqueue(idx + 1)
+            if (y > 0) tryEnqueue(idx - w)
+            if (y < h - 1) tryEnqueue(idx + w)
+        }
+
+        val alpha = ByteArray(w * h) { i -> if (bg[i]) 0 else 255.toByte() }
+        val blurred = alpha.copyOf()
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val i = y * w + x
+                val a = (alpha[i].toInt() and 0xFF)
+                val n = ((alpha[i - 1].toInt() and 0xFF) + (alpha[i + 1].toInt() and 0xFF) +
+                    (alpha[i - w].toInt() and 0xFF) + (alpha[i + w].toInt() and 0xFF) +
+                    4 * a) / 8
+                blurred[i] = n.toByte()
+            }
+        }
+        return blurred
+    }
 
     private fun colorDist(a: Int, b: Int): Float {
         val dr = ((a shr 16) and 0xFF) - ((b shr 16) and 0xFF)

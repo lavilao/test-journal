@@ -60,7 +60,6 @@ import com.example.ai.needle.WhistleDictationController
 import com.example.ai.needle.WhistleKeywordBuilder
 import com.example.media.AudioDecode
 import com.example.media.PlaybackState
-import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
@@ -232,7 +231,7 @@ fun VoiceTranscriptionModal(
                 Icon(
                     Icons.Default.Mic,
                     contentDescription = null,
-                    tint = if (isDictating) TerracottaAccent else ForestPrimary,
+                    tint = if (isDictating) TerracottaAccent else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -277,7 +276,7 @@ fun VoiceTranscriptionModal(
                                 Icon(
                                     if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = "Reproducir",
-                                    tint = ForestPrimary
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
                             val sec = durationMs / 1000
@@ -307,7 +306,7 @@ fun VoiceTranscriptionModal(
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = if (whistleRecording || isDictating) TerracottaAccent.copy(alpha = 0.12f)
-                    else ForestPrimary.copy(alpha = 0.08f)
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                 ),
                 shape = RoundedCornerShape(12.dp)
             ) {
@@ -356,19 +355,19 @@ fun VoiceTranscriptionModal(
                                 color = TerracottaAccent
                             )
                         } else {
-                            Icon(Icons.Default.Mic, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (whistleUsable) "Dictado sin conexión" else "Dictado en vivo",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = ForestPrimary
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
                     if (whistleRecording) {
                         Button(
                             onClick = { transcribeWhistle() },
-                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             modifier = Modifier.testTag("modal_whistle_process_btn")
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -401,7 +400,7 @@ fun VoiceTranscriptionModal(
                                 }
                             },
                             enabled = dictationAvailable || whistleUsable,
-                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             modifier = Modifier.testTag("modal_start_dictation_btn")
                         ) {
                             Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -449,7 +448,7 @@ fun VoiceTranscriptionModal(
                         onSaveTranscript(transcriptText)
                         onDismiss()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Guardar")
                 }

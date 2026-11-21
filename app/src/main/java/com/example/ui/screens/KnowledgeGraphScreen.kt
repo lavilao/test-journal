@@ -26,10 +26,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -67,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.GraphEdge
 import com.example.data.model.GraphNode
 import com.example.data.model.GraphNodeType
+import com.example.semantic.JournalInsights
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.ForestPrimary
@@ -98,9 +102,14 @@ fun KnowledgeGraphScreen(
 ) {
     val graphData by viewModel.graphData.collectAsState()
     val isLoading by viewModel.isGraphLoading.collectAsState()
+    val entries by viewModel.entries.collectAsState()
 
     var selectedNode by remember { mutableStateOf<GraphNode?>(null) }
     var activeFilter by remember { mutableStateOf(GraphNodeFilter.ALL) }
+    var showInsights by remember { mutableStateOf(false) }
+
+    val graphSummary = remember(graphData) { JournalInsights.summarizeGraph(graphData) }
+    val writingStats = remember(entries) { JournalInsights.computeWritingStats(entries) }
 
     // Canvas transformation state (pan & pinch-to-zoom)
     var scale by remember { mutableFloatStateOf(1f) }
@@ -397,22 +406,37 @@ fun KnowledgeGraphScreen(
                             )
                         }
                     }
-                    IconButton(
-                        onClick = {
-                            scale = 1f
-                            offset = Offset.Zero
-                            viewModel.refreshGraph()
-                        },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("refresh_graph_button")
-                    ) {
-                        Icon(
-                            Icons.Default.CenterFocusStrong,
-                            contentDescription = "Centrar grafo",
-                            tint = primaryColor,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { showInsights = !showInsights },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("graph_insights_toggle")
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = "Patrones del grafo",
+                                tint = if (showInsights) AmberNode else primaryColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                scale = 1f
+                                offset = Offset.Zero
+                                viewModel.refreshGraph()
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("refresh_graph_button")
+                        ) {
+                            Icon(
+                                Icons.Default.CenterFocusStrong,
+                                contentDescription = "Centrar grafo",
+                                tint = primaryColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -467,6 +491,61 @@ fun KnowledgeGraphScreen(
                                 ),
                                 color = if (selected) primaryColor else MaterialTheme.colorScheme.onSurface
                             )
+                        }
+                    }
+                }
+            }
+
+            if (showInsights && selectedNode == null) {
+                LiquidGlassCard(
+                    cornerRadius = 20.dp,
+                    contentPadding = 14.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("graph_insights_card")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Patrones de tus memorias",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${graphSummary.totalLinks} vínculos",
+                            style = MaterialTheme.typography.labelSmall.tabular,
+                            color = primaryColor
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = writingStats.summaryLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val topHubs = (graphSummary.people.take(3) + graphSummary.places.take(2) + graphSummary.topics.take(3))
+                    if (topHubs.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            topHubs.forEach { hub ->
+                                AssistChip(
+                                    onClick = { onNavigateToEntity(hub.rawId) },
+                                    label = {
+                                        Text(
+                                            text = "${hub.label} · ${hub.connections}",
+                                            style = MaterialTheme.typography.labelSmall.tabular
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }

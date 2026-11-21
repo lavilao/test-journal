@@ -279,6 +279,10 @@ fun LensScreen(
                     if (!NeedleModelManager.isMirageDownloaded(context)) {
                         statusLine = "Descarga Mirage (22 MB) en Voz e IA local para describir escenas"
                         LensResult()
+                    } else if (!NeedleRuntime.isSupported()) {
+                        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "esta CPU"
+                        statusLine = "Motor Cactus/Mirage no disponible para arquitectura $abi"
+                        LensResult()
                     } else {
                         NeedleModelManager.ensureLoaded(context)
                         val mirageRes = NeedleRuntime.describeImageFromUri(
@@ -287,6 +291,9 @@ fun LensScreen(
                             language = "es",
                             keywords = WhistleKeywordBuilder.forMirage(context)
                         )
+                        if (mirageRes == null) {
+                            statusLine = NeedleRuntime.lastErrorMessage ?: "Mirage no pudo describir esta imagen"
+                        }
                         LensResult(mirage = mirageRes)
                     }
                 }
@@ -305,7 +312,7 @@ fun LensScreen(
             if (mode == LensMode.MIRAGE && statusLine == null &&
                 (newResult.mirage == null || newResult.mirage.isEmpty())
             ) {
-                statusLine = "Mirage no pudo describir esta imagen"
+                statusLine = NeedleRuntime.lastErrorMessage ?: "Mirage no detectó contenido descriptible en esta imagen"
             }
         }
     }

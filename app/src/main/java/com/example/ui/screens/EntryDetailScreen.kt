@@ -89,6 +89,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -208,6 +209,8 @@ fun EntryDetailScreen(
     // ---- On-device photo surgery (subject segmentation) ----
     var photoProcessing by remember(entryId) { mutableStateOf<String?>(null) }
     var photoResultUri by remember(entryId) { mutableStateOf<android.net.Uri?>(null) }
+    var selectedMediaId by remember(entryId) { mutableStateOf<Long?>(null) }
+    var viewerMirageBusy by remember(entryId) { mutableStateOf(false) }
     // v1.6: fullscreen photo viewer (gallery tap) — the surgery actions and
     // the delete action apply to the photo being viewed.
     var viewerPhotoUri by remember(entryId) { mutableStateOf<String?>(null) }
@@ -217,30 +220,71 @@ fun EntryDetailScreen(
             Toast.makeText(context, "No hay foto que procesar.", Toast.LENGTH_SHORT).show()
             return
         }
+        val uri = android.net.Uri.parse(sourceUri)
         scope.launch {
-            photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
+            val baseLabel = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
+            photoProcessing = baseLabel
             var result = try {
-                SubjectSegmentationManager.process(context, android.net.Uri.parse(sourceUri), op)
+                SubjectSegmentationManager.process(context, uri, op)
             } catch (e: Exception) {
-                SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+                if (SubjectSegmentationManager.isModelMissing(e)) {
+                    SubjectSegmentationManager.SegResult.ModelNeeded(e.message ?: "falta modelo")
+                } else {
+                    SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+                }
             }
-            // v1.6: if the ML model is missing, ASK Play Services to fetch
-            // it once (visible progress) and retry — instead of failing
-            // forever with a guess-y message.
+
+            // If Play Services optional module isn't installed yet, ask once and retry.
             if (result is SubjectSegmentationManager.SegResult.ModelNeeded) {
                 photoProcessing = "descargando el modelo (una sola vez)"
                 val ready = SubjectSegmentationManager.ensureModel(context) { state, pct ->
                     photoProcessing = if (pct >= 0) "$state $pct%" else state
                 }
                 if (ready) {
-                    photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) "quitando el fondo" else "quitando el sujeto"
-                    result = try {
-                        SubjectSegmentationManager.process(context, android.net.Uri.parse(sourceUri), op)
-                    } catch (e: Exception) {
-                        SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+                    for (attempt in 0 until 2) {
+                        photoProcessing = baseLabel
+                        result = try {
+                            SubjectSegmentationManager.process(context, uri, op)
+                        } catch (e: Exception) {
+                            SubjectSegmentationManager.SegResult.Failed(e.message ?: "error inesperado")
+                        }
+                        if (result is SubjectSegmentationManager.SegResult.ModelNeeded && attempt == 0) {
+                            delay(1200)
+                        } else {
+                            break
+                        }
                     }
                 }
             }
+
+            // Automatic local software fallback whenever ML Kit module is unavailable (offline / no Play Services).
+            if (result is SubjectSegmentationManager.SegResult.ModelNeeded) {
+                photoProcessing = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) {
+                    "recorte rápido (sin IA)"
+                } else {
+                    "difuminando sujeto (local)"
+                }
+                val fallback = SubjectSegmentationManager.softwareFallback(context, uri, op)
+                photoProcessing = null
+                if (fallback != null) {
+                    photoResultUri = android.net.Uri.fromFile(fallback)
+                    viewModel.addPhoto(entryId, photoResultUri!!)
+                    val msg = if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) {
+                        "Recorte rápido local aplicado (sin modelo ML Kit en este dispositivo)."
+                    } else {
+                        "Sujeto difuminado en modo local rápido (sin modelo ML Kit en este dispositivo)."
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(
+                        context,
+                        "No se pudo procesar la imagen en modo local (${result.reason}).",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                return@launch
+            }
+
             photoProcessing = null
             when (result) {
                 is SubjectSegmentationManager.SegResult.Success -> {
@@ -248,32 +292,7 @@ fun EntryDetailScreen(
                     viewModel.addPhoto(entryId, photoResultUri!!)
                     Toast.makeText(context, "Foto procesada y adjuntada (IA local).", Toast.LENGTH_SHORT).show()
                 }
-                is SubjectSegmentationManager.SegResult.ModelNeeded -> {
-                    // ML unavailable: for background removal there is an
-                    // honest software fallback ("aproximado").
-                    if (op == SubjectSegmentationManager.Op.REMOVE_BACKGROUND) {
-                        Toast.makeText(
-                            context,
-                            "El modelo de IA no está disponible (Play Services antiguo o sin conexión). Uso el recorte rápido por software: calidad aproximada.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        photoProcessing = "recorte rápido (sin IA)"
-                        val fallback = SubjectSegmentationManager.quickCutoutFallback(context, android.net.Uri.parse(sourceUri))
-                        photoProcessing = null
-                        if (fallback != null) {
-                            photoResultUri = android.net.Uri.fromFile(fallback)
-                            viewModel.addPhoto(entryId, photoResultUri!!)
-                        } else {
-                            Toast.makeText(context, "El recorte rápido tampoco pudo procesar la foto.", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(
-                            context,
-                            "Quitar el sujeto necesita el modelo de IA: ${result.reason}. Actualiza Google Play Services y reintenta.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
+                is SubjectSegmentationManager.SegResult.ModelNeeded -> Unit
                 is SubjectSegmentationManager.SegResult.Failed -> {
                     Toast.makeText(context, "La segmentación falló: ${result.reason}.", Toast.LENGTH_LONG).show()
                 }
@@ -517,7 +536,8 @@ fun EntryDetailScreen(
                 galleryMedia.map { it.uri } +
                     (if (galleryMedia.isEmpty() && !entry.imageUri.isNullOrBlank()) listOf(entry.imageUri!! ) else emptyList())
                 ).distinct()
-            val media = galleryMedia.firstOrNull()
+            val selectedIdx = galleryMedia.indexOfFirst { it.id == selectedMediaId }.takeIf { it >= 0 } ?: 0
+            val media = galleryMedia.getOrNull(selectedIdx)
 
             if (galleryPhotos.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -536,11 +556,15 @@ fun EntryDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     galleryPhotos.forEachIndexed { index, uri ->
+                        val matchingMedia = galleryMedia.firstOrNull { it.uri == uri }
                         Box(
                             modifier = Modifier
                                 .size(width = 128.dp, height = 96.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { viewerPhotoUri = uri }
+                                .clickable {
+                                    matchingMedia?.let { selectedMediaId = it.id }
+                                    viewerPhotoUri = uri
+                                }
                         ) {
                             AsyncImage(
                                 model = uri,
@@ -617,6 +641,7 @@ fun EntryDetailScreen(
                             when {
                                 photoProcessing?.startsWith("quitando el sujeto") == true -> "Procesando…"
                                 photoProcessing?.startsWith("descargando") == true || photoProcessing?.startsWith("instalando") == true -> "Modelo…"
+                                photoProcessing?.startsWith("difuminando") == true -> "Borrando…"
                                 else -> "Quitar sujeto"
                             },
                             style = MaterialTheme.typography.labelSmall
@@ -659,23 +684,40 @@ fun EntryDetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                     Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberNode, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Inteligencia visual local",
+                                        text = if (galleryMedia.size > 1) {
+                                            "Inteligencia visual · Foto ${selectedIdx + 1}/${galleryMedia.size}"
+                                        } else {
+                                            "Inteligencia visual local"
+                                        },
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+                                }
+                                if (galleryMedia.size > 1) {
+                                    TextButton(
+                                        onClick = {
+                                            val nextIdx = (selectedIdx + 1) % galleryMedia.size
+                                            selectedMediaId = galleryMedia[nextIdx].id
+                                        },
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(26.dp)
+                                    ) {
+                                        Text("Siguiente", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                    }
                                 }
                                 if (mirageAvailable) {
                                     OutlinedButton(
                                         onClick = {
                                             mirageAnalyzing = true
-                                            viewModel.describePhotoWithMirage(media.id, entry.id) { ok ->
+                                            viewModel.describePhotoWithMirageDetailed(media.id, entry.id) { ok, err ->
                                                 mirageAnalyzing = false
                                                 if (!ok) {
-                                                    Toast.makeText(context, "No se pudo describir la foto con Mirage", Toast.LENGTH_SHORT).show()
+                                                    val detail = err?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+                                                    Toast.makeText(context, "Mirage no pudo describir la foto$detail", Toast.LENGTH_LONG).show()
                                                 }
                                             }
                                         },
@@ -1533,10 +1575,18 @@ fun EntryDetailScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
-                    if (photoProcessing != null) {
+                    if (mediaRow != null && mediaRow.caption.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = photoProcessing ?: "",
+                            text = mediaRow.caption,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f)
+                        )
+                    }
+                    if (photoProcessing != null || viewerMirageBusy) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (viewerMirageBusy) "Analizando foto con Mirage…" else (photoProcessing ?: ""),
                             style = MaterialTheme.typography.labelMedium,
                             color = androidx.compose.ui.graphics.Color.White,
                             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -1551,7 +1601,7 @@ fun EntryDetailScreen(
                             onClick = {
                                 runPhotoOp(photoUri, SubjectSegmentationManager.Op.REMOVE_BACKGROUND)
                             },
-                            enabled = photoProcessing == null,
+                            enabled = photoProcessing == null && !viewerMirageBusy,
                             colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                                 contentColor = androidx.compose.ui.graphics.Color.White
                             ),
@@ -1565,7 +1615,7 @@ fun EntryDetailScreen(
                             onClick = {
                                 runPhotoOp(photoUri, SubjectSegmentationManager.Op.REMOVE_SUBJECT)
                             },
-                            enabled = photoProcessing == null,
+                            enabled = photoProcessing == null && !viewerMirageBusy,
                             colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                                 contentColor = androidx.compose.ui.graphics.Color.White
                             ),
@@ -1574,6 +1624,29 @@ fun EntryDetailScreen(
                             Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Quitar sujeto", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (mediaRow != null && NeedleModelManager.isMirageDownloaded(context)) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewerMirageBusy = true
+                                    viewModel.describePhotoWithMirageDetailed(mediaRow.id, entryId) { ok, err ->
+                                        viewerMirageBusy = false
+                                        if (!ok) {
+                                            val detail = err?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+                                            Toast.makeText(context, "Mirage no pudo describir esta foto$detail", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                enabled = photoProcessing == null && !viewerMirageBusy,
+                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                    contentColor = androidx.compose.ui.graphics.Color.White
+                                ),
+                                modifier = Modifier.weight(0.9f)
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Mirage", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                         if (mediaRow != null) {
                             OutlinedButton(
@@ -1585,7 +1658,7 @@ fun EntryDetailScreen(
                                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                                     contentColor = MaterialTheme.colorScheme.error
                                 ),
-                                modifier = Modifier.weight(0.7f)
+                                modifier = Modifier.weight(0.6f)
                             ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Eliminar foto", modifier = Modifier.size(14.dp))
                             }

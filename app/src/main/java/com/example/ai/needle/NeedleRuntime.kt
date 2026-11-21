@@ -38,6 +38,7 @@ object NeedleRuntime {
     @Volatile private var initialized = false
     @Volatile var lastErrorMessage: String? = null
         private set
+    @Volatile private var visionLoadError: String? = null
 
     /**
      * Tokenized length of the static prefix (system prompt + declared
@@ -139,32 +140,48 @@ object NeedleRuntime {
      * Loads the downloaded models (when present) and declares the tool
      * catalogue. Safe to call repeatedly; returns the loaded model bitmask.
      */
-    suspend fun loadFromDisk(context: Context): Int = withContext(needleDispatcher) {
-        if (!isSupported()) return@withContext 0
-        val dir = modelsDir(context)
-        val textFile = File(dir, NeedleModelManager.NEEDLE_FILE)
-        val speechFile = File(dir, NeedleModelManager.WHISTLE_FILE)
-        val visionFile = File(dir, NeedleModelManager.MIRAGE_FILE)
-        if (textFile.exists() && !isTextModelLoaded()) {
-            val rc = nativeLoadModel(textFile.absolutePath)
-            if (rc < 0) {
-                lastErrorMessage = lastError() ?: "no se pudo cargar ${textFile.name}"
-            }
+    suspend fun loadFromDisk(context: Context): Int = apiMutex.withLock {
+        if (!isSupported()) {
+            lastErrorMessage = supportError()
+                ?: "Motor nativo Cactus no disponible en esta arquitectura (${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "desconocida"})"
+            return@withLock 0
         }
-        if (speechFile.exists() && !isSpeechModelLoaded()) {
-            val rc = nativeLoadModel(speechFile.absolutePath)
-            if (rc < 0) {
-                lastErrorMessage = lastError() ?: "no se pudo cargar ${speechFile.name}"
+        withContext(needleDispatcher) {
+            val dir = modelsDir(context)
+            val textFile = File(dir, NeedleModelManager.NEEDLE_FILE)
+            val speechFile = File(dir, NeedleModelManager.WHISTLE_FILE)
+            val visionFile = File(dir, NeedleModelManager.MIRAGE_FILE)
+            if (textFile.exists() && !isTextModelLoaded()) {
+                val rc = nativeLoadModel(textFile.absolutePath)
+                if (rc < 0) {
+                    lastErrorMessage = lastError() ?: "no se pudo cargar ${textFile.name}"
+                }
             }
-        }
-        if (visionFile.exists() && !isVisionModelLoaded()) {
-            val rc = nativeLoadModel(visionFile.absolutePath)
-            if (rc < 0) {
-                lastErrorMessage = lastError() ?: "no se pudo cargar ${visionFile.name}"
+            if (speechFile.exists() && !isSpeechModelLoaded()) {
+                val rc = nativeLoadModel(speechFile.absolutePath)
+                if (rc < 0) {
+                    lastErrorMessage = lastError() ?: "no se pudo cargar ${speechFile.name}"
+                }
             }
+            if (visionFile.exists() && !isVisionModelLoaded()) {
+                if (visionFile.length() < 512L * 1024L) {
+                    visionLoadError = "${visionFile.name} parece incompleto (${visionFile.length() / 1024} KB); reimpórtalo o vuelve a descargarlo"
+                    lastErrorMessage = visionLoadError
+                } else {
+                    val rc = nativeLoadModel(visionFile.absolutePath)
+                    if (rc < 0) {
+                        visionLoadError = lastError() ?: "no se pudo cargar ${visionFile.name} (versión o formato .cact incompatible)"
+                        lastErrorMessage = visionLoadError
+                    } else {
+                        visionLoadError = null
+                    }
+                }
+            }
+            if (isTextModelLoaded() && !initialized) {
+                declareTools(context)
+            }
+            loadedModels()
         }
-        if (isTextModelLoaded()) initialize(context)
-        loadedModels()
     }
 
     /**
@@ -179,6 +196,7 @@ object NeedleRuntime {
             nativeReset()
             initialized = false
             lastErrorMessage = null
+            visionLoadError = null
             val rc = nativeLoadModel(file.absolutePath)
             val detected = if (rc > 0) rc else 0
             if (detected == 0) {
@@ -353,18 +371,25 @@ object NeedleRuntime {
         keywords: String? = null,
         optionsJson: String = MirageVision.DEFAULT_OPTIONS_JSON
     ): MirageResult? = apiMutex.withLock {
-        if (!isVisionModelLoaded()) return@withLock null
+        if (!isSupported()) {
+            lastErrorMessage = supportError()
+                ?: "Motor nativo Cactus no disponible en ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "esta CPU"}"
+            return@withLock null
+        }
+        if (!isVisionModelLoaded()) {
+            lastErrorMessage = visionLoadError ?: lastErrorMessage ?: "El modelo Mirage no está cargado en memoria"
+            return@withLock null
+        }
         withContext(needleDispatcher) {
             try {
-                val (rgb, width, height) = MirageVision.bitmapToPackedRgb(bitmap) ?: return@withContext null
-                val bytes = nativeDescribeImage(rgb, width, height, optionsJson, language, keywords)
-                if (bytes == null) {
-                    lastErrorMessage = lastError() ?: "cactus_describe falló"
+                lastErrorMessage = null
+                val (rgb, width, height) = MirageVision.bitmapToPackedRgb(bitmap) ?: run {
+                    lastErrorMessage = "Dimensiones de imagen inválidas"
                     return@withContext null
                 }
-                MirageVision.parseJson(bytes.toString(Charsets.UTF_8))
+                runMirageNativeDescribe(rgb, width, height, optionsJson, language, keywords)
             } catch (t: Throwable) {
-                lastErrorMessage = t.message
+                lastErrorMessage = t.message ?: t.javaClass.simpleName
                 null
             }
         }
@@ -378,22 +403,61 @@ object NeedleRuntime {
         keywords: String? = null,
         optionsJson: String = MirageVision.DEFAULT_OPTIONS_JSON
     ): MirageResult? = apiMutex.withLock {
-        if (!isVisionModelLoaded()) return@withLock null
+        if (!isSupported()) {
+            lastErrorMessage = supportError()
+                ?: "Motor nativo Cactus no disponible en ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "esta CPU"}"
+            return@withLock null
+        }
+        if (!isVisionModelLoaded()) {
+            lastErrorMessage = visionLoadError ?: lastErrorMessage ?: "El modelo Mirage no está cargado en memoria"
+            return@withLock null
+        }
         withContext(needleDispatcher) {
             try {
-                val (rgb, width, height) = MirageVision.decodePackedRgbFromUri(context, uri)
-                    ?: return@withContext null
-                val bytes = nativeDescribeImage(rgb, width, height, optionsJson, language, keywords)
-                if (bytes == null) {
-                    lastErrorMessage = lastError() ?: "cactus_describe falló"
+                lastErrorMessage = null
+                val (packed, decodeErr) = MirageVision.decodePackedRgbFromUriWithError(context, uri)
+                if (packed == null) {
+                    lastErrorMessage = decodeErr ?: "No pude leer la foto"
                     return@withContext null
                 }
-                MirageVision.parseJson(bytes.toString(Charsets.UTF_8))
+                val (rgb, width, height) = packed
+                runMirageNativeDescribe(rgb, width, height, optionsJson, language, keywords)
             } catch (t: Throwable) {
-                lastErrorMessage = t.message
+                lastErrorMessage = t.message ?: t.javaClass.simpleName
                 null
             }
         }
+    }
+
+    private fun runMirageNativeDescribe(
+        rgb: ByteArray,
+        width: Int,
+        height: Int,
+        optionsJson: String,
+        language: String?,
+        keywords: String?
+    ): MirageResult? {
+        var bytes = nativeDescribeImage(rgb, width, height, optionsJson, language, keywords)
+        if (bytes == null && (optionsJson != "{}" || !keywords.isNullOrBlank())) {
+            val firstErr = lastError()
+            // Retry with minimal options and no keyword bias in case the loaded build rejects them.
+            bytes = nativeDescribeImage(rgb, width, height, "{}", language, null)
+            if (bytes == null) {
+                lastErrorMessage = lastError() ?: firstErr ?: "cactus_describe falló"
+                return null
+            }
+        }
+        if (bytes == null) {
+            lastErrorMessage = lastError() ?: "cactus_describe falló"
+            return null
+        }
+        val raw = bytes.toString(Charsets.UTF_8)
+        val parsed = MirageVision.parseJson(raw)
+        if (parsed == null) {
+            lastErrorMessage = "Respuesta no válida de Mirage: ${raw.take(100)}"
+            return null
+        }
+        return parsed
     }
 
     /**

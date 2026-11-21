@@ -104,6 +104,9 @@ fun RoutinesScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val digest by viewModel.habitDigest.collectAsState()
+    val entries by viewModel.entries.collectAsState()
+    val upcomingEvents by viewModel.upcomingCalendarEvents.collectAsState()
+    val writingStats = remember(entries) { com.example.semantic.JournalInsights.computeWritingStats(entries) }
 
     var loading by remember { mutableStateOf(true) }
     var eventCounts by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
@@ -706,11 +709,20 @@ fun RoutinesScreen(
                         generatingBrief = true
                         scope.launch {
                             val narrative = try {
-                                HabitMiners.generateBriefNarrative(context, currentDigest)
+                                HabitMiners.generateBriefNarrative(
+                                    context = context,
+                                    digest = currentDigest,
+                                    writingSummary = writingStats.summaryLine,
+                                    upcomingEventsCount = upcomingEvents.size
+                                )
                             } catch (_: Exception) {
                                 null
                             }
-                            val text = narrative ?: HabitMiners.templateBrief(currentDigest)
+                            val text = narrative ?: HabitMiners.templateBrief(
+                                digest = currentDigest,
+                                writingSummary = writingStats.summaryLine,
+                                upcomingEventsCount = upcomingEvents.size
+                            )
                             HabitEngine.saveBrief(context, text, fromNeedle = narrative != null)
                             briefIsFromNeedle = narrative != null
                             briefText = text
@@ -972,6 +984,7 @@ fun RoutinesScreen(
 // v1.7: user routines (Bixby-style "si X entonces Y"), all on-device
 // ----------------------------------------------------------------------
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun MyRoutinesCard(onChanged: () -> Unit = {}) {
     val context = LocalContext.current
@@ -995,10 +1008,70 @@ private fun MyRoutinesCard(onChanged: () -> Unit = {}) {
 
         if (routines.isEmpty()) {
             Text(
-                text = "Aún no tienes rutinas. Ejemplo: «si son las 8:00 → avisarme de salir».",
+                text = "Aún no tienes rutinas. Activa una sugerencia rápida o crea la tuya:",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(6.dp))
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                FilterChip(
+                    selected = false,
+                    onClick = {
+                        RoutineEngine.upsert(
+                            context,
+                            UserRoutine(
+                                id = RoutineEngine.newId(),
+                                name = "Noticias matutinas",
+                                trigger = Trigger.Time(8, 30),
+                                action = Action.OpenNews
+                            )
+                        )
+                        reload()
+                        onChanged()
+                    },
+                    label = { Text("08:30 Noticias", style = MaterialTheme.typography.labelSmall) }
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = {
+                        RoutineEngine.upsert(
+                            context,
+                            UserRoutine(
+                                id = RoutineEngine.newId(),
+                                name = "Cierre del día",
+                                trigger = Trigger.Time(21, 30),
+                                action = Action.CreateNote(
+                                    "Balance del día",
+                                    "Lo mejor de hoy:\n- \nPendiente para mañana:\n- "
+                                )
+                            )
+                        )
+                        reload()
+                        onChanged()
+                    },
+                    label = { Text("21:30 Nota cierre", style = MaterialTheme.typography.labelSmall) }
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = {
+                        RoutineEngine.upsert(
+                            context,
+                            UserRoutine(
+                                id = RoutineEngine.newId(),
+                                name = "Asistente al cargar",
+                                trigger = Trigger.ChargingOn,
+                                action = Action.OpenAssistant
+                            )
+                        )
+                        reload()
+                        onChanged()
+                    },
+                    label = { Text("Carga → Asistente", style = MaterialTheme.typography.labelSmall) }
+                )
+            }
         } else {
             routines.forEach { routine ->
                 RoutineRow(
@@ -1134,7 +1207,8 @@ private fun RoutineEditorDialog(
         "notification" to "Avisarme",
         "note" to "Crear nota",
         "open_news" to "Abrir noticias",
-        "open_assistant" to "Abrir asistente"
+        "open_assistant" to "Abrir asistente",
+        "open_lens" to "Abrir Lens IA"
     )
 
     fun buildRoutine(): UserRoutine {
@@ -1152,6 +1226,7 @@ private fun RoutineEditorDialog(
             )
             "open_news" -> Action.OpenNews
             "open_assistant" -> Action.OpenAssistant
+            "open_lens" -> Action.OpenLens
             else -> Action.Notify(
                 actionTitle.ifBlank { "Mnemosyne" },
                 actionText

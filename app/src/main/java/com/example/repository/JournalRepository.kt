@@ -336,46 +336,80 @@ class JournalRepository(
         mediaId
     }
 
+    data class MirageDescribeOutcome(
+        val ok: Boolean,
+        val errorMessage: String? = null
+    )
+
     /**
      * Runs Mirage local VLM on an existing attached photo and saves its Spanish
      * scene description, objects, and OCR into Room + semantic search index.
      */
-    suspend fun describeMediaWithMirage(mediaId: Long, entryId: Long): Boolean = withContext(Dispatchers.IO) {
-        val media = dao.getMediaById(mediaId) ?: return@withContext false
-        if (!com.example.ai.needle.NeedleModelManager.isMirageDownloaded(context)) return@withContext false
-        com.example.ai.needle.NeedleModelManager.ensureLoaded(context)
-        if (!com.example.ai.needle.NeedleRuntime.isVisionModelLoaded()) return@withContext false
+    suspend fun describeMediaWithMirage(mediaId: Long, entryId: Long): Boolean =
+        describeMediaWithMirageDetailed(mediaId, entryId).ok
 
-        val entityNames = runCatching {
-            dao.getEntryWithRelations(entryId)?.entities?.map { it.displayName }.orEmpty()
-        }.getOrDefault(emptyList())
-        val keywords = com.example.ai.needle.WhistleKeywordBuilder.forMirage(context, entityNames)
-        val mirage = com.example.ai.needle.NeedleRuntime.describeImageFromUri(
-            context = context,
-            uri = Uri.parse(media.uri),
-            language = "es",
-            keywords = keywords
-        ) ?: return@withContext false
+    suspend fun describeMediaWithMirageDetailed(mediaId: Long, entryId: Long): MirageDescribeOutcome =
+        withContext(Dispatchers.IO) {
+            val media = dao.getMediaById(mediaId)
+                ?: return@withContext MirageDescribeOutcome(false, "No se encontró el archivo multimedia.")
+            if (!com.example.ai.needle.NeedleModelManager.isMirageDownloaded(context)) {
+                return@withContext MirageDescribeOutcome(false, "Descarga o importa primero el modelo Mirage (.cact).")
+            }
+            if (!com.example.ai.needle.NeedleRuntime.isSupported()) {
+                val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "esta CPU"
+                return@withContext MirageDescribeOutcome(
+                    false,
+                    "El motor nativo Cactus/Mirage no está incluido para la arquitectura $abi."
+                )
+            }
+            com.example.ai.needle.NeedleModelManager.ensureLoaded(context)
+            if (!com.example.ai.needle.NeedleRuntime.isVisionModelLoaded()) {
+                val reason = com.example.ai.needle.NeedleRuntime.lastErrorMessage
+                    ?: "No se pudo inicializar mirage.cact en memoria."
+                return@withContext MirageDescribeOutcome(false, reason)
+            }
 
-        val existingLabels = parseLabelsArray(media.labelsJson)
-        val combinedLabels = (existingLabels + mirage.mergedLabels()).distinct()
-        val mirageOcr = mirage.mergedOcrText()
-        val combinedOcr = when {
-            media.ocrText.isBlank() -> mirageOcr
-            mirageOcr.isBlank() || media.ocrText.contains(mirageOcr, ignoreCase = true) -> media.ocrText
-            else -> "${media.ocrText}\n$mirageOcr"
-        }
-        val caption = mirage.formattedJournalCaption().ifBlank { media.caption }
-        dao.updateMediaItem(
-            media.copy(
-                labelsJson = JSONArray(combinedLabels).toString(),
-                ocrText = combinedOcr,
-                caption = caption
+            val entityNames = runCatching {
+                dao.getEntryWithRelations(entryId)?.entities?.map { it.displayName }.orEmpty()
+            }.getOrDefault(emptyList())
+            val keywords = com.example.ai.needle.WhistleKeywordBuilder.forMirage(context, entityNames)
+            val mirage = com.example.ai.needle.NeedleRuntime.describeImageFromUri(
+                context = context,
+                uri = Uri.parse(media.uri),
+                language = "es",
+                keywords = keywords
+            ) ?: return@withContext MirageDescribeOutcome(
+                false,
+                com.example.ai.needle.NeedleRuntime.lastErrorMessage
+                    ?: "El motor Mirage no pudo analizar esta imagen."
             )
-        )
-        processSemanticIntelligence(entryId)
-        true
-    }
+
+            if (mirage.isEmpty()) {
+                return@withContext MirageDescribeOutcome(
+                    false,
+                    "Mirage no detectó elementos, texto ni escena descriptible en esta foto."
+                )
+            }
+
+            val existingLabels = parseLabelsArray(media.labelsJson)
+            val combinedLabels = (existingLabels + mirage.mergedLabels()).distinct()
+            val mirageOcr = mirage.mergedOcrText()
+            val combinedOcr = when {
+                media.ocrText.isBlank() -> mirageOcr
+                mirageOcr.isBlank() || media.ocrText.contains(mirageOcr, ignoreCase = true) -> media.ocrText
+                else -> "${media.ocrText}\n$mirageOcr"
+            }
+            val caption = mirage.formattedJournalCaption().ifBlank { media.caption }
+            dao.updateMediaItem(
+                media.copy(
+                    labelsJson = JSONArray(combinedLabels).toString(),
+                    ocrText = combinedOcr,
+                    caption = caption
+                )
+            )
+            processSemanticIntelligence(entryId)
+            MirageDescribeOutcome(true, null)
+        }
 
     private suspend fun analyzeMediaCandidate(
         entryId: Long,

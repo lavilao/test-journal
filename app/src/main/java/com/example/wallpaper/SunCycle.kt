@@ -82,10 +82,11 @@ object SunCycle {
         systemDark: Boolean
     ): Boolean {
         if (systemDark) return true
-        if (weather == AtmosphereWeather.FOG) return false
-        return when (phase) {
-            Phase.NIGHT, Phase.DAWN, Phase.DUSK -> true
-            Phase.MORNING, Phase.MIDDAY, Phase.AFTERNOON -> true
+        return when {
+            weather == AtmosphereWeather.FOG -> false
+            phase == Phase.NIGHT || weather == AtmosphereWeather.STORM -> true
+            weather == AtmosphereWeather.CLOUDY || weather == AtmosphereWeather.SNOW -> false
+            else -> true
         }
     }
 
