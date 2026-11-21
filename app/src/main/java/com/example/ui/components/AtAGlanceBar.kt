@@ -44,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.data.DeviceCalendarEvent
 import com.example.data.model.LocalReminder
 import com.example.telemetry.LifeHubTelemetry
@@ -174,12 +177,15 @@ fun AtAGlanceBar(
     }
 
     var alertIndex by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    LaunchedEffect(chips.size) {
+    LaunchedEffect(chips.size, lifecycleOwner) {
         if (chips.size <= 1) return@LaunchedEffect
-        while (true) {
-            delay(5000)
-            alertIndex = (alertIndex + 1) % chips.size
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(5000)
+                alertIndex = (alertIndex + 1) % chips.size
+            }
         }
     }
 

@@ -1,7 +1,9 @@
 package com.example.wallpaper
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -10,7 +12,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -24,7 +25,11 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.ui.components.AuroraBackground
+import com.example.wallpaper.SunCycle.AppSurfaceMode
 import com.example.wallpaper.SunCycle.AtmosphereWeather
 import com.example.wallpaper.SunCycle.Phase
 import kotlinx.coroutines.delay
@@ -34,25 +39,49 @@ import kotlin.math.pow
 import kotlin.math.sin
 
 /**
- * Unified app background: renders the dynamic time-of-day + weather atmosphere
- * when enabled (on by default), or falls back to the classic Aurora canvas.
+ * Matte, distraction-free Notion-caliber workspace backdrop: 0% GPU redraw loop.
+ */
+@Composable
+fun StaticNotionWorkspaceBackdrop(modifier: Modifier = Modifier) {
+    val isDark = isSystemInDarkTheme()
+    val bgTop = if (isDark) Color(0xFF141413) else Color(0xFFFBFAF8)
+    val bgBottom = if (isDark) Color(0xFF191918) else Color(0xFFF5F3EF)
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(bgTop, bgBottom)))
+    )
+}
+
+/**
+ * Unified app background: defaults to crisp zero-GPU Notion workspace paper/obsidian
+ * (or renders low-power dynamic sky strictly when chosen in Settings and on Home).
  */
 @Composable
 fun NowBriefAppBackground(
     modifier: Modifier = Modifier,
-    weatherCode: Int? = null
+    weatherCode: Int? = null,
+    isHomeScreen: Boolean = true
 ) {
     val context = LocalContext.current
-    val dynamicEnabled = remember(weatherCode) { SunCycle.isDynamicAtmosphereEnabled(context) }
+    val surfaceMode = remember(weatherCode, isHomeScreen) { SunCycle.getSurfaceMode(context) }
     val resolvedCode = weatherCode ?: SunCycle.lastWeatherCode(context)
 
-    if (dynamicEnabled) {
-        SunGradientBackground(
-            modifier = modifier,
-            weatherCode = resolvedCode
-        )
-    } else {
-        AuroraBackground(modifier = modifier)
+    when (surfaceMode) {
+        AppSurfaceMode.STATIC_NOTION -> StaticNotionWorkspaceBackdrop(modifier = modifier)
+        AppSurfaceMode.CLASSIC_AURORA -> AuroraBackground(modifier = modifier)
+        AppSurfaceMode.DYNAMIC_LOW_POWER -> {
+            if (isHomeScreen) {
+                SunGradientBackground(
+                    modifier = modifier,
+                    weatherCode = resolvedCode,
+                    animateParticles = true
+                )
+            } else {
+                // Keep editor / reader / secondary screens calm & 0-FPS idle.
+                StaticNotionWorkspaceBackdrop(modifier = modifier)
+            }
+        }
     }
 }
 
@@ -66,29 +95,31 @@ private data class SkyPalette(
 )
 
 /**
- * Dynamic atmospheric sky rendered with Jetpack Compose Canvas:
- * adapts sky colors, sun/moon arc, drifting clouds, mist, rain, snow,
- * and distant storm lightning to the real time of day (via [SunCycle])
- * and real local weather condition ([weatherCode]).
- *
- * Frame timing is read solely inside [Canvas] draw scope so animations
- * stay 60fps without triggering Compose recompositions.
+ * Dynamic atmospheric sky rendered with Jetpack Compose Canvas.
+ * Energy-optimized: updates clock only while RESUMED every 60s, renders clear/cloudy
+ * skies completely statically (0 continuous redraws), and caps active weather particles
+ * (rain/snow/storm) to ~12 FPS only while the screen is RESUMED.
  */
 @Composable
 fun SunGradientBackground(
     modifier: Modifier = Modifier,
     weatherCode: Int? = null,
     overridePhase: Phase? = null,
-    overrideWeather: AtmosphereWeather? = null
+    overrideWeather: AtmosphereWeather? = null,
+    animateParticles: Boolean = true
 ) {
     val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(60_000)
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             now = System.currentTimeMillis()
+            while (true) {
+                delay(60_000L)
+                now = System.currentTimeMillis()
+            }
         }
     }
 
@@ -115,13 +146,21 @@ fun SunGradientBackground(
         paletteFor(phase, weather, isDark)
     }
 
-    // Read only inside Canvas draw scope -> 0 recompositions per animation frame.
+    val needsMotion = animateParticles && (
+        weather == AtmosphereWeather.RAIN ||
+            weather == AtmosphereWeather.SNOW ||
+            weather == AtmosphereWeather.STORM
+        )
+
+    // Read only inside Canvas draw scope; static skies incur 0 redraws, precip throttled to ~12fps.
     val timeSec = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(phase, weather) {
-        val startNanos = withFrameNanos { it }
-        while (true) {
-            withFrameNanos { frameNanos ->
-                timeSec.floatValue = (frameNanos - startNanos) / 1_000_000_000f
+    LaunchedEffect(lifecycleOwner, needsMotion, phase, weather) {
+        if (!needsMotion) return@LaunchedEffect
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            val startMs = System.currentTimeMillis()
+            while (true) {
+                timeSec.floatValue = (System.currentTimeMillis() - startMs) / 1000f
+                delay(80L)
             }
         }
     }

@@ -35,34 +35,34 @@ val DarkTerracottaAccent = Color(0xFFE07A4A)
 val DarkAmberNode = Color(0xFFF59E0B)
 
 // ---------------------------------------------------------------
-// NowBrief (Samsung mode) palettes — warm sunrise light / ocean dark
+// NowBrief + Notion Workspace palettes — calm paper light / obsidian dark
 // ---------------------------------------------------------------
 
-// Warm Cream & Burnt Orange — "like a sunrise"
-val NowBriefPrimaryLight = Color(0xFFE8804A)
+// Warm Stone Paper & Editorial Terracotta (high contrast, clean matte surfaces)
+val NowBriefPrimaryLight = Color(0xFFD0602E)
 val NowBriefOnPrimaryLight = Color(0xFFFFFFFF)
-val NowBriefPrimaryContainerLight = Color(0xFFF5EFE8)
-val NowBriefBackgroundLight = Color(0xFFFAF6F1)
-val NowBriefSurfaceLight = Color(0xFFFDF9F4)
-val NowBriefSurfaceVariantLight = Color(0xFFF5EFE8)
-val NowBriefOnSurfaceLight = Color(0xFF231810)
-val NowBriefOnSurfaceVariantLight = Color(0xFF564738)
-val NowBriefOutlineLight = Color(0xFFD2C6B8)
-val NowBriefTertiaryLight = Color(0xFFE07D48)
+val NowBriefPrimaryContainerLight = Color(0xFFF3EFEA)
+val NowBriefBackgroundLight = Color(0xFFFBFAF8)
+val NowBriefSurfaceLight = Color(0xFFFFFFFF)
+val NowBriefSurfaceVariantLight = Color(0xFFF3F1ED)
+val NowBriefOnSurfaceLight = Color(0xFF1F1E1C)
+val NowBriefOnSurfaceVariantLight = Color(0xFF64615B)
+val NowBriefOutlineLight = Color(0xFFD9D5CE)
+val NowBriefTertiaryLight = Color(0xFFB95D31)
 
-// Deep Navy -> Electric Sky Blue — "night ocean"
-val NowBriefPrimaryDark = Color(0xFF5BB8FF)
-val NowBriefOnPrimaryDark = Color(0xFF003258)
-val NowBriefPrimaryContainerDark = Color(0xFF00243D)
-val NowBriefBackgroundDark = Color(0xFF040D18)
-val NowBriefSurfaceDark = Color(0xFF081524)
-val NowBriefSurfaceVariantDark = Color(0xFF0D2035)
-val NowBriefOnSurfaceDark = Color(0xFFCEE5FF)
-val NowBriefOnSurfaceVariantDark = Color(0xFF7EB5D6)
-val NowBriefOutlineDark = Color(0xFF1A3A56)
+// Notion Obsidian Charcoal & Crisp Sky Accent
+val NowBriefPrimaryDark = Color(0xFF6CB8F7)
+val NowBriefOnPrimaryDark = Color(0xFF0A2540)
+val NowBriefPrimaryContainerDark = Color(0xFF1E2A36)
+val NowBriefBackgroundDark = Color(0xFF191918)
+val NowBriefSurfaceDark = Color(0xFF20201F)
+val NowBriefSurfaceVariantDark = Color(0xFF282826)
+val NowBriefOnSurfaceDark = Color(0xFFEBEAE6)
+val NowBriefOnSurfaceVariantDark = Color(0xFFA3A19B)
+val NowBriefOutlineDark = Color(0xFF363633)
 val NowBriefTertiaryDark = Color(0xFF90CAF9)
 
 // Semantic accents (NowBrief)
-val NowBriefVitalsGreen = Color(0xFF4CAF50)
-val NowBriefNewsBlue = Color(0xFF2196F3)
-val NowBriefOrange = Color(0xFFE8804A)
+val NowBriefVitalsGreen = Color(0xFF3E9B4F)
+val NowBriefNewsBlue = Color(0xFF2E86DE)
+val NowBriefOrange = Color(0xFFD0602E)

@@ -126,7 +126,7 @@ fun GoogleActivityScreen(
     val dateFormat = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
 
     Column(
         modifier = Modifier

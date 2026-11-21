@@ -98,7 +98,7 @@ fun GoogleNotificationsScreen(
     }
 
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
     val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
 
     Column(

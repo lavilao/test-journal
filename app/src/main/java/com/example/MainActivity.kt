@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,6 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.speech.hotword.HotwordService
 import com.example.ui.components.GlassBottomBar
@@ -64,7 +68,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 sealed interface AppScreen {
     data class Main(val tab: MainNavTab) : AppScreen
-    data class Edit(val entryId: Long?) : AppScreen
+    data class Edit(val entryId: Long?, val parentEntryId: Long? = null) : AppScreen
     data class Detail(val entryId: Long) : AppScreen
     data object Assistant : AppScreen
     data object Lens : AppScreen
@@ -82,7 +86,7 @@ private val AppScreenSaver: Saver<AppScreen, String> = Saver(
     save = { screen ->
         when (screen) {
             is AppScreen.Main -> "main:${screen.tab.name}"
-            is AppScreen.Edit -> "edit:${screen.entryId ?: -1L}"
+            is AppScreen.Edit -> "edit:${screen.entryId ?: -1L}:${screen.parentEntryId ?: -1L}"
             is AppScreen.Detail -> "detail:${screen.entryId}"
             AppScreen.Assistant -> "assistant"
             AppScreen.Lens -> "lens"
@@ -92,12 +96,16 @@ private val AppScreenSaver: Saver<AppScreen, String> = Saver(
         }
     },
     restore = { value ->
-        val parts = value.split(":", limit = 2)
+        val parts = value.split(":")
         val arg = parts.getOrNull(1)
+        val arg2 = parts.getOrNull(2)
         when (parts.firstOrNull()) {
             "main" -> runCatching { AppScreen.Main(MainNavTab.valueOf(arg ?: "INICIO")) }
                 .getOrDefault(AppScreen.Main(MainNavTab.INICIO))
-            "edit" -> AppScreen.Edit(arg?.toLongOrNull()?.takeIf { it > 0L })
+            "edit" -> AppScreen.Edit(
+                entryId = arg?.toLongOrNull()?.takeIf { it > 0L },
+                parentEntryId = arg2?.toLongOrNull()?.takeIf { it > 0L }
+            )
             "detail" -> arg?.toLongOrNull()?.let { AppScreen.Detail(it) }
                 ?: AppScreen.Main(MainNavTab.INICIO)
             "assistant" -> AppScreen.Assistant
@@ -227,6 +235,21 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
     val realWeather by viewModel.realWeather.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val appContext = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.onAppResumed()
+                Lifecycle.Event.ON_PAUSE -> viewModel.onAppPaused()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // After a process-death restore, put the saved tab back into the
     // ViewModel so the Main screen renders what the user was seeing.
@@ -368,9 +391,12 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     .padding(innerPadding)
             ) {
                 if (screenState !is AppScreen.Lens) {
+                    val isHomeTab = screenState is AppScreen.Main &&
+                        (currentTab == MainNavTab.INICIO || currentTab == MainNavTab.TIMELINE)
                     NowBriefAppBackground(
                         modifier = Modifier.fillMaxSize(),
-                        weatherCode = realWeather.weatherCode
+                        weatherCode = realWeather.weatherCode,
+                        isHomeScreen = isHomeTab
                     )
                 }
                 AnimatedContent(
@@ -431,7 +457,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                 viewModel = viewModel,
                                 onBack = { screenState = AppScreen.Main(currentTab) },
                                 onSaved = { savedId -> screenState = AppScreen.Detail(savedId) },
-                                onOpenLens = { screenState = AppScreen.Lens }
+                                onOpenLens = { screenState = AppScreen.Lens },
+                                initialParentEntryId = targetScreen.parentEntryId
                             )
                         }
                         is AppScreen.Detail -> {
@@ -444,7 +471,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                                     viewModel.selectEntity(entityId)
                                     screenState = AppScreen.Main(MainNavTab.ENTITIES)
                                 },
-                                onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) }
+                                onNavigateToEntry = { id -> screenState = AppScreen.Detail(id) },
+                                onCreateSubPage = { parentId -> screenState = AppScreen.Edit(null, parentId) }
                             )
                         }
                         is AppScreen.Assistant -> {

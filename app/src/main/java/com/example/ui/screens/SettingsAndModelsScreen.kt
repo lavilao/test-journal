@@ -202,8 +202,11 @@ fun SettingsAndModelsScreen(
     }
 
     // ---- dynamic time+weather atmosphere + places state ----
+    var surfaceMode by remember {
+        mutableStateOf(SunCycle.getSurfaceMode(context))
+    }
     var sunWallpaperChecked by remember {
-        mutableStateOf(SunCycle.isDynamicAtmosphereEnabled(context))
+        mutableStateOf(surfaceMode == SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER)
     }
     var placesTick by remember { mutableStateOf(0) }
     val savedPlaces = remember(placesTick) { SmartPlaces.places(context) }
@@ -245,9 +248,14 @@ fun SettingsAndModelsScreen(
             // =========================================================
             // 1. Clima y atmósfera
             // =========================================================
+            val modeLabel = when (surfaceMode) {
+                SunCycle.AppSurfaceMode.STATIC_NOTION -> "Minimalista (0% GPU)"
+                SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER -> "Atmósfera bajo consumo"
+                SunCycle.AppSurfaceMode.CLASSIC_AURORA -> "Aurora estático"
+            }
             GlassCollapsibleSectionCard(
                 title = "Clima y atmósfera",
-                summary = "${selectedCity?.name ?: "Sin ciudad"} · Fondo ${if (sunWallpaperChecked) "dinámico" else "clásico"}",
+                summary = "${selectedCity?.name ?: "Sin ciudad"} · $modeLabel",
                 icon = Icons.Default.AutoAwesome,
                 expanded = expandClimate,
                 onToggle = { expandClimate = !expandClimate }
@@ -315,11 +323,11 @@ fun SettingsAndModelsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Fondo dinámico (hora del día + clima)",
+                                text = "Fondo atmosférico dinámico",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                             )
                             ExpandableHint(
-                                text = "El cielo, el sol/luna y las nubes, niebla, lluvia, nieve o tormenta cambian automáticamente con la hora y tu clima real.",
+                                text = "Por defecto la app usa fondo estático Minimalista Notion (0% GPU y mínimo consumo de batería). Actívalo solo si prefieres cielo dinámico en Inicio.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -328,11 +336,41 @@ fun SettingsAndModelsScreen(
                             checked = sunWallpaperChecked,
                             onCheckedChange = { checked ->
                                 sunWallpaperChecked = checked
-                                context.getSharedPreferences(SunCycle.WALLPAPER_PREFS, Context.MODE_PRIVATE)
-                                    .edit().putBoolean(SunCycle.KEY_WALLPAPER_ENABLED, checked).apply()
+                                val target = if (checked) {
+                                    SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER
+                                } else {
+                                    SunCycle.AppSurfaceMode.STATIC_NOTION
+                                }
+                                surfaceMode = target
+                                SunCycle.setSurfaceMode(context, target)
                             },
                             modifier = Modifier.testTag("sun_wallpaper_switch")
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            SunCycle.AppSurfaceMode.STATIC_NOTION to "Notion (0% GPU)",
+                            SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER to "Cielo (bajo consumo)",
+                            SunCycle.AppSurfaceMode.CLASSIC_AURORA to "Aurora estático"
+                        ).forEach { (mode, label) ->
+                            androidx.compose.material3.FilterChip(
+                                selected = surfaceMode == mode,
+                                onClick = {
+                                    surfaceMode = mode
+                                    sunWallpaperChecked = mode == SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER
+                                    SunCycle.setSurfaceMode(context, mode)
+                                },
+                                label = { Text(label, fontSize = 11.sp) }
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -415,7 +453,7 @@ fun SettingsAndModelsScreen(
                         Text("Poner como fondo de pantalla del sistema")
                     }
                     ExpandableHint(
-                        text = "El interruptor activa el fondo atmosférico dentro de la app (si lo desactivas vuelve el Aurora clásico); el botón lo instala como fondo animado del teléfono.",
+                        text = "Modo Notion y Aurora estático consumen 0% GPU en reposo; el cielo dinámico pausa al salir de Inicio.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

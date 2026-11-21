@@ -23,6 +23,16 @@ object SunCycle {
 
     const val WALLPAPER_PREFS = "sun_wallpaper"
     const val KEY_WALLPAPER_ENABLED = "enabled"
+    const val KEY_SURFACE_MODE = "surface_mode"
+
+    enum class AppSurfaceMode {
+        /** Matte Notion-style workspace backdrop: 0 FPS idle GPU draw. */
+        STATIC_NOTION,
+        /** Low-power atmospheric sky on Home (static unless raining/snowing). */
+        DYNAMIC_LOW_POWER,
+        /** Calm static aurora gradient mesh: 0 FPS idle GPU draw. */
+        CLASSIC_AURORA
+    }
 
     data class Daylight(
         val sunriseMillis: Long,
@@ -52,13 +62,35 @@ object SunCycle {
         else -> AtmosphereWeather.PARTLY_CLOUDY
     }
 
-    fun isDynamicAtmosphereEnabled(context: Context): Boolean {
+    fun getSurfaceMode(context: Context): AppSurfaceMode {
         return try {
-            context.getSharedPreferences(WALLPAPER_PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_WALLPAPER_ENABLED, true)
+            val prefs = context.getSharedPreferences(WALLPAPER_PREFS, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_SURFACE_MODE, null)
+            if (raw != null) {
+                runCatching { AppSurfaceMode.valueOf(raw) }.getOrDefault(AppSurfaceMode.STATIC_NOTION)
+            } else {
+                // Migrate legacy toggle only if user explicitly disabled or switched;
+                // default to STATIC_NOTION to prevent 60-120fps shader battery drain.
+                AppSurfaceMode.STATIC_NOTION
+            }
         } catch (_: Exception) {
-            true
+            AppSurfaceMode.STATIC_NOTION
         }
+    }
+
+    fun setSurfaceMode(context: Context, mode: AppSurfaceMode) {
+        try {
+            context.getSharedPreferences(WALLPAPER_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_SURFACE_MODE, mode.name)
+                .putBoolean(KEY_WALLPAPER_ENABLED, mode == AppSurfaceMode.DYNAMIC_LOW_POWER)
+                .apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun isDynamicAtmosphereEnabled(context: Context): Boolean {
+        return getSurfaceMode(context) == AppSurfaceMode.DYNAMIC_LOW_POWER
     }
 
     fun lastWeatherCode(context: Context): Int? {

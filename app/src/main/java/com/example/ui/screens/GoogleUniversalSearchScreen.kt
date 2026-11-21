@@ -152,7 +152,7 @@ fun GoogleUniversalSearchScreen(
     }
 
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
     val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
 
     Column(
@@ -162,8 +162,8 @@ fun GoogleUniversalSearchScreen(
     ) {
         // Frosted Glass Search Header Bar extending cleanly beneath status bar
         Surface(
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
-            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.background,
+            tonalElevation = 0.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -172,12 +172,12 @@ fun GoogleUniversalSearchScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(26.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    border = BorderStroke(1.dp, glassBorder),
+                    border = BorderStroke(0.75.dp, glassBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(26.dp))
+                        .clip(RoundedCornerShape(14.dp))
                 ) {
                     Row(
                         modifier = Modifier

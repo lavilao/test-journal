@@ -125,6 +125,7 @@ fun KnowledgeGraphScreen(
     var simulation by remember { mutableStateOf<ForceSimulation?>(null) }
     var canvasSize by remember { mutableStateOf(Offset(1080f, 1920f)) }
     var isDraggingNode by remember { mutableStateOf(false) }
+    var reheatNonce by remember { mutableIntStateOf(0) }
 
     val labelTextColor = MaterialTheme.colorScheme.onSurface
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -135,24 +136,18 @@ fun KnowledgeGraphScreen(
             simulation = ForceSimulation(graphData.nodes, graphData.edges).also { sim ->
                 sim.initialize(canvasSize.x, canvasSize.y)
             }
+            reheatNonce++
         } else {
             simulation = null
         }
     }
 
-    LaunchedEffect(simulation, canvasSize) {
+    LaunchedEffect(simulation, canvasSize, reheatNonce) {
         val sim = simulation ?: return@LaunchedEffect
-        while (true) {
-            if (sim.isActive()) {
-                withFrameNanos { }
-                sim.step(canvasSize.x, canvasSize.y)
-                positionTick.intValue++
-            } else {
-                delay(120)
-                if (isDraggingNode || sim.wasDisturbed()) {
-                    sim.reheat(0.35f)
-                }
-            }
+        while (sim.isActive() || isDraggingNode) {
+            withFrameNanos { }
+            sim.step(canvasSize.x, canvasSize.y)
+            positionTick.intValue++
         }
     }
 
@@ -235,7 +230,9 @@ fun KnowledgeGraphScreen(
                                 val hit = sim.hitTest(graphX, graphY)
                                 if (hit != null) {
                                     sim.beginDrag(hit, graphX, graphY)
+                                    sim.reheat(0.35f)
                                     isDraggingNode = true
+                                    reheatNonce++
                                 }
                             },
                             onDrag = { change, _ ->
@@ -251,11 +248,15 @@ fun KnowledgeGraphScreen(
                             },
                             onDragEnd = {
                                 currentSim?.endDrag()
+                                currentSim?.reheat(0.35f)
                                 isDraggingNode = false
+                                reheatNonce++
                             },
                             onDragCancel = {
                                 currentSim?.endDrag()
+                                currentSim?.reheat(0.35f)
                                 isDraggingNode = false
+                                reheatNonce++
                             }
                         )
                     }

@@ -326,7 +326,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     /** Full background-style pass, used by pull-to-refresh. */
     fun syncNow() {
-        SyncHub.syncNow(getApplication<Application>())
+        SyncHub.syncNow(getApplication<Application>(), forceHeavy = true)
         refreshTelemetry()
         refreshRecentActivity()
         refreshHabitFacts()
@@ -545,24 +545,102 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
             refreshCalendarEvents()
             refreshRecentActivity()
         }
-        // Boot the realtime layer: persisted snapshot + 5-minute cadence +
-        // the per-reminder wake-up alarm. Survives reboots via the receiver.
+        // Boot the realtime layer: persisted snapshot + 30-minute passive cadence +
+        // per-reminder wake-up alarm. Survives reboots via the receiver.
         SyncHub.ensureInitialized(application)
         SyncScheduler.schedule(application)
         SyncScheduler.scheduleNextReminderAlarm(application)
         viewModelScope.launch {
             ReminderNotifications.checkAndNotifyDue(application)
         }
-        // Habit engine: first harvest (7-day bootstrap on first run) + digest.
+        // Habit engine: first harvest + digest.
         refreshHabitFacts()
-        // Real-time filter: every minute, past events vanish and the list is
-        // re-queried so a task/event created outside this app shows up fast.
-        viewModelScope.launch {
-            while (true) {
-                delay(60_000)
+    }
+
+    private var foregroundRefreshJob: Job? = null
+
+    /** Called by MainActivity.onResume — runs calendar/step updates only while visible. */
+    fun onAppResumed() {
+        lifeHubManager.registerStepSensor()
+        foregroundRefreshJob?.cancel()
+        foregroundRefreshJob = viewModelScope.launch {
+            SyncHub.refreshFilter()
+            while (currentCoroutineContext().isActive) {
+                delay(60_000L)
                 SyncHub.refreshFilter()
-                SyncHub.refreshCalendar(application)
+                SyncHub.refreshCalendar(getApplication<Application>())
             }
+        }
+    }
+
+    /** Called by MainActivity.onPause — immediately stops foreground loops & step sensor. */
+    fun onAppPaused() {
+        foregroundRefreshJob?.cancel()
+        foregroundRefreshJob = null
+        lifeHubManager.unregisterStepSensor()
+    }
+
+    // Notion Workspace actions & state
+    fun getChildPages(parentId: Long): kotlinx.coroutines.flow.Flow<List<EntryWithRelations>> =
+        repository.getChildPages(parentId)
+
+    suspend fun getBreadcrumbs(entryId: Long): List<JournalEntry> =
+        repository.getBreadcrumbs(entryId)
+
+    fun toggleEntryPin(entryId: Long, pinned: Boolean) {
+        viewModelScope.launch {
+            repository.toggleEntryPinned(entryId, pinned)
+        }
+    }
+
+    fun updateEntryStatus(entryId: Long, status: String) {
+        viewModelScope.launch {
+            repository.updateEntryStatus(entryId, status)
+        }
+    }
+
+    fun updateWorkspaceProperties(
+        entryId: Long,
+        parentEntryId: Long?,
+        iconEmoji: String,
+        coverColorHex: String?,
+        pageType: String,
+        status: String,
+        priority: String,
+        isPinned: Boolean
+    ) {
+        viewModelScope.launch {
+            repository.updateWorkspaceProperties(
+                id = entryId,
+                parentEntryId = parentEntryId,
+                iconEmoji = iconEmoji,
+                coverColorHex = coverColorHex,
+                pageType = pageType,
+                status = status,
+                priority = priority,
+                isPinned = isPinned
+            )
+        }
+    }
+
+    fun toggleChecklistLine(entryId: Long, lineIndex: Int) {
+        viewModelScope.launch {
+            repository.toggleChecklistLine(entryId, lineIndex)
+        }
+    }
+
+    fun createSubPage(
+        parentId: Long,
+        title: String,
+        iconEmoji: String = "📄",
+        pageType: String = "PAGE",
+        status: String = "Inbox",
+        onCreated: (Long) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val id = repository.createSubPage(parentId, title, "", iconEmoji, pageType, status)
+            refreshGraph()
+            onCreated(id)
         }
     }
 
@@ -653,16 +731,31 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         attachedImages: List<Uri> = emptyList(),
         pages: List<JournalPage> = emptyList(),
         audioRecords: List<AudioRecordItem> = emptyList(),
+        parentEntryId: Long? = null,
+        iconEmoji: String = "📄",
+        coverColorHex: String? = null,
+        pageType: String = "PAGE",
+        status: String = "Inbox",
+        priority: String = "Normal",
+        isPinned: Boolean = false,
         onComplete: (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
+            val safeParent = if (id > 0L && parentEntryId == id) null else parentEntryId
             val entry = JournalEntry(
                 id = id,
                 title = title.trim(),
                 body = body.trim(),
                 journalDate = journalDate,
                 mood = mood,
-                location = location?.trim()?.ifBlank { null }
+                location = location?.trim()?.ifBlank { null },
+                parentEntryId = safeParent,
+                iconEmoji = iconEmoji.ifBlank { "📄" },
+                coverColorHex = coverColorHex,
+                pageType = pageType,
+                status = status,
+                priority = priority,
+                isPinned = isPinned
             )
             val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages, audioRecords, attachedImages)
             refreshGraph()

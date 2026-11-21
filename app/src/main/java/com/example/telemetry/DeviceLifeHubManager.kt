@@ -69,30 +69,38 @@ class DeviceLifeHubManager(
     )
     val telemetry: StateFlow<LifeHubTelemetry> = _telemetry.asStateFlow()
 
+    @Volatile
+    private var isStepRegistered = false
+
     init {
         // Restore the persisted day-baseline so a process restart does not
-        // reset the day's steps back to 0 (the old in-memory baseline died
-        // with the process).
+        // reset the day's steps back to 0.
         val cached = cachedStepsToday(context)
         if (cached > 0) {
             _telemetry.value = _telemetry.value.copy(todaySteps = cached)
         }
-        registerStepSensor()
         refreshTelemetry()
     }
 
     fun registerStepSensor() {
+        if (isStepRegistered) return
         if (stepSensor != null && hasActivityRecognitionPermission()) {
             try {
-                sensorManager?.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI)
+                // SENSOR_DELAY_NORMAL is more than enough for a step counter and avoids high wake frequency.
+                val ok = sensorManager?.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL) ?: false
+                isStepRegistered = ok
             } catch (_: Exception) {}
         }
     }
 
     fun unregisterStepSensor() {
+        if (!isStepRegistered) return
         try {
             sensorManager?.unregisterListener(this)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            isStepRegistered = false
+        }
     }
 
     fun hasActivityRecognitionPermission(): Boolean {

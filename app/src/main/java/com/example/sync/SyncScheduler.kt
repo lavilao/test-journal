@@ -28,20 +28,20 @@ object SyncScheduler {
     const val ACTION_TICK = "com.example.SYNC_TICK"
     const val ACTION_REMINDER_DUE = "com.example.REMINDER_DUE"
 
-    private const val TICK_PERIOD_MS = 5 * 60_000L
+    private const val TICK_PERIOD_MS = 30 * 60_000L
     private const val TICK_REQUEST_CODE = 4001
     private const val REMINDER_REQUEST_CODE = 4002
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Starts / restarts the 5-minute sync cadence (idempotent). */
+    /** Starts / restarts the 30-minute passive sync cadence (idempotent). */
     fun schedule(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val pi = tickPendingIntent(context)
         am.cancel(pi)
         am.setInexactRepeating(
             AlarmManager.ELAPSED_REALTIME,
-            SystemClock.elapsedRealtime() + 45_000L,
+            SystemClock.elapsedRealtime() + 5 * 60_000L,
             TICK_PERIOD_MS,
             pi
         )

@@ -1,11 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,89 +41,57 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.isSystemInDarkTheme
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
- * Aurora animated background: three soft gradient blobs drifting slowly in an
- * 18-second loop, like the Now brief "liquid glass" home. Cheap to render
- * (three radial-gradient circles per frame, GPU-composited) so it stays smooth
- * even on low-end hardware.
+ * Calm static Aurora gradient mesh (zero continuous frame ticks -> 0% idle GPU).
  */
 @Composable
 fun AuroraBackground(modifier: Modifier = Modifier) {
     val dark = isSystemInDarkTheme()
 
-    val baseColor = if (dark) Color(0xFF040D18) else Color(0xFFF8F4F0)
-
-    val blob1 = if (dark) listOf(Color(0x993B82F6), Color(0x44A78BFA)) else listOf(Color(0xAAFFBBA0), Color(0x55FF9580))
-    val blob2 = if (dark) listOf(Color(0x888B5CF6), Color(0x448B5CF6)) else listOf(Color(0x88C4B5FC), Color(0x44A78BFA))
-    val blob3 = if (dark) listOf(Color(0x6614B8AA), Color(0x3314B8AA)) else listOf(Color(0x7786EFCA), Color(0x3334D399))
-
-    val transition = rememberInfiniteTransition(label = "aurora")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 18_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "auroraPhase"
-    )
+    val baseColor = if (dark) Color(0xFF111214) else Color(0xFFF7F5F2)
+    val blob1 = if (dark) listOf(Color(0x334B83F2), Color.Transparent) else listOf(Color(0x44F7C5A8), Color.Transparent)
+    val blob2 = if (dark) listOf(Color(0x288B5CF6), Color.Transparent) else listOf(Color(0x38D6C8F8), Color.Transparent)
+    val blob3 = if (dark) listOf(Color(0x2214B8AA), Color.Transparent) else listOf(Color(0x28BCE8D5), Color.Transparent)
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
         drawRect(baseColor)
 
-        val t = phase * 2f * Math.PI.toFloat()
-
-        // Top-left warm blob
-        val c1 = Offset(
-            x = w * (0.20f + 0.08f * sin(t)),
-            y = h * (0.16f + 0.06f * cos(t * 0.8f))
-        )
+        val c1 = Offset(x = w * 0.18f, y = h * 0.14f)
         drawCircle(
             brush = Brush.radialGradient(colors = blob1, center = c1, radius = w * 0.75f),
             radius = w * 0.75f,
             center = c1
         )
 
-        // Right lavender blob
-        val c2 = Offset(
-            x = w * (0.86f + 0.07f * cos(t * 0.9f)),
-            y = h * (0.38f + 0.08f * sin(t))
-        )
+        val c2 = Offset(x = w * 0.86f, y = h * 0.36f)
         drawCircle(
             brush = Brush.radialGradient(colors = blob2, center = c2, radius = w * 0.65f),
             radius = w * 0.65f,
             center = c2
         )
 
-        // Bottom mint blob
-        val c3 = Offset(
-            x = w * (0.42f + 0.10f * sin(t * 1.1f)),
-            y = h * (0.92f + 0.05f * cos(t * 0.7f))
-        )
+        val c3 = Offset(x = w * 0.44f, y = h * 0.90f)
         drawCircle(
-            brush = Brush.radialGradient(colors = blob3, center = c3, radius = w * 0.8f),
-            radius = w * 0.8f,
+            brush = Brush.radialGradient(colors = blob3, center = c3, radius = w * 0.80f),
+            radius = w * 0.80f,
             center = c3
         )
     }
 }
 
 /**
- * Frosted-glass card in the Now brief style: 20 dp radius, translucent
- * surface, subtle 1 dp border, generous inner padding.
+ * Clean editorial surface card with subtle hairline border (Notion / NowBrief hybrid).
  */
 @Composable
 fun LiquidGlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 20.dp,
+    cornerRadius: Dp = 16.dp,
     contentPadding: Dp = 16.dp,
-    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
-    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
+    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
     onClick: (() -> Unit)? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
@@ -141,8 +103,8 @@ fun LiquidGlassCard(
     Surface(
         color = containerColor,
         shape = RoundedCornerShape(cornerRadius),
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
-        tonalElevation = 1.dp,
+        border = androidx.compose.foundation.BorderStroke(0.75.dp, borderColor),
+        tonalElevation = 0.dp,
         modifier = base
     ) {
         Column(
@@ -153,7 +115,7 @@ fun LiquidGlassCard(
 }
 
 /**
- * Unified frosted Liquid Glass top bar for secondary and sub-screens.
+ * Unified editorial top bar for secondary and sub-screens.
  */
 @Composable
 fun GlassTopBar(
@@ -165,10 +127,10 @@ fun GlassTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
         ),
         modifier = modifier.fillMaxWidth()
     ) {
@@ -380,10 +342,10 @@ fun GlassBottomBar(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        shape = RoundedCornerShape(30.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.38f)),
-        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        border = androidx.compose.foundation.BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.44f)),
+        shadowElevation = 4.dp,
         modifier = modifier
     ) {
         Row(

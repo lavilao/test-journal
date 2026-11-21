@@ -292,6 +292,95 @@ class JournalRepository(
         }
     }
 
+    fun getChildPages(parentId: Long): Flow<List<EntryWithRelations>> =
+        dao.getChildEntriesWithRelations(parentId)
+
+    suspend fun toggleEntryPinned(id: Long, pinned: Boolean) = withContext(Dispatchers.IO) {
+        dao.setEntryPinned(id, pinned, System.currentTimeMillis())
+    }
+
+    suspend fun updateEntryStatus(id: Long, status: String) = withContext(Dispatchers.IO) {
+        dao.updateEntryStatus(id, status, System.currentTimeMillis())
+    }
+
+    suspend fun updateWorkspaceProperties(
+        id: Long,
+        parentEntryId: Long?,
+        iconEmoji: String,
+        coverColorHex: String?,
+        pageType: String,
+        status: String,
+        priority: String,
+        isPinned: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val safeParent = if (parentEntryId == id) null else parentEntryId
+        dao.updateWorkspaceProperties(
+            id = id,
+            parentEntryId = safeParent,
+            iconEmoji = iconEmoji.ifBlank { "📄" },
+            coverColorHex = coverColorHex,
+            pageType = pageType,
+            status = status,
+            priority = priority,
+            isPinned = isPinned,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    suspend fun createSubPage(
+        parentId: Long,
+        title: String,
+        body: String = "",
+        iconEmoji: String = "📄",
+        pageType: String = "PAGE",
+        status: String = "Inbox"
+    ): Long = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val entry = JournalEntry(
+            title = title.trim().ifBlank { "Nueva sub-página" },
+            body = body,
+            createdAt = now,
+            updatedAt = now,
+            journalDate = now,
+            parentEntryId = parentId,
+            iconEmoji = iconEmoji.ifBlank { "📄" },
+            pageType = pageType,
+            status = status
+        )
+        saveEntry(entry)
+    }
+
+    suspend fun getBreadcrumbs(entryId: Long): List<JournalEntry> = withContext(Dispatchers.IO) {
+        val chain = mutableListOf<JournalEntry>()
+        val visited = mutableSetOf<Long>()
+        var current = dao.getEntryById(entryId)
+        while (current != null && visited.add(current.id)) {
+            chain.add(current)
+            val pId = current.parentEntryId ?: break
+            current = dao.getEntryById(pId)
+        }
+        chain.reversed()
+    }
+
+    suspend fun toggleChecklistLine(entryId: Long, lineIndex: Int): Boolean = withContext(Dispatchers.IO) {
+        val entry = dao.getEntryById(entryId) ?: return@withContext false
+        val lines = entry.body.lines().toMutableList()
+        if (lineIndex !in lines.indices) return@withContext false
+        val line = lines[lineIndex]
+        val unchecked = Regex("^(\\s*[-*+]\\s+)\\[ \\](.*)$")
+        val checked = Regex("^(\\s*[-*+]\\s+)\\[[xX]\\](.*)$")
+        val updated = when {
+            unchecked.matches(line) -> unchecked.replace(line, "$1[x]$2")
+            checked.matches(line) -> checked.replace(line, "$1[ ]$2")
+            else -> return@withContext false
+        }
+        lines[lineIndex] = updated
+        val newBody = lines.joinToString("\n")
+        val wc = newBody.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
+        dao.updateEntryBodyOnly(entryId, newBody, wc, System.currentTimeMillis())
+        true
+    }
+
     suspend fun addPhotoToEntry(entryId: Long, uri: Uri, caption: String = ""): Long = withContext(Dispatchers.IO) {
         val persistentUriString = persistImageToLocalStorage(uri)
         val persistentUri = Uri.parse(persistentUriString)
@@ -1205,49 +1294,105 @@ class JournalRepository(
         val now = System.currentTimeMillis()
         val dayMillis = 24 * 60 * 60 * 1000L
 
-        val seed1 = JournalEntry(
-            title = "Morning Coffee & MindForger Architecture",
-            body = "Met with Sarah at Blue Bottle Cafe to discuss on-device personal knowledge management. We talked about MindForger's information retrieval algorithms and how to adapt TF-IDF and BM25 for offline Android notes without requiring any remote cloud servers. Beautiful crisp morning.",
-            journalDate = now - 3 * dayMillis,
-            location = "Blue Bottle Cafe",
-            mood = "Inspired",
-            language = "en"
-        )
-        val id1 = saveEntry(seed1, listOf("pkm", "offline", "coffee"))
+        val workspaceRoot = JournalEntry(
+            title = "Espacio de trabajo Mnemosyne",
+            body = """
+> 💡 Todo vive sin conexión en tu dispositivo: páginas anidadas, bloques Markdown, tareas interactivas y búsqueda semántica con IA local.
 
-        val seed2 = JournalEntry(
-            title = "Testing ML Kit On-Device Translation",
-            body = "Researched local translation using Google ML Kit. Sarah recommended testing Spanish and Japanese language packs. The beauty of this approach is zero latency and complete user privacy. Visited Stanford Lab in the afternoon.",
-            journalDate = now - 2 * dayMillis,
-            location = "Stanford Lab",
-            mood = "Focused",
-            language = "en"
-        )
-        val id2 = saveEntry(seed2, listOf("mlkit", "translation", "privacy"))
+### Cómo usar tu workspace
+- Usa `/` dentro del editor para insertar encabezados, listas de tareas, citas o sub-páginas.
+- Toca cualquier casilla `[ ]` en lectura para marcar tareas completadas al instante.
+- Conecta páginas escribiendo `[[Nombre de página]]` para poblar el Grafo de conocimiento.
 
-        val seed3 = JournalEntry(
-            title = "Everglades Expedition with Mike",
-            body = "Went hiking at Everglades with Mike. Saw three alligators sunbathing by the canal trail! Such an incredible landscape. Later we stopped by Starbucks for iced tea and reviewed our field notes.",
-            journalDate = now - 1 * dayMillis,
-            location = "Everglades",
-            mood = "Joyful",
-            language = "en"
-        )
-        val id3 = saveEntry(seed3, listOf("hiking", "nature", "everglades"))
-
-        val seed4 = JournalEntry(
-            title = "Knowledge Graphs & Semantic Memory",
-            body = "Reflecting on how personal memory works. When I talked with Sarah earlier this week at Blue Bottle Cafe, she mentioned that human recall relies on associative nodes rather than linear folders. Implementing associative semantic links in Mnemosyne feels like giving memory digital form.",
+### Acciones rápidas de hoy
+- [x] Configurar espacio offline de notas
+- [ ] Probar el tablero Kanban por estado
+- [ ] Crear una sub-página de proyecto
+            """.trimIndent(),
             journalDate = now,
-            location = "Home Study",
-            mood = "Thoughtful",
-            language = "en"
+            mood = "✨ Wonder",
+            language = "es",
+            iconEmoji = "🚀",
+            coverColorHex = "#2E6F5E",
+            pageType = "PROJECT",
+            status = "En curso",
+            priority = "Alta",
+            isPinned = true
         )
-        val id4 = saveEntry(seed4, listOf("philosophy", "memory", "pkm"))
+        val rootId = saveEntry(workspaceRoot, listOf("workspace", "guia"))
 
-        processSemanticIntelligence(id1)
-        processSemanticIntelligence(id2)
-        processSemanticIntelligence(id3)
-        processSemanticIntelligence(id4)
+        val sub1 = JournalEntry(
+            title = "Arquitectura de IA local y privacidad",
+            body = """
+### Motores en el dispositivo
+- **Needle 3**: resúmenes diarios, clasificación de intenciones y embeddings sin servidor.
+- **Whistle**: dictado offline con detector de silencio VAD de bajo consumo.
+- **Mirage**: descripción automática de imágenes y extracción OCR.
+
+---
+
+> Ninguna nota ni coordenada abandona este teléfono.
+            """.trimIndent(),
+            journalDate = now - dayMillis,
+            mood = "🎯 Focused",
+            language = "es",
+            parentEntryId = rootId,
+            iconEmoji = "🧠",
+            coverColorHex = "#3A5A8C",
+            pageType = "DOC",
+            status = "Listo",
+            priority = "Normal",
+            isPinned = false
+        )
+        val sub1Id = saveEntry(sub1, listOf("ia-local", "privacidad"))
+
+        val sub2 = JournalEntry(
+            title = "Plan semanal y entregables",
+            body = """
+### Prioridades de la semana
+- [ ] Revisar [[Arquitectura de IA local y privacidad]]
+- [ ] Grabar nota de voz de seguimiento con equipo
+- [x] Organizar páginas fijadas en Inicio
+
+### Notas de reunión
+- Mantener la interfaz limpia y sin distracciones para escribir más rápido.
+            """.trimIndent(),
+            journalDate = now - 2 * dayMillis,
+            mood = "☕ Productive",
+            language = "es",
+            parentEntryId = rootId,
+            iconEmoji = "🗓️",
+            pageType = "MEETING",
+            status = "En curso",
+            priority = "Alta",
+            isPinned = true
+        )
+        val sub2Id = saveEntry(sub2, listOf("planificacion", "tareas"))
+
+        val ideaRoot = JournalEntry(
+            title = "Banco de ideas y lecturas",
+            body = """
+### Conceptos por explorar
+- Conectar notas diarias con entidades automáticas en el grafo.
+- Capturar pizarras o apuntes con Lens directo a una página.
+
+- [ ] Añadir primeras notas de lectura
+            """.trimIndent(),
+            journalDate = now - 3 * dayMillis,
+            mood = "💡 Inspired",
+            language = "es",
+            iconEmoji = "💡",
+            coverColorHex = "#8C5A3C",
+            pageType = "PAGE",
+            status = "Inbox",
+            priority = "Normal",
+            isPinned = false
+        )
+        val ideaId = saveEntry(ideaRoot, listOf("ideas", "lectura"))
+
+        processSemanticIntelligence(rootId)
+        processSemanticIntelligence(sub1Id)
+        processSemanticIntelligence(sub2Id)
+        processSemanticIntelligence(ideaId)
     }
 }

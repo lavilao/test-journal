@@ -44,7 +44,7 @@ import com.example.habit.HabitEvent
         EntryEmbedding::class,
         CustomTool::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -232,6 +232,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `parentEntryId` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `iconEmoji` TEXT NOT NULL DEFAULT '📄'")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `coverColorHex` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `pageType` TEXT NOT NULL DEFAULT 'PAGE'")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'Inbox'")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `priority` TEXT NOT NULL DEFAULT 'Normal'")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `dueDate` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `isArchived` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `journal_entries` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_journal_entries_parentEntryId` ON `journal_entries` (`parentEntryId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -239,7 +255,15 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mnemosyne_journal.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
+                    )
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

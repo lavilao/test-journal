@@ -12,6 +12,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -37,6 +40,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -56,22 +60,28 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material.icons.filled.WbCloudy
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -112,6 +122,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import coil.compose.AsyncImage
 import com.example.contacts.ContactsHelper
 import com.example.data.DeviceCalendarEvent
@@ -131,8 +144,6 @@ import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.NowBriefNewsBlue
-import com.example.ui.theme.NowBriefPrimaryDark
-import com.example.ui.theme.NowBriefPrimaryLight
 import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
@@ -149,13 +160,20 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+private enum class WorkspaceTab {
+    PAGINAS,
+    TABLERO,
+    NOTICIAS
+}
+
+private val WORKSPACE_STATUS_FILTERS = listOf("Todas", "Inbox", "En curso", "Listo", "Archivado")
+private val KANBAN_LANES = listOf("Inbox", "En curso", "Listo")
+
 /**
- * Unified NowBrief home: Samsung "Now brief" liquid-glass visual system
- * (animated aurora / dynamic sun background, frosted glass cards, vitals rings,
- * living clock & weather hero) seamlessly enriched with Google universal search
- * (semantic notes via Needle, MediaStore files, Contacts), pull-to-refresh,
- * contextual device alerts (next alarm, low battery coach), and a cohesive
- * Noticias / Memorias feed switcher with rich discover cards & multi-select.
+ * Calm, matte Notion-caliber Workspace Home + collapsible NowBrief.
+ * Zero idle animation loops, crisp typography & hairline contrast, nested sub-page
+ * tree awareness, Fijadas quick-jump strip, List + Kanban board views, and
+ * full semantic/device universal search.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -169,6 +187,7 @@ fun NowBriefHomeScreen(
     onOpenNews: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
     val entries by viewModel.entries.collectAsState()
@@ -193,14 +212,16 @@ fun NowBriefHomeScreen(
     }
 
     var homeSearchQuery by rememberSaveable { mutableStateOf("") }
-    var selectedFeedView by rememberSaveable { mutableStateOf(HomeFeedView.NOTICIAS) }
+    var selectedWorkspaceTab by rememberSaveable { mutableStateOf(WorkspaceTab.PAGINAS) }
+    var selectedStatusFilter by rememberSaveable { mutableStateOf("Todas") }
+    var briefExpanded by rememberSaveable { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
 
     var showCityPicker by remember { mutableStateOf(false) }
     var showPhotoChoiceDialog by remember { mutableStateOf(false) }
     var readerArticle by remember { mutableStateOf<RssArticle?>(null) }
 
-    // Multi-select memories (long-press to enter, tap to toggle, batch delete)
+    // Multi-select pages (long-press to enter, tap to toggle, batch delete)
     var selectionMode by remember { mutableStateOf(false) }
     var selectedMemoryIds by remember { mutableStateOf(setOf<Long>()) }
 
@@ -213,12 +234,12 @@ fun NowBriefHomeScreen(
         val ids = selectedMemoryIds.toList()
         if (ids.isNotEmpty()) {
             ids.forEach { viewModel.deleteEntry(it) }
-            Toast.makeText(context, "${ids.size} memorias eliminadas", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "${ids.size} páginas eliminadas", Toast.LENGTH_SHORT).show()
             exitSelection()
         }
     }
 
-    // Runtime permission launchers (contextual to cards / search)
+    // Runtime permission launchers (contextual to Brief / search)
     val activityPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { viewModel.refreshTelemetry() }
@@ -244,7 +265,7 @@ fun NowBriefHomeScreen(
         if (granted && homeSearchQuery.isNotBlank()) viewModel.searchDevice(homeSearchQuery)
     }
 
-    // Gallery Picker & Camera Capture launchers for the Search Bar camera button
+    // Gallery Picker & Camera Capture launchers for Search bar camera icon
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -254,6 +275,7 @@ fun NowBriefHomeScreen(
                 id = 0L,
                 title = "Foto de Galería",
                 body = "Recuerdo visual guardado en el dispositivo.",
+                iconEmoji = "🖼️",
                 attachedImageUri = Uri.parse(persistentUri),
                 onComplete = { newId -> onNavigateToDetail(newId) }
             )
@@ -275,10 +297,11 @@ fun NowBriefHomeScreen(
                     id = 0L,
                     title = "Foto de Cámara",
                     body = "Foto capturada con la cámara y guardada en el dispositivo.",
+                    iconEmoji = "📷",
                     attachedImageUri = localUri,
                     onComplete = { newId -> onNavigateToDetail(newId) }
                 )
-                Toast.makeText(context, "Foto guardada en tus recuerdos", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Foto guardada en tu espacio", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Error al guardar foto: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -291,23 +314,24 @@ fun NowBriefHomeScreen(
         viewModel.onSemanticSearchChanged(homeSearchQuery)
     }
 
-    // Living clock, refreshed every 30 seconds
+    // Lifecycle-gated clock ticker: 0 work while paused/backgrounded
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            nowMillis = System.currentTimeMillis()
-            delay(30_000)
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
+                delay(30_000L)
+            }
         }
     }
 
-    // System alarm & low battery signals from AtAGlanceBar (unique, not duplicated elsewhere)
     val nextAlarmText = remember(nowMillis) {
         try {
             val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             val trigger = am?.nextAlarmClock?.triggerTime
             if (trigger != null && trigger > System.currentTimeMillis()) {
                 val f = SimpleDateFormat("EEE d · HH:mm", Locale.getDefault())
-                "Alarma: ${f.format(Date(trigger))}"
+                "Alarma ${f.format(Date(trigger))}"
             } else null
         } catch (_: Exception) {
             null
@@ -317,17 +341,17 @@ fun NowBriefHomeScreen(
         try {
             val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
             val capacity = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-            if (capacity in 1..20) "Batería baja: $capacity%" else null
+            if (capacity in 1..20) "Batería $capacity%" else null
         } catch (_: Exception) {
             null
         }
     }
 
     val timeFormat = remember { SimpleDateFormat("H:mm", Locale.getDefault()) }
-    val dateFormat = remember { SimpleDateFormat("EEEE d 'de' MMMM", Locale.getDefault()) }
+    val dateFormat = remember { SimpleDateFormat("EEEE d MMM", Locale.getDefault()) }
 
     val isDark = isSystemInDarkTheme()
-    val dynamicBgOn = remember { SunCycle.isDynamicAtmosphereEnabled(context) }
+    val dynamicBgOn = remember(weather.weatherCode) { SunCycle.isDynamicAtmosphereEnabled(context) }
     val skyCoords = remember(nowMillis) { SunCycle.lastCoordinates(context) }
     val skyDaylight = remember(nowMillis, skyCoords) {
         SunCycle.daylightFor(nowMillis, skyCoords?.first, skyCoords?.second)
@@ -340,13 +364,13 @@ fun NowBriefHomeScreen(
         isDark
     }
     val heroColor = when {
-        !dynamicBgOn -> if (isDark) NowBriefPrimaryDark else Color(0xFF1F2A38)
+        !dynamicBgOn -> MaterialTheme.colorScheme.onSurface
         useLightHeaderText -> Color.White
         else -> Color(0xFF132033)
     }
     val headerSecondaryColor = when {
         !dynamicBgOn -> MaterialTheme.colorScheme.onSurfaceVariant
-        useLightHeaderText -> Color.White.copy(alpha = 0.90f)
+        useLightHeaderText -> Color.White.copy(alpha = 0.88f)
         else -> Color(0xFF2D3E52)
     }
     val headerAccentColor = when {
@@ -365,8 +389,25 @@ fun NowBriefHomeScreen(
         }
     }
 
-    val searchResults = semanticSearch.hits
+    // Derived Workspace hierarchy helpers (memoized on entries)
+    val entriesById = remember(entries) { entries.associateBy { it.entry.id } }
+    val childCountByParent = remember(entries) {
+        entries.mapNotNull { it.entry.parentEntryId }
+            .groupingBy { it }
+            .eachCount()
+    }
+    val pinnedEntries = remember(entries) {
+        entries.filter { it.entry.isPinned && !it.entry.isArchived }
+    }
+    val filteredWorkspaceEntries = remember(entries, selectedStatusFilter) {
+        when (selectedStatusFilter) {
+            "Todas" -> entries.filter { !it.entry.isArchived && it.entry.status != "Archivado" }
+            "Archivado" -> entries.filter { it.entry.isArchived || it.entry.status == "Archivado" }
+            else -> entries.filter { !it.entry.isArchived && it.entry.status.equals(selectedStatusFilter, ignoreCase = true) }
+        }
+    }
 
+    val searchResults = semanticSearch.hits
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
@@ -382,7 +423,7 @@ fun NowBriefHomeScreen(
                     isRefreshing = true
                     viewModel.refreshRssFeeds()
                     viewModel.syncNow()
-                    delay(500)
+                    delay(450)
                     isRefreshing = false
                 }
             },
@@ -395,12 +436,12 @@ fun NowBriefHomeScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = if (statusTop > 0.dp) 8.dp else 12.dp,
+                    top = if (statusTop > 0.dp) 6.dp else 10.dp,
                     bottom = navBottom + 104.dp
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Unified Living Hero Header: Clock + Editorial Greeting + Date + City + Quick Actions
+                // 1. Calm Notion Workspace Header
                 item(key = "header") {
                     Row(
                         modifier = Modifier
@@ -412,25 +453,24 @@ fun NowBriefHomeScreen(
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
                                     text = timeFormat.format(Date(nowMillis)),
-                                    style = MaterialTheme.typography.displayLarge.tabular.copy(
+                                    style = MaterialTheme.typography.titleLarge.tabular.copy(
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 30.sp,
-                                        lineHeight = 34.sp
+                                        fontSize = 24.sp
                                     ),
                                     color = heroColor
                                 )
                                 if (homeSearchQuery.isBlank()) {
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "¡$greeting!",
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 20.sp
+                                        text = "· $greeting",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 17.sp
                                         ),
-                                        color = heroColor.copy(alpha = 0.92f),
+                                        color = heroColor.copy(alpha = 0.86f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(bottom = 2.dp)
+                                        modifier = Modifier.padding(bottom = 1.dp)
                                     )
                                 }
                             }
@@ -440,7 +480,6 @@ fun NowBriefHomeScreen(
                                     text = dateFormat.format(Date(nowMillis)).replaceFirstChar { it.uppercase() },
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Medium,
-                                        letterSpacing = 0.3.sp,
                                         fontSize = 12.sp
                                     ),
                                     color = headerSecondaryColor
@@ -497,7 +536,7 @@ fun NowBriefHomeScreen(
                                     Icons.Default.Refresh,
                                     contentDescription = "Actualizar",
                                     tint = headerSecondaryColor,
-                                    modifier = Modifier.size(21.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -512,13 +551,13 @@ fun NowBriefHomeScreen(
                                 Icons.Default.Settings,
                                 contentDescription = "Ajustes",
                                 tint = headerSecondaryColor,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
 
-                // Universal Liquid-Glass Pill Search Bar (from Google mode, styled in Samsung glass)
+                // 2. Matte Hairline Universal Search Pill
                 item(key = "universal_search_bar") {
                     GlassUniversalSearchBar(
                         query = homeSearchQuery,
@@ -567,11 +606,11 @@ fun NowBriefHomeScreen(
                     // Phone-wide search header + semantic AI indicator
                     item(key = "search_results_header") {
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                            border = BorderStroke(
+                                0.75.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -584,7 +623,7 @@ fun NowBriefHomeScreen(
                             ) {
                                 Text(
                                     text = "En este dispositivo",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -597,13 +636,13 @@ fun NowBriefHomeScreen(
                                         Spacer(modifier = Modifier.width(6.dp))
                                     }
                                     Surface(
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         color = (if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary)
-                                            .copy(alpha = 0.16f)
+                                            .copy(alpha = 0.14f)
                                     ) {
                                         Text(
                                             text = if (semanticSearch.viaNeedle) "Semántica · IA local" else "Semántica",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                             color = if (semanticSearch.viaNeedle) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                         )
@@ -642,7 +681,7 @@ fun NowBriefHomeScreen(
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Crear nota con este título")
+                                        Text("Crear página con este título")
                                     }
                                 }
                             }
@@ -652,7 +691,7 @@ fun NowBriefHomeScreen(
                     if (searchResults.isNotEmpty()) {
                         item(key = "search_notes_label") {
                             GlassLabel(
-                                text = "📝 Tus notas y memorias (${searchResults.size})",
+                                text = "📄 Páginas y notas (${searchResults.size})",
                                 accent = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
@@ -663,8 +702,8 @@ fun NowBriefHomeScreen(
                             val tint = if (viaAi) NowBriefVitalsGreen else MaterialTheme.colorScheme.primary
                             LiquidGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 16.dp,
-                                contentPadding = 14.dp,
+                                cornerRadius = 14.dp,
+                                contentPadding = 12.dp,
                                 onClick = { onNavigateToDetail(hit.entryId) }
                             ) {
                                 Row(
@@ -673,18 +712,18 @@ fun NowBriefHomeScreen(
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
-                                        color = tint.copy(alpha = 0.14f),
-                                        modifier = Modifier.size(40.dp)
+                                        color = tint.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(38.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = hit.title,
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -734,8 +773,8 @@ fun NowBriefHomeScreen(
                             }
                             LiquidGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 16.dp,
-                                contentPadding = 14.dp,
+                                cornerRadius = 14.dp,
+                                contentPadding = 12.dp,
                                 onClick = { viewModel.openDeviceFile(deviceFile) }
                             ) {
                                 Row(
@@ -744,18 +783,18 @@ fun NowBriefHomeScreen(
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
-                                        color = tint.copy(alpha = 0.14f),
-                                        modifier = Modifier.size(40.dp)
+                                        color = tint.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(38.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = deviceFile.displayName,
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -783,8 +822,8 @@ fun NowBriefHomeScreen(
                         items(deviceContacts.take(8), key = { "contact_${it.id}_${it.displayName}" }) { contact ->
                             LiquidGlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 16.dp,
-                                contentPadding = 14.dp,
+                                cornerRadius = 14.dp,
+                                contentPadding = 12.dp,
                                 onClick = {
                                     contact.phoneNumber?.let { phone ->
                                         ContactsHelper.dialContact(context, phone)
@@ -797,8 +836,8 @@ fun NowBriefHomeScreen(
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = NowBriefVitalsGreen.copy(alpha = 0.14f),
-                                        modifier = Modifier.size(40.dp)
+                                        color = NowBriefVitalsGreen.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(38.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Text(
@@ -812,7 +851,7 @@ fun NowBriefHomeScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = contact.displayName,
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -830,341 +869,461 @@ fun NowBriefHomeScreen(
                         }
                     }
                 } else {
-                    // Weather Hero Card (Samsung base)
-                    item(key = "weather_hero") {
-                        WeatherHeroCard(
+                    // 3. Compact Expandable "Brief del día" Strip
+                    item(key = "compact_daily_brief") {
+                        CompactBriefStripCard(
+                            expanded = briefExpanded,
+                            onToggleExpand = { briefExpanded = !briefExpanded },
                             weather = weather,
-                            forecast = weatherForecast,
-                            selectedCity = selectedCity,
-                            onChooseCity = { showCityPicker = true },
-                            onOpenWeatherApp = { viewModel.openSystemWeatherApp() }
-                        )
-                    }
-
-                    // Vitals Glass Card: Steps / Screen Time / Memories
-                    item(key = "vitals_card") {
-                        VitalsGlassCard(
-                            steps = telemetry.todaySteps,
-                            stepGoal = telemetry.stepGoal,
-                            hasStepPermission = telemetry.hasActivityRecognitionPermission,
-                            hasStepSensor = telemetry.isStepSensorAvailable,
-                            screenTimeMinutes = telemetry.screenTimeMinutes,
-                            memoriesCount = entries.size,
-                            onRequestStepPermission = {
-                                activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
-                            }
-                        )
-                    }
-
-                    // Today Glass Card: Calendar + Next Reminder + Unique Glance Alerts (Next Alarm & Low Battery)
-                    item(key = "today_card") {
-                        TodayGlassCard(
                             nextEvent = calendarEvents.firstOrNull(),
-                            hasCalendarPermission = telemetry.hasCalendarPermission,
-                            reminderTitle = nextReminder?.title,
+                            nextReminderTitle = nextReminder?.title,
+                            writingStats = writingStats,
                             nextAlarmText = nextAlarmText,
                             lowBatteryText = lowBatteryText,
-                            onRequestCalendarPermission = {
-                                calendarPermissionLauncher.launch(
-                                    viewModel.calendarSyncManager.requiredCalendarPermissions()
+                            onThisDayCount = onThisDayMemories.size
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                WeatherHeroCard(
+                                    weather = weather,
+                                    forecast = weatherForecast,
+                                    selectedCity = selectedCity,
+                                    onChooseCity = { showCityPicker = true },
+                                    onOpenWeatherApp = { viewModel.openSystemWeatherApp() }
                                 )
-                            },
-                            onOpenCalendar = { viewModel.calendarSyncManager.openCalendarApp() },
-                            onOpenReminders = {
-                                viewModel.selectTab(MainNavTab.NOTIFICACIONES)
-                            }
-                        )
-                    }
 
-                    // On This Day ("Un día como hoy") Flashback Card
-                    if (onThisDayMemories.isNotEmpty()) {
-                        item(key = "on_this_day_card") {
-                            OnThisDayGlassCard(
-                                memory = onThisDayMemories.first(),
-                                totalCount = onThisDayMemories.size,
-                                onOpenMemory = { onNavigateToDetail(it.id) }
-                            )
+                                VitalsGlassCard(
+                                    steps = telemetry.todaySteps,
+                                    stepGoal = telemetry.stepGoal,
+                                    hasStepPermission = telemetry.hasActivityRecognitionPermission,
+                                    hasStepSensor = telemetry.isStepSensorAvailable,
+                                    screenTimeMinutes = telemetry.screenTimeMinutes,
+                                    memoriesCount = entries.size,
+                                    onRequestStepPermission = {
+                                        activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                                    }
+                                )
+
+                                TodayGlassCard(
+                                    nextEvent = calendarEvents.firstOrNull(),
+                                    hasCalendarPermission = telemetry.hasCalendarPermission,
+                                    reminderTitle = nextReminder?.title,
+                                    nextAlarmText = nextAlarmText,
+                                    lowBatteryText = lowBatteryText,
+                                    onRequestCalendarPermission = {
+                                        calendarPermissionLauncher.launch(
+                                            viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                        )
+                                    },
+                                    onOpenCalendar = { viewModel.calendarSyncManager.openCalendarApp() },
+                                    onOpenReminders = { viewModel.selectTab(MainNavTab.NOTIFICACIONES) }
+                                )
+
+                                if (onThisDayMemories.isNotEmpty()) {
+                                    OnThisDayGlassCard(
+                                        memory = onThisDayMemories.first(),
+                                        totalCount = onThisDayMemories.size,
+                                        onOpenMemory = { onNavigateToDetail(it.id) }
+                                    )
+                                }
+
+                                HabitGlassCard(
+                                    digest = habitDigest,
+                                    writingStats = writingStats,
+                                    upcomingEventsCount = calendarEvents.size,
+                                    context = context,
+                                    onOpenRoutines = onOpenRoutines
+                                )
+                            }
                         }
                     }
 
-                    // Habit Engine + Proactive Daily Brief Glass Card
-                    item(key = "habit_card") {
-                        HabitGlassCard(
-                            digest = habitDigest,
-                            writingStats = writingStats,
-                            upcomingEventsCount = calendarEvents.size,
-                            context = context,
-                            onOpenRoutines = onOpenRoutines
-                        )
+                    // 4. Fijadas (Pinned Workspace Pages)
+                    if (pinnedEntries.isNotEmpty()) {
+                        item(key = "pinned_pages_section") {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "FIJADAS",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(pinnedEntries, key = { "pin_${it.entry.id}" }) { rel ->
+                                        PinnedWorkspaceCard(
+                                            entry = rel.entry,
+                                            childCount = childCountByParent[rel.entry.id] ?: 0,
+                                            onClick = { onNavigateToDetail(rel.entry.id) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    // Unified Feed Switcher: Noticias vs Memorias
-                    item(key = "feed_switcher") {
+                    // 5. Workspace Switcher: Páginas | Tablero | Noticias
+                    item(key = "workspace_switcher") {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 4.dp),
+                                .padding(top = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 FilterChip(
-                                    selected = selectedFeedView == HomeFeedView.NOTICIAS,
-                                    onClick = {
-                                        exitSelection()
-                                        selectedFeedView = HomeFeedView.NOTICIAS
-                                    },
+                                    selected = selectedWorkspaceTab == WorkspaceTab.PAGINAS,
+                                    onClick = { selectedWorkspaceTab = WorkspaceTab.PAGINAS },
                                     leadingIcon = {
-                                        Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(15.dp))
                                     },
-                                    label = { Text("Noticias") },
+                                    label = { Text("Páginas (${entries.size})", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                                        selectedLabelColor = NowBriefNewsBlue,
-                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                                         labelColor = MaterialTheme.colorScheme.onSurface
                                     ),
                                     border = FilterChipDefaults.filterChipBorder(
                                         enabled = true,
-                                        selected = selectedFeedView == HomeFeedView.NOTICIAS,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
-                                        selectedBorderColor = NowBriefNewsBlue.copy(alpha = 0.65f)
+                                        selected = selectedWorkspaceTab == WorkspaceTab.PAGINAS,
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.42f),
+                                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
                                     )
                                 )
 
                                 FilterChip(
-                                    selected = selectedFeedView == HomeFeedView.MEMORIAS,
-                                    onClick = { selectedFeedView = HomeFeedView.MEMORIAS },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    selected = selectedWorkspaceTab == WorkspaceTab.TABLERO,
+                                    onClick = {
+                                        exitSelection()
+                                        selectedWorkspaceTab = WorkspaceTab.TABLERO
                                     },
-                                    label = { Text("Memorias (${entries.size})") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Dashboard, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    },
+                                    label = { Text("Tablero", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                                         selectedLabelColor = MaterialTheme.colorScheme.primary,
-                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                                         labelColor = MaterialTheme.colorScheme.onSurface
                                     ),
                                     border = FilterChipDefaults.filterChipBorder(
                                         enabled = true,
-                                        selected = selectedFeedView == HomeFeedView.MEMORIAS,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.36f),
+                                        selected = selectedWorkspaceTab == WorkspaceTab.TABLERO,
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.42f),
                                         selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                                    )
+                                )
+
+                                FilterChip(
+                                    selected = selectedWorkspaceTab == WorkspaceTab.NOTICIAS,
+                                    onClick = {
+                                        exitSelection()
+                                        selectedWorkspaceTab = WorkspaceTab.NOTICIAS
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    },
+                                    label = { Text("Noticias", fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NowBriefNewsBlue.copy(alpha = 0.14f),
+                                        selectedLabelColor = NowBriefNewsBlue,
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                                        labelColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = selectedWorkspaceTab == WorkspaceTab.NOTICIAS,
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.42f),
+                                        selectedBorderColor = NowBriefNewsBlue.copy(alpha = 0.65f)
                                     )
                                 )
                             }
 
-                            if (selectedFeedView == HomeFeedView.NOTICIAS) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        0.8.dp,
-                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
-                                    )
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            if (selectedWorkspaceTab == WorkspaceTab.NOTICIAS) {
+                                TextButton(
+                                    onClick = onOpenNews,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(36.dp)
                                 ) {
-                                    TextButton(
-                                        onClick = onOpenNews,
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(34.dp)
-                                    ) {
-                                        Text(
-                                            text = "Ver todas ›",
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = NowBriefNewsBlue
-                                        )
-                                    }
+                                    Text(
+                                        text = "Todas ›",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = NowBriefNewsBlue
+                                    )
                                 }
                             } else {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        0.8.dp,
-                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
-                                    )
+                                TextButton(
+                                    onClick = onNavigateToNewEntry,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(36.dp)
                                 ) {
-                                    TextButton(
-                                        onClick = onNavigateToNewEntry,
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(34.dp)
-                                    ) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Escribir",
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                        )
-                                    }
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "Nueva",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    )
                                 }
                             }
                         }
                     }
 
-                    if (selectedFeedView == HomeFeedView.NOTICIAS) {
-                        if (rssArticles.isEmpty()) {
-                            item(key = "news_empty") {
-                                LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
-                                    Text(
-                                        text = if (isRssLoading) {
-                                            "Descargando titulares de tus fuentes…"
-                                        } else {
-                                            "No hay artículos en caché todavía. Desliza hacia abajo para actualizar."
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                    // 6. Tab Content
+                    when (selectedWorkspaceTab) {
+                        WorkspaceTab.PAGINAS -> {
+                            item(key = "status_filter_row") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    WORKSPACE_STATUS_FILTERS.forEach { filter ->
+                                        val isActive = selectedStatusFilter == filter
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isActive) {
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            border = BorderStroke(
+                                                width = 0.75.dp,
+                                                color = if (isActive) {
+                                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)
+                                                } else {
+                                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+                                                }
+                                            ),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { selectedStatusFilter = filter }
+                                        ) {
+                                            Text(
+                                                text = filter,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium
+                                                ),
+                                                color = if (isActive) {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            val homeArticles = rssArticles.take(10)
-                            items(homeArticles, key = { "news_${it.id}" }) { article ->
-                                GlassDiscoverCard(
-                                    article = article,
-                                    onClick = { readerArticle = article },
-                                    onSaveToJournal = { savedArticle ->
-                                        viewModel.saveEntry(
-                                            id = 0L,
-                                            title = savedArticle.title,
-                                            body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
-                                            onComplete = {
-                                                Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                )
-                            }
-                            if (rssArticles.size > homeArticles.size) {
-                                item(key = "news_see_all_footer") {
+
+                            if (selectionMode) {
+                                item(key = "memories_selection_bar") {
                                     LiquidGlassCard(
                                         modifier = Modifier.fillMaxWidth(),
-                                        cornerRadius = 18.dp,
-                                        contentPadding = 14.dp,
-                                        onClick = onOpenNews
+                                        cornerRadius = 14.dp,
+                                        contentPadding = 10.dp,
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                                        borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.Center,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "Explorar las ${rssArticles.size} noticias",
-                                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                                color = NowBriefNewsBlue
+                                                text = "${selectedMemoryIds.size} seleccionadas",
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(start = 6.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                                contentDescription = null,
-                                                tint = NowBriefNewsBlue,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            TextButton(onClick = {
+                                                selectedMemoryIds =
+                                                    if (selectedMemoryIds.size == filteredWorkspaceEntries.size) emptySet()
+                                                    else filteredWorkspaceEntries.map { it.entry.id }.toSet()
+                                            }) {
+                                                Text(
+                                                    if (selectedMemoryIds.size == filteredWorkspaceEntries.size) "Ninguna" else "Todas",
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                            Button(
+                                                onClick = deleteSelected,
+                                                enabled = selectedMemoryIds.isNotEmpty(),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = MaterialTheme.colorScheme.error
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Borrar", fontSize = 12.sp)
+                                            }
+                                            IconButton(onClick = { exitSelection() }) {
+                                                Icon(Icons.Default.Close, contentDescription = "Salir de la selección")
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    } else {
-                        // Memorias tab: Multi-select action bar + rich glass cards
-                        if (selectionMode) {
-                            item(key = "memories_selection_bar") {
-                                LiquidGlassCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    cornerRadius = 18.dp,
-                                    contentPadding = 10.dp,
-                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-                                ) {
-                                    Row(
+
+                            if (filteredWorkspaceEntries.isEmpty()) {
+                                item(key = "memories_empty") {
+                                    LiquidGlassCard(
                                         modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        onClick = onNavigateToNewEntry
                                     ) {
-                                        Text(
-                                            text = "${selectedMemoryIds.size} seleccionadas",
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary,
+                                        Column(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .padding(start = 6.dp)
-                                        )
-                                        TextButton(onClick = {
-                                            selectedMemoryIds =
-                                                if (selectedMemoryIds.size == entries.size) emptySet()
-                                                else entries.map { it.entry.id }.toSet()
-                                        }) {
-                                            Text(
-                                                if (selectedMemoryIds.size == entries.size) "Ninguna" else "Todas",
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                        Button(
-                                            onClick = deleteSelected,
-                                            enabled = selectedMemoryIds.isNotEmpty(),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.error
-                                            )
+                                                .fillMaxWidth()
+                                                .padding(vertical = 14.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
                                         ) {
-                                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Borrar", fontSize = 12.sp)
-                                        }
-                                        IconButton(onClick = { exitSelection() }) {
-                                            Icon(Icons.Default.Close, contentDescription = "Salir de la selección")
+                                            Text(
+                                                text = if (selectedStatusFilter == "Todas") {
+                                                    "Tu espacio está vacío"
+                                                } else {
+                                                    "Sin páginas en \"$selectedStatusFilter\""
+                                                },
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = "Toca aquí para crear una nueva página con bloques, listas y enlaces.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
+                                }
+                            } else {
+                                items(filteredWorkspaceEntries, key = { "mem_${it.entry.id}" }) { entryWithRel ->
+                                    val parentTitle = entryWithRel.entry.parentEntryId?.let { pid ->
+                                        entriesById[pid]?.entry?.let { "${it.iconEmoji} ${it.title.ifBlank { "Sin título" }}" }
+                                    }
+                                    val subCount = childCountByParent[entryWithRel.entry.id] ?: 0
+                                    GlassMemoryCard(
+                                        entryWithRelations = entryWithRel,
+                                        parentLabel = parentTitle,
+                                        childCount = subCount,
+                                        selected = selectionMode && entryWithRel.entry.id in selectedMemoryIds,
+                                        onTogglePin = {
+                                            viewModel.toggleEntryPin(entryWithRel.entry.id, !entryWithRel.entry.isPinned)
+                                        },
+                                        onLongClick = {
+                                            selectionMode = true
+                                            selectedMemoryIds = setOf(entryWithRel.entry.id)
+                                        },
+                                        onClick = {
+                                            if (selectionMode) {
+                                                selectedMemoryIds =
+                                                    if (entryWithRel.entry.id in selectedMemoryIds) {
+                                                        selectedMemoryIds - entryWithRel.entry.id
+                                                    } else {
+                                                        selectedMemoryIds + entryWithRel.entry.id
+                                                    }
+                                                if (selectedMemoryIds.isEmpty()) selectionMode = false
+                                            } else {
+                                                onNavigateToDetail(entryWithRel.entry.id)
+                                            }
+                                        }
+                                    )
                                 }
                             }
                         }
 
-                        if (entries.isEmpty()) {
-                            item(key = "memories_empty") {
-                                LiquidGlassCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = onNavigateToNewEntry
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 12.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
+                        WorkspaceTab.TABLERO -> {
+                            item(key = "kanban_board") {
+                                KanbanWorkspaceBoard(
+                                    entries = entries.filter { !it.entry.isArchived && it.entry.status != "Archivado" },
+                                    childCountByParent = childCountByParent,
+                                    onOpenEntry = onNavigateToDetail,
+                                    onMoveNextStatus = { entry ->
+                                        val idx = KANBAN_LANES.indexOfFirst { it.equals(entry.status, ignoreCase = true) }
+                                        val next = KANBAN_LANES[((idx.coerceAtLeast(0)) + 1) % KANBAN_LANES.size]
+                                        viewModel.updateEntryStatus(entry.id, next)
+                                    },
+                                    onCreateNew = onNavigateToNewEntry
+                                )
+                            }
+                        }
+
+                        WorkspaceTab.NOTICIAS -> {
+                            if (rssArticles.isEmpty()) {
+                                item(key = "news_empty") {
+                                    LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
                                         Text(
-                                            text = "Aún no tienes memorias escritas",
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = "Tus reflexiones, notas de voz y fotos aparecerán aquí. Toca para escribir tu primera nota.",
+                                            text = if (isRssLoading) {
+                                                "Descargando titulares de tus fuentes…"
+                                            } else {
+                                                "No hay artículos en caché todavía. Desliza hacia abajo para actualizar."
+                                            },
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
-                            }
-                        } else {
-                            items(entries, key = { "mem_${it.entry.id}" }) { entryWithRel ->
-                                GlassMemoryCard(
-                                    entryWithRelations = entryWithRel,
-                                    selected = selectionMode && entryWithRel.entry.id in selectedMemoryIds,
-                                    onLongClick = {
-                                        selectionMode = true
-                                        selectedMemoryIds = setOf(entryWithRel.entry.id)
-                                    },
-                                    onClick = {
-                                        if (selectionMode) {
-                                            selectedMemoryIds =
-                                                if (entryWithRel.entry.id in selectedMemoryIds) {
-                                                    selectedMemoryIds - entryWithRel.entry.id
-                                                } else {
-                                                    selectedMemoryIds + entryWithRel.entry.id
+                            } else {
+                                val homeArticles = rssArticles.take(10)
+                                items(homeArticles, key = { "news_${it.id}" }) { article ->
+                                    GlassDiscoverCard(
+                                        article = article,
+                                        onClick = { readerArticle = article },
+                                        onSaveToJournal = { savedArticle ->
+                                            viewModel.saveEntry(
+                                                id = 0L,
+                                                title = savedArticle.title,
+                                                body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
+                                                iconEmoji = "📰",
+                                                onComplete = {
+                                                    Toast.makeText(context, "Artículo guardado en tu espacio", Toast.LENGTH_SHORT).show()
                                                 }
-                                            if (selectedMemoryIds.isEmpty()) selectionMode = false
-                                        } else {
-                                            onNavigateToDetail(entryWithRel.entry.id)
+                                            )
+                                        }
+                                    )
+                                }
+                                if (rssArticles.size > homeArticles.size) {
+                                    item(key = "news_see_all_footer") {
+                                        LiquidGlassCard(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            cornerRadius = 14.dp,
+                                            contentPadding = 14.dp,
+                                            onClick = onOpenNews
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Explorar las ${rssArticles.size} noticias",
+                                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                                    color = NowBriefNewsBlue
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                                    contentDescription = null,
+                                                    tint = NowBriefNewsBlue,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                     }
-                                )
+                                }
                             }
                         }
                     }
@@ -1172,11 +1331,11 @@ fun NowBriefHomeScreen(
             }
         }
 
-        // Clean single-action FAB for creating a new memory (Mic & Camera already live in Search Pill)
+        // Clean Notion-style FAB for creating a new page
         Surface(
-            shape = CircleShape,
+            shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.primary,
-            shadowElevation = 8.dp,
+            shadowElevation = 4.dp,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
@@ -1191,9 +1350,9 @@ fun NowBriefHomeScreen(
             ) {
                 Icon(
                     Icons.Default.Edit,
-                    contentDescription = "Nueva memoria",
+                    contentDescription = "Nueva página",
                     tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(23.dp)
                 )
             }
         }
@@ -1227,7 +1386,7 @@ fun NowBriefHomeScreen(
                     ) {
                         Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Foto rápida para una memoria", fontSize = 13.sp)
+                        Text("Foto rápida en página nueva", fontSize = 13.sp)
                     }
                     OutlinedButton(
                         onClick = {
@@ -1268,6 +1427,7 @@ fun NowBriefHomeScreen(
                     id = 0L,
                     title = savedArticle.title,
                     body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
+                    iconEmoji = "📰",
                     onComplete = { newId -> onNavigateToDetail(newId) }
                 )
             },
@@ -1280,7 +1440,315 @@ fun NowBriefHomeScreen(
     BackHandler(enabled = selectionMode) { exitSelection() }
 }
 
-/** Liquid-glass universal pill search bar with Mic (Assistant) and Camera (Lens / Photo). */
+@Composable
+private fun CompactBriefStripCard(
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    weather: RealWeatherData,
+    nextEvent: DeviceCalendarEvent?,
+    nextReminderTitle: String?,
+    writingStats: JournalInsights.WritingStats,
+    nextAlarmText: String?,
+    lowBatteryText: String?,
+    onThisDayCount: Int,
+    expandedContent: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+            border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onToggleExpand)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val weatherChip = weather.temperature?.let { "☀ $it°" } ?: "☀ Clima"
+                val contextChip = when {
+                    lowBatteryText != null -> lowBatteryText
+                    nextEvent != null -> "📅 ${nextEvent.title}"
+                    nextReminderTitle != null -> "⏰ $nextReminderTitle"
+                    nextAlarmText != null -> nextAlarmText
+                    writingStats.streakDays >= 2 -> "🔥 ${writingStats.streakDays}d racha"
+                    onThisDayCount > 0 -> "🕰 $onThisDayCount recuerdo"
+                    else -> "Brief del día"
+                }
+                Text(
+                    text = "$weatherChip  ·  $contextChip",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (expanded) "Ocultar" else "Brief",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Contraer brief" else "Expandir brief",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            expandedContent()
+        }
+    }
+}
+
+@Composable
+private fun PinnedWorkspaceCard(
+    entry: JournalEntry,
+    childCount: Int,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+        modifier = Modifier
+            .width(156.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(modifier = Modifier.padding(11.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = entry.iconEmoji.ifBlank { "📄" }, fontSize = 18.sp)
+                StatusDotPill(status = entry.status)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = entry.title.ifBlank { "Página sin título" },
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (childCount > 0) {
+                Text(
+                    text = "↳ $childCount sub-pág.",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusDotPill(status: String) {
+    val tint = when {
+        status.equals("Listo", ignoreCase = true) -> NowBriefVitalsGreen
+        status.equals("En curso", ignoreCase = true) -> NowBriefNewsBlue
+        status.equals("Archivado", ignoreCase = true) -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> AmberNode
+    }
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = tint.copy(alpha = 0.14f)
+    ) {
+        Text(
+            text = status,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = tint,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun KanbanWorkspaceBoard(
+    entries: List<EntryWithRelations>,
+    childCountByParent: Map<Long, Int>,
+    onOpenEntry: (Long) -> Unit,
+    onMoveNextStatus: (JournalEntry) -> Unit,
+    onCreateNew: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        KANBAN_LANES.forEach { lane ->
+            val laneEntries = entries.filter {
+                it.entry.status.equals(lane, ignoreCase = true) ||
+                    (lane == "Inbox" && it.entry.status !in KANBAN_LANES && !it.entry.isArchived)
+            }
+            val laneTint = when (lane) {
+                "Listo" -> NowBriefVitalsGreen
+                "En curso" -> NowBriefNewsBlue
+                else -> AmberNode
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.42f)),
+                modifier = Modifier.width(268.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = laneTint,
+                                modifier = Modifier.size(8.dp)
+                            ) {}
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = lane,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = "${laneEntries.size}",
+                            style = MaterialTheme.typography.labelSmall.tabular,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (laneEntries.isEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = onCreateNew)
+                        ) {
+                            Text(
+                                text = "+ Sin páginas en $lane",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else {
+                        laneEntries.forEach { rel ->
+                            val e = rel.entry
+                            val subCount = childCountByParent[e.id] ?: 0
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.36f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onOpenEntry(e.id) }
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(e.iconEmoji.ifBlank { "📄" }, fontSize = 15.sp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = e.title.ifBlank { "Sin título" },
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (e.priority == "Alta") {
+                                                Surface(
+                                                    shape = RoundedCornerShape(5.dp),
+                                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                                                ) {
+                                                    Text(
+                                                        text = "Alta",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (subCount > 0) {
+                                                Text(
+                                                    text = "↳$subCount",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            rel.tags.firstOrNull()?.let { tag ->
+                                                Text(
+                                                    text = "#${tag.name}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable { onMoveNextStatus(e) }
+                                        ) {
+                                            Text(
+                                                text = "Mover ›",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Crisp Notion matte universal search bar with Mic (Assistant) and Camera (Lens / Photo). */
 @Composable
 private fun GlassUniversalSearchBar(
     query: String,
@@ -1289,14 +1757,14 @@ private fun GlassUniversalSearchBar(
     onCameraClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-        shadowElevation = 2.dp,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+        shadowElevation = 0.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .clip(RoundedCornerShape(28.dp))
+            .height(52.dp)
+            .clip(RoundedCornerShape(14.dp))
             .testTag("google_pill_search_bar")
     ) {
         Row(
@@ -1309,7 +1777,7 @@ private fun GlassUniversalSearchBar(
                 imageVector = Icons.Default.Search,
                 contentDescription = "Buscar",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
 
@@ -1317,7 +1785,7 @@ private fun GlassUniversalSearchBar(
                 value = query,
                 onValueChange = onQueryChange,
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = MaterialTheme.colorScheme.onSurface
                 ),
                 cursorBrush = Brush.verticalGradient(
@@ -1330,7 +1798,7 @@ private fun GlassUniversalSearchBar(
                     ) {
                         if (query.isEmpty()) {
                             Text(
-                                text = "Buscar notas, archivos, contactos…",
+                                text = "Buscar páginas, archivos, contactos…",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -1346,64 +1814,47 @@ private fun GlassUniversalSearchBar(
             )
 
             if (query.isNotEmpty()) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
+                IconButton(
+                    onClick = { onQueryChange("") },
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable { onQueryChange("") }
+                        .size(40.dp)
                         .testTag("clear_search_btn")
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Limpiar búsqueda",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Limpiar búsqueda",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+            IconButton(
+                onClick = onVoiceClick,
                 modifier = Modifier
-                    .padding(start = 6.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onVoiceClick)
+                    .size(44.dp)
                     .testTag("google_voice_search_btn")
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Asistente de voz",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Asistente de voz",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
+            IconButton(
+                onClick = onCameraClick,
                 modifier = Modifier
-                    .padding(start = 6.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onCameraClick)
+                    .size(44.dp)
                     .testTag("google_lens_btn")
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.CameraAlt,
-                        contentDescription = "Lens / Cámara",
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = "Lens / Cámara",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -1417,11 +1868,11 @@ private fun GlassPermissionPill(
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = tint.copy(alpha = 0.14f),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(10.dp),
+        color = tint.copy(alpha = 0.12f),
+        border = BorderStroke(0.75.dp, tint.copy(alpha = 0.35f)),
         modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
     ) {
         Row(
@@ -1439,7 +1890,7 @@ private fun GlassPermissionPill(
     }
 }
 
-/** Rich RSS Discover card styled in Samsung liquid-glass aesthetics. */
+/** Rich RSS Discover card styled as a crisp matte editorial card. */
 @Composable
 private fun GlassDiscoverCard(
     article: RssArticle,
@@ -1449,12 +1900,12 @@ private fun GlassDiscoverCard(
     val context = LocalContext.current
 
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.42f)),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .testTag("discover_card_${article.id}")
     ) {
@@ -1466,35 +1917,20 @@ private fun GlassDiscoverCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
-                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .height(176.dp)
+                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(96.dp)
-                        .padding(14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.RssFeed,
-                        contentDescription = null,
-                        tint = NowBriefNewsBlue.copy(alpha = 0.35f),
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
             }
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
                 Text(
                     text = article.title,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         lineHeight = 22.sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
@@ -1502,7 +1938,7 @@ private fun GlassDiscoverCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1515,7 +1951,7 @@ private fun GlassDiscoverCard(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = NowBriefNewsBlue.copy(alpha = 0.16f),
+                            color = NowBriefNewsBlue.copy(alpha = 0.14f),
                             modifier = Modifier.size(20.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -1586,12 +2022,15 @@ private fun GlassDiscoverCard(
     }
 }
 
-/** Rich Memory card with tags, audio badge, photo thumbnail, and long-press multi-select. */
+/** Notion Page row card with emoji, hierarchy indicator, status badge, pin toggle & snippet. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GlassMemoryCard(
     entryWithRelations: EntryWithRelations,
+    parentLabel: String?,
+    childCount: Int,
     selected: Boolean,
+    onTogglePin: () -> Unit,
     onLongClick: () -> Unit,
     onClick: () -> Unit
 ) {
@@ -1603,131 +2042,178 @@ private fun GlassMemoryCard(
     }
 
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (selected) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
         },
         border = BorderStroke(
-            width = if (selected) 2.dp else 1.dp,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
+            width = if (selected) 1.5.dp else 0.75.dp,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.42f)
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(14.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .testTag("google_memory_card_${entry.id}")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.Top
         ) {
             if (selected) {
                 Checkbox(
                     checked = true,
                     onCheckedChange = { onClick() },
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            } else {
+                Text(
+                    text = entry.iconEmoji.ifBlank { "📄" },
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(top = 1.dp, end = 10.dp)
                 )
             }
 
             Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val tagText = entryWithRelations.tags.firstOrNull()?.name ?: "Nota"
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                if (parentLabel != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 2.dp)
                     ) {
-                        Text(
-                            text = "#$tagText",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        Icon(
+                            imageVector = Icons.Default.SubdirectoryArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(12.dp)
                         )
-                    }
-
-                    Text(
-                        text = "• $dateFormatted",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (hasAudio) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Audio",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = "Voz",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = parentLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = entry.title.ifBlank { "Nota sin título" },
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = entry.title.ifBlank { "Página sin título" },
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onTogglePin,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (entry.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                            contentDescription = if (entry.isPinned) "Desfijar" else "Fijar",
+                            tint = if (entry.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
 
                 val cleanSnippet = remember(entry.body) {
                     entry.body
                         .replace(Regex("#+\\s*"), "")
                         .replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1")
+                        .replace(Regex("-\\s+\\[[ xX]\\]\\s+"), "☑ ")
                         .replace(Regex("[*_~`]"), "")
                         .replace("\n", " ")
                         .trim()
                 }
                 if (cleanSnippet.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = cleanSnippet,
-                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    StatusDotPill(status = entry.status)
+
+                    if (entry.priority == "Alta") {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = "Alta",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    entryWithRelations.tags.firstOrNull()?.let { tag ->
+                        Text(
+                            text = "#${tag.name}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium, fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    if (childCount > 0) {
+                        Text(
+                            text = "↳ $childCount sub",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (hasAudio) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Audio",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+
+                    Text(
+                        text = dateFormatted,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             if (photoUri != null) {
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 AsyncImage(
                     model = photoUri,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(10.dp))
                 )
             }
         }
@@ -1752,34 +2238,34 @@ private fun WeatherHeroCard(
 
     LiquidGlassCard(
         modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 22.dp,
-        contentPadding = 16.dp
+        cornerRadius = 16.dp,
+        contentPadding = 14.dp
     ) {
-        GlassLabel(text = "🌤 Tu clima", accent = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(8.dp))
+        GlassLabel(text = "🌤 Clima", accent = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(6.dp))
         if (hasWeather) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(34.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "${weather.temperature}°",
-                    style = MaterialTheme.typography.displayLarge.tabular.copy(
+                    style = MaterialTheme.typography.displayMedium.tabular.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 46.sp,
-                        lineHeight = 50.sp
+                        fontSize = 38.sp,
+                        lineHeight = 42.sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
                         text = weather.conditionText ?: "",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     val freshness = weather.lastUpdated?.let {
@@ -1806,17 +2292,17 @@ private fun WeatherHeroCard(
                     imageVector = Icons.Default.Cloud,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(34.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = selectedCity.name,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Actualizando el clima… sin conexión se mostrará la última lectura",
+                        text = "Actualizando el clima…",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1830,7 +2316,7 @@ private fun WeatherHeroCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Elige tu ciudad para ver el clima",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -1842,14 +2328,13 @@ private fun WeatherHeroCard(
                 TextButton(onClick = onChooseCity) {
                     Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Elegir ciudad")
+                    Text("Elegir")
                 }
             }
         }
 
         if (hasWeather) {
             Spacer(modifier = Modifier.height(8.dp))
-
             if (forecast != null && forecast.buckets.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1864,7 +2349,7 @@ private fun WeatherHeroCard(
                             )
                             Text(
                                 text = "${bucket.temperature}°",
-                                style = MaterialTheme.typography.titleLarge.tabular.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
@@ -1876,10 +2361,9 @@ private fun WeatherHeroCard(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
             }
-
             if (forecast != null && forecast.daily.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1897,22 +2381,12 @@ private fun WeatherHeroCard(
                             )
                             Text(
                                 text = "${day.maxTemp}° ${day.minTemp}°",
-                                style = MaterialTheme.typography.bodyMedium.tabular.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.bodySmall.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = if (day.rainProbable) "🌧" else "",
-                                style = MaterialTheme.typography.labelSmall
                             )
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Pronóstico de la semana en caché — se actualiza con el ciclo del clima.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
             TextButton(
                 onClick = onOpenWeatherApp,
@@ -1920,7 +2394,7 @@ private fun WeatherHeroCard(
             ) {
                 Icon(Icons.Default.WbCloudy, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Abrir la app del clima", style = MaterialTheme.typography.labelMedium)
+                Text("Abrir app del clima", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -1937,8 +2411,8 @@ private fun VitalsGlassCard(
     onRequestStepPermission: () -> Unit
 ) {
     LiquidGlassCard(modifier = Modifier.fillMaxWidth()) {
-        GlassLabel(text = "💚 Tus vitales", accent = NowBriefVitalsGreen)
-        Spacer(modifier = Modifier.height(12.dp))
+        GlassLabel(text = "💚 Vitales", accent = NowBriefVitalsGreen)
+        Spacer(modifier = Modifier.height(10.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -1949,9 +2423,7 @@ private fun VitalsGlassCard(
                 label = "pasos",
                 color = NowBriefVitalsGreen
             )
-
             VerticalDividerSpacer()
-
             val screenText = screenTimeMinutes?.let {
                 val h = it / 60
                 val m = it % 60
@@ -1963,35 +2435,22 @@ private fun VitalsGlassCard(
                 label = "pantalla",
                 color = NowBriefNewsBlue
             )
-
             VerticalDividerSpacer()
-
             RingStat(
                 progress = (memoriesCount % 10) / 10f,
                 valueText = "$memoriesCount",
-                label = "memorias",
+                label = "páginas",
                 color = MaterialTheme.colorScheme.primary
             )
         }
 
         if (!hasStepPermission && hasStepSensor) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             TextButton(onClick = onRequestStepPermission) {
-                Icon(
-                    Icons.AutoMirrored.Filled.DirectionsWalk,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.AutoMirrored.Filled.DirectionsWalk, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Activar contador de pasos")
             }
-        } else if (!hasStepSensor) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Tu dispositivo no tiene sensor de pasos",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -2008,21 +2467,18 @@ private fun RingStat(
             GlassRing(
                 progress = progress,
                 ringColor = color,
-                modifier = Modifier.size(78.dp)
+                modifier = Modifier.size(70.dp)
             )
             Text(
                 text = valueText,
-                style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.titleSmall.tabular.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = label.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.sp,
-                letterSpacing = 1.sp
-            ),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 1.sp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -2033,7 +2489,7 @@ private fun VerticalDividerSpacer() {
     Box(
         modifier = Modifier
             .width(1.dp)
-            .height(64.dp)
+            .height(58.dp)
             .padding(vertical = 8.dp)
     )
 }
@@ -2056,19 +2512,14 @@ private fun TodayGlassCard(
         onClick = if (hasCalendarPermission) onOpenCalendar else null
     ) {
         GlassLabel(text = "📅 Hoy", accent = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (!hasCalendarPermission) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    Icons.Default.CalendarToday,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
+                Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -2082,32 +2533,23 @@ private fun TodayGlassCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                TextButton(onClick = onRequestCalendarPermission) {
-                    Text("Permitir")
-                }
+                TextButton(onClick = onRequestCalendarPermission) { Text("Permitir") }
             }
         } else if (nextEvent != null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = eventTimeFormat.format(Date(nextEvent.startMillis)),
-                        style = MaterialTheme.typography.titleLarge.tabular.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = "hora",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
+                Text(
+                    text = eventTimeFormat.format(Date(nextEvent.startMillis)),
+                    style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = nextEvent.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -2125,14 +2567,14 @@ private fun TodayGlassCard(
             }
         } else {
             Text(
-                text = "Sin eventos próximos. Disfruta tu día ✨",
+                text = "Sin eventos próximos.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         reminderTitle?.let {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -2141,20 +2583,20 @@ private fun TodayGlassCard(
                     .padding(vertical = 2.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 ) {
                     Text(
-                        text = "recordatorio",
+                        text = "Recordatorio",
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = it,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -2162,13 +2604,9 @@ private fun TodayGlassCard(
             }
         }
 
-        // Unique device glance signals from AtAGlanceBar (system alarm + low battery)
         if (nextAlarmText != null || lowBatteryText != null) {
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-            )
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -2178,49 +2616,31 @@ private fun TodayGlassCard(
             ) {
                 nextAlarmText?.let { alarm ->
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.Alarm,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = alarm,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Icon(Icons.Default.Alarm, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(alarm, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
                 lowBatteryText?.let { batt ->
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.BatteryAlert,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = batt,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.error
-                            )
+                            Icon(Icons.Default.BatteryAlert, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(batt, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -2262,21 +2682,21 @@ private fun OnThisDayGlassCard(
         ) {
             GlassLabel(text = "🕰 Un día como hoy", accent = AmberNode)
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = AmberNode.copy(alpha = 0.16f)
+                shape = RoundedCornerShape(6.dp),
+                color = AmberNode.copy(alpha = 0.14f)
             ) {
                 Text(
                     text = if (totalCount > 1) "$badgeText · +${totalCount - 1}" else badgeText,
                     style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.SemiBold),
                     color = AmberNode,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                 )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = memory.title.ifBlank { "Memoria del $dateLabel" },
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -2285,7 +2705,7 @@ private fun OnThisDayGlassCard(
             memory.body.replace(Regex("[#*_~`]"), "").replace("\n", " ").trim()
         }
         if (preview.isNotBlank()) {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = preview,
                 style = MaterialTheme.typography.bodySmall,
@@ -2328,7 +2748,7 @@ private fun HabitGlassCard(
             GlassLabel(text = "🧠 Brief y rutinas", accent = NowBriefNewsBlue)
             if (writingStats.streakDays >= 2 || writingStats.notesLast7Days > 0) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = NowBriefVitalsGreen.copy(alpha = 0.14f)
                 ) {
                     Text(
@@ -2339,31 +2759,31 @@ private fun HabitGlassCard(
                         },
                         style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.SemiBold),
                         color = NowBriefVitalsGreen,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
             }
         }
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (briefText != null) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("home_daily_brief_box")
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(10.dp)) {
                     Text(
                         text = briefText ?: "",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (briefFromNeedle) "Brief generado localmente · Needle 3" else "Brief local del día",
+                        text = if (briefFromNeedle) "Brief local · Needle 3" else "Brief local del día",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2375,11 +2795,7 @@ private fun HabitGlassCard(
         val lines = buildList {
             digest?.sleep?.let { s ->
                 s.lastNight?.let { n ->
-                    add(
-                        "Anoche dormiste " + HabitMiners.formatDuration(
-                            (n.endMillis - n.startMillis) / 60_000L
-                        )
-                    )
+                    add("Anoche dormiste " + HabitMiners.formatDuration((n.endMillis - n.startMillis) / 60_000L))
                 }
                 if (s.typicalBedMinuteOfDay != null && s.typicalWakeMinuteOfDay != null) {
                     add(
@@ -2388,11 +2804,11 @@ private fun HabitGlassCard(
                     )
                 }
                 s.sleepDebtMinutes?.takeIf { it > 15 }?.let {
-                    add("Deuda de sueño: " + HabitMiners.formatDuration(it.toLong()) + " vs tu mediana")
+                    add("Deuda de sueño: " + HabitMiners.formatDuration(it.toLong()))
                 }
                 s.bedtimeDriftMinutesPerNight?.let {
                     val dir = if (it > 0) "más tarde" else "más pronto"
-                    add("Tu hora de dormir se mueve ~${abs(it).roundToInt()} min $dir cada noche")
+                    add("Tu hora de dormir se mueve ~${abs(it).roundToInt()} min $dir")
                 }
             }
             digest?.apps?.let { a ->
@@ -2400,7 +2816,7 @@ private fun HabitGlassCard(
                     val conf = a.predictedNowConfidence
                     val label = HabitMiners.appLabel(context, p.pkg)
                     if (conf != null && conf >= 0.55f) {
-                        add("A esta hora sueles abrir $label (${(conf * 100).roundToInt()}% de confianza)")
+                        add("A esta hora sueles abrir $label (${(conf * 100).roundToInt()}%)")
                     } else {
                         add("A esta hora sueles abrir $label")
                     }
@@ -2408,27 +2824,22 @@ private fun HabitGlassCard(
             }
             digest?.battery?.let { b ->
                 b.projectedBedtimeLevel?.let {
-                    val basis = if (b.drainConfidenceDays >= 3) "por tu ritmo reciente" else "por el ritmo de hoy"
-                    add("Llegarás a dormir con ~$it% de batería ($basis)")
+                    add("Llegarás a dormir con ~$it% de batería")
                 }
             }
         }
         if (briefText == null) {
             if (lines.isEmpty()) {
                 Text(
-                    text = if (digest == null) {
-                        "Aprendiendo de tu uso, sueño y lugares…"
-                    } else {
-                        "Aprendiendo — necesito un par de días más de datos"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = if (digest == null) "Aprendiendo de tu uso, sueño y lugares…" else "Aprendiendo — necesito un par de días más de datos",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 lines.take(4).forEach { line ->
                     Text(
                         text = line,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
@@ -2443,20 +2854,16 @@ private fun HabitGlassCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = onOpenRoutines) {
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Ver rutinas aprendidas")
+                Text("Ver rutinas")
             }
             if (digest != null) {
                 TextButton(

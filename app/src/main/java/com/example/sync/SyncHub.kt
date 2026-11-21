@@ -130,67 +130,72 @@ object SyncHub {
         }
     }
 
+    private const val KEY_LAST_HEAVY_SYNC = "last_heavy_sync"
+    private const val HEAVY_SYNC_COOLDOWN_MS = 20 * 60_000L
+    private const val SYNC_DEBOUNCE_MS = 15_000L
+
+    @Volatile
+    private var lastAttemptMs = 0L
+
     /**
      * Full background pass: calendar + due tasks + weather cache + widget,
-     * then re-arm the per-reminder alarm. Used by the 5-minute tick and by
-     * pull-to-refresh.
+     * then re-arm the per-reminder alarm. Heavy telemetry/GPS subsystems run
+     * at most once every 20 minutes unless [forceHeavy] is true (pull-to-refresh).
      */
-    fun syncNow(context: Context) {
+    fun syncNow(context: Context, forceHeavy: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!forceHeavy && (now - lastAttemptMs) < SYNC_DEBOUNCE_MS) return
+        lastAttemptMs = now
+
         val app = context.applicationContext
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lastHeavy = prefs.getLong(KEY_LAST_HEAVY_SYNC, 0L)
+        val runHeavy = forceHeavy || (now - lastHeavy) >= HEAVY_SYNC_COOLDOWN_MS
+        if (runHeavy) {
+            prefs.edit().putLong(KEY_LAST_HEAVY_SYNC, now).apply()
+        }
+
         scope.launch {
             refreshCalendar(app)
             try {
                 ReminderNotifications.checkAndNotifyDue(app)
             } catch (_: Exception) {
             }
-            try {
-                // v1.7: Bixby-style routines — time & battery triggers ride
-                // the same 5-minute tick.
-                com.example.routine.RoutineEngine.evaluate(
-                    app, com.example.routine.RoutineEngine.RoutineEvent.TICK
-                )
-            } catch (_: Exception) {
-            }
-            try {
-                // Location-based reminders (private app: coordinates never
-                // leave the device).
-                com.example.location.SmartPlaces.checkProximityAndNotify(app)
-            } catch (_: Exception) {
-            }
-            try {
-                // SPATIAL reminders: calendar places × current location →
-                // "time to leave" + arrivals.
-                com.example.location.SpatialContextEngine.evaluate(app)
-            } catch (_: Exception) {
-            }
-            try {
-                // Health Connect (Android 9+ with the provider app, 14+ built
-                // in): real steps overwrite the sensor baseline when available.
-                com.example.health.HealthConnectManager.refreshStepsIntoCache(app)
-            } catch (_: Exception) {
-            }
-            try {
-                // Re-arm the activity-transitions feed (idempotent) so the
-                // habit store keeps learning commute patterns.
-                com.example.habit.ActivityTransitionsManager.register(app)
-            } catch (_: Exception) {
-            }
-            try {
-                // Honors the 20-minute staleness window internally, so this
-                // only touches the network when the cached reading expires.
-                com.example.telemetry.WeatherService(app).refreshWeather()
-            } catch (_: Exception) {
-            }
-            try {
-                // Habit engine: throttled telemetry harvest (~15 min) — the
-                // collectors survive process death via UsageStats replays.
-                com.example.habit.HabitEngine.collectTick(app)
-            } catch (_: Exception) {
-            }
-            try {
-                // Morning brief + weekly report alarms (learned wake time).
-                com.example.sync.BriefScheduler.rearm(app)
-            } catch (_: Exception) {
+            if (runHeavy) {
+                try {
+                    com.example.routine.RoutineEngine.evaluate(
+                        app, com.example.routine.RoutineEngine.RoutineEvent.TICK
+                    )
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.location.SmartPlaces.checkProximityAndNotify(app)
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.location.SpatialContextEngine.evaluate(app)
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.health.HealthConnectManager.refreshStepsIntoCache(app)
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.habit.ActivityTransitionsManager.register(app)
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.telemetry.WeatherService(app).refreshWeather()
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.habit.HabitEngine.collectTick(app)
+                } catch (_: Exception) {
+                }
+                try {
+                    com.example.sync.BriefScheduler.rearm(app)
+                } catch (_: Exception) {
+                }
             }
             SyncScheduler.scheduleNextReminderAlarm(app)
             try {

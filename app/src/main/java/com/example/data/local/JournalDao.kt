@@ -68,6 +68,46 @@ interface JournalDao {
     @Query("SELECT * FROM journal_entries WHERE journalDate BETWEEN :startTime AND :endTime ORDER BY journalDate DESC")
     suspend fun getEntriesInRange(startTime: Long, endTime: Long): List<JournalEntry>
 
+    @Transaction
+    @Query("SELECT * FROM journal_entries WHERE parentEntryId = :parentId AND isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
+    fun getChildEntriesWithRelations(parentId: Long): Flow<List<EntryWithRelations>>
+
+    @Query("UPDATE journal_entries SET isPinned = :pinned, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setEntryPinned(id: Long, pinned: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE journal_entries SET status = :status, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateEntryStatus(id: Long, status: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE journal_entries SET isArchived = :archived, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setEntryArchived(id: Long, archived: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE journal_entries SET body = :body, wordCount = :wordCount, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateEntryBodyOnly(id: Long, body: String, wordCount: Int, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("""
+        UPDATE journal_entries
+        SET parentEntryId = :parentEntryId,
+            iconEmoji = :iconEmoji,
+            coverColorHex = :coverColorHex,
+            pageType = :pageType,
+            status = :status,
+            priority = :priority,
+            isPinned = :isPinned,
+            updatedAt = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateWorkspaceProperties(
+        id: Long,
+        parentEntryId: Long?,
+        iconEmoji: String,
+        coverColorHex: String?,
+        pageType: String,
+        status: String,
+        priority: String,
+        isPinned: Boolean,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     // === Tags ===
     @Query("SELECT * FROM tags ORDER BY name ASC")
     fun getAllTags(): Flow<List<Tag>>

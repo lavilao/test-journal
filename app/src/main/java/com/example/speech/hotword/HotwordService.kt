@@ -383,6 +383,7 @@ class HotwordService : Service(), RecognitionListener {
         var wakeRingMark = 0
         var streamAudioMs = 0L
         var errorStreakLocal = 0
+        var lastVoiceActivityAt = 0L
 
         try {
             while (whistleRunning && isRunning.value) {
@@ -401,6 +402,27 @@ class HotwordService : Service(), RecognitionListener {
                 if (off <= 0) break
 
                 appendRing(chunk, off)
+                val rms = WhistleVadGate.computeRms(chunk, off)
+                val nowRead = System.currentTimeMillis()
+                val hasSpeech = WhistleVadGate.shouldProcessChunk(
+                    rms = rms,
+                    nowMs = nowRead,
+                    lastVoiceMs = lastVoiceActivityAt,
+                    armed = armedLocal
+                )
+                if (rms >= WhistleVadGate.DEFAULT_RMS_THRESHOLD) {
+                    lastVoiceActivityAt = nowRead
+                }
+                if (!hasSpeech) {
+                    // Flush stale stream state once after prolonged silence, then skip native NN completely.
+                    if (streamAudioMs > 0L) {
+                        runCatching { runBlocking { NeedleRuntime.streamStop() } }
+                        streamAudioMs = 0L
+                        sessionText.clear()
+                    }
+                    continue
+                }
+
                 for (i in 0 until off) floatChunk[i] = chunk[i] / 32768f
                 val pcm = if (off == chunk.size) floatChunk else floatChunk.copyOf(off)
                 streamAudioMs += (off.toLong() * 1000L) / sampleRate

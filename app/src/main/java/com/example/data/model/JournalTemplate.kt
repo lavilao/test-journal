@@ -8,201 +8,165 @@ data class JournalTemplate(
     val defaultTitle: String,
     val defaultBody: String,
     val defaultTags: List<String> = emptyList(),
-    val defaultMood: String? = null
+    val defaultMood: String? = null,
+    val defaultEmoji: String = "📄",
+    val defaultPageType: String = "PAGE",
+    val defaultStatus: String = "Inbox"
 ) {
     companion object {
         val ALL_TEMPLATES = listOf(
             JournalTemplate(
                 id = "freeform",
-                name = "Freeform Note",
-                description = "Empty page for spontaneous thoughts and ideas.",
+                name = "Página en blanco",
+                description = "Documento limpio listo para bloques Markdown, tareas e ideas.",
                 iconName = "edit",
                 defaultTitle = "",
-                defaultBody = ""
-            ),
-            JournalTemplate(
-                id = "daily_reflection",
-                name = "Daily Journal",
-                description = "Morning intentions, evening reflections, and gratitude.",
-                iconName = "wb_sunny",
-                defaultTitle = "Daily Reflection",
-                defaultBody = """
-### Morning Intentions
-- What is my primary focus for today?
-- What am I grateful for this morning?
-
-### Evening Reflection
-- What went well today?
-- What did I learn or discover?
-- Highlight of the day:
-                """.trimIndent(),
-                defaultTags = listOf("reflection", "daily"),
-                defaultMood = "Peaceful"
-            ),
-            JournalTemplate(
-                id = "weekly_review",
-                name = "Weekly Review",
-                description = "High-level review of wins, progress, and upcoming goals.",
-                iconName = "calendar_view_week",
-                defaultTitle = "Weekly Synthesis",
-                defaultBody = """
-### Big Wins & Accomplishments
-1. 
-2. 
-
-### Key Lessons & Blockers
-- 
-
-### People & Connections
-- Meaningful conversations this week:
-
-### Next Week's Priorities
-- [ ] 
-- [ ] 
-                """.trimIndent(),
-                defaultTags = listOf("review", "planning")
-            ),
-            JournalTemplate(
-                id = "travel_trip",
-                name = "Travel & Trip Day",
-                description = "Destinations, transit details, meals, and adventures.",
-                iconName = "flight",
-                defaultTitle = "Travel Day: ",
-                defaultBody = """
-### Itinerary & Places
-- Location / Destination:
-- Sights & Landmarks:
-
-### Food & Atmosphere
-- Memorable meals or cafes:
-
-### Impressions & Highlights
-- 
-                """.trimIndent(),
-                defaultTags = listOf("travel", "places")
-            ),
-            JournalTemplate(
-                id = "book_note",
-                name = "Book Notes",
-                description = "Author, central thesis, quotes, and personal takeaways.",
-                iconName = "menu_book",
-                defaultTitle = "Book: ",
-                defaultBody = """
-**Author:** 
-**Category:** Non-Fiction / Fiction
-**Rating:** ★★★★☆
-
-### Central Thesis
-- 
-
-### Key Quotes & Passages
-> 
-
-### Personal Takeaways & Action Items
-- 
-                """.trimIndent(),
-                defaultTags = listOf("reading", "book")
-            ),
-            JournalTemplate(
-                id = "movie_media",
-                name = "Movie / Show",
-                description = "Director, themes, memorable moments, and personal critique.",
-                iconName = "movie",
-                defaultTitle = "Watch: ",
-                defaultBody = """
-**Director / Creator:** 
-**Watched on:** 
-**Rating:** 8/10
-
-### Synopsis & Themes
-- 
-
-### Memorable Moments & Performances
-- 
-
-### Final Impressions
-- 
-                """.trimIndent(),
-                defaultTags = listOf("media", "cinema")
-            ),
-            JournalTemplate(
-                id = "game_review",
-                name = "Game Log",
-                description = "Platform, gameplay highlights, story impressions, and hours played.",
-                iconName = "sports_esports",
-                defaultTitle = "Game: ",
-                defaultBody = """
-**Platform:** 
-**Status:** In Progress / Completed
-
-### Gameplay & Mechanics
-- 
-
-### Atmosphere & Art / Music
-- 
-
-### Memorable Milestones
-- 
-                """.trimIndent(),
-                defaultTags = listOf("gaming", "review")
+                defaultBody = "",
+                defaultEmoji = "📄",
+                defaultPageType = "PAGE",
+                defaultStatus = "Inbox"
             ),
             JournalTemplate(
                 id = "project_milestone",
-                name = "Project Tracker",
-                description = "Project goals, architectural decisions, and current backlog.",
+                name = "Proyecto y entregables",
+                description = "Objetivo, decisiones técnicas y lista de tareas accionables.",
                 iconName = "work",
-                defaultTitle = "Project: ",
+                defaultTitle = "Proyecto: ",
                 defaultBody = """
-### Objective & Context
-- Why are we building this?
+> 💡 Resume en una frase por qué importa este proyecto y cuál es su resultado clave.
 
-### Decisions & Architecture
+### Objetivo y contexto
+- Resultado esperado:
+- Fecha límite:
+
+### Próximos pasos
+- [ ] Definir alcance inicial
+- [ ] Crear primera sub-página de especificaciones
+
+---
+
+### Decisiones y arquitectura
 - 
-
-### Next Deliverables
-- [ ] 
-- [ ] 
                 """.trimIndent(),
-                defaultTags = listOf("project", "focus")
+                defaultTags = listOf("proyecto", "enfoque"),
+                defaultEmoji = "🚀",
+                defaultPageType = "PROJECT",
+                defaultStatus = "En curso"
             ),
             JournalTemplate(
                 id = "meeting_notes",
-                name = "Meeting Notes",
-                description = "Attendees, agenda items, discussion notes, and action items.",
+                name = "Acta de reunión",
+                description = "Participantes, agenda, acuerdos y próximos pasos.",
                 iconName = "groups",
-                defaultTitle = "Meeting: ",
+                defaultTitle = "Reunión: ",
                 defaultBody = """
-**Participants:** 
-**Date/Time:** 
+**Participantes:** 
+**Contexto:** 
 
 ### Agenda
 1. 
+2. 
 
-### Discussion Points
+### Puntos clave y acuerdos
 - 
 
-### Action Items & Next Steps
+### Acciones asignadas
 - [ ] 
                 """.trimIndent(),
-                defaultTags = listOf("meeting", "work")
+                defaultTags = listOf("reunion", "trabajo"),
+                defaultEmoji = "🗓️",
+                defaultPageType = "MEETING",
+                defaultStatus = "En curso"
+            ),
+            JournalTemplate(
+                id = "daily_reflection",
+                name = "Nota diaria",
+                description = "Prioridad del día, bitácora rápida y cierre.",
+                iconName = "wb_sunny",
+                defaultTitle = "Nota de hoy",
+                defaultBody = """
+### Enfoque de hoy
+- [ ] Prioridad principal del día
+- [ ] Bloque de trabajo profundo
+
+### Bitácora y aprendizajes
+- 
+
+### Cierre del día
+> 
+                """.trimIndent(),
+                defaultTags = listOf("diario", "hoy"),
+                defaultMood = "🎯 Focused",
+                defaultEmoji = "☀️",
+                defaultPageType = "DAILY",
+                defaultStatus = "En curso"
+            ),
+            JournalTemplate(
+                id = "book_note",
+                name = "Base de conocimiento / Libro",
+                description = "Tesis central, citas destacadas y síntesis personal.",
+                iconName = "menu_book",
+                defaultTitle = "Referencia: ",
+                defaultBody = """
+**Autor / Fuente:** 
+**Tema:** 
+
+### Idea central
+> 💡 
+
+### Conceptos y citas clave
+- 
+
+### Cómo aplicarlo
+- [ ] 
+                """.trimIndent(),
+                defaultTags = listOf("conocimiento", "lectura"),
+                defaultEmoji = "📚",
+                defaultPageType = "DOC",
+                defaultStatus = "Inbox"
+            ),
+            JournalTemplate(
+                id = "weekly_review",
+                name = "Revisión semanal",
+                description = "Logros, bloqueos y prioridades para la próxima semana.",
+                iconName = "calendar_view_week",
+                defaultTitle = "Revisión semanal",
+                defaultBody = """
+### Logros principales
+1. 
+2. 
+
+### Aprendizajes y bloqueos
+- 
+
+### Prioridades próxima semana
+- [ ] 
+- [ ] 
+                """.trimIndent(),
+                defaultTags = listOf("revision", "planificacion"),
+                defaultEmoji = "🧭",
+                defaultPageType = "DOC",
+                defaultStatus = "Inbox"
             ),
             JournalTemplate(
                 id = "idea_spark",
-                name = "Idea Spark",
-                description = "Unfiltered brainstorm, potential value, and experiment steps.",
+                name = "Brote de idea",
+                description = "Hipótesis rápida, por qué importa y primer experimento.",
                 iconName = "lightbulb",
                 defaultTitle = "Idea: ",
                 defaultBody = """
-### The Spark
+> 💡 Escribe la idea tal como llegó antes de editarla.
+
+### Por qué tiene potencial
 - 
 
-### Why It Matters
-- 
-
-### Potential Next Experiment
-- 
+### Primer experimento mínimo
+- [ ] 
                 """.trimIndent(),
-                defaultTags = listOf("idea", "brainstorm")
+                defaultTags = listOf("idea"),
+                defaultEmoji = "💡",
+                defaultPageType = "PAGE",
+                defaultStatus = "Inbox"
             )
         )
     }
