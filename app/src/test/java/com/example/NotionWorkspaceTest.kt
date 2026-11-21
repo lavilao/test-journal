@@ -118,5 +118,7 @@ class NotionWorkspaceTest {
         val updatedChild = db.journalDao().getEntryById(childId)
         assertEquals(true, updatedChild?.isPinned)
         assertEquals("Listo", updatedChild?.status)
+
+        kotlinx.coroutines.delay(350)
     }
 }

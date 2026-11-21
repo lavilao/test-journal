@@ -167,6 +167,73 @@ data class JournalTemplate(
                 defaultEmoji = "💡",
                 defaultPageType = "PAGE",
                 defaultStatus = "Inbox"
+            ),
+            JournalTemplate(
+                id = "travel_trip",
+                name = "Viaje e itinerario",
+                description = "Vuelos, alojamiento, reservas y lista de equipaje.",
+                iconName = "flight",
+                defaultTitle = "Viaje a ",
+                defaultBody = """
+### Datos clave y reservas
+- Destino: 
+- Fechas: 
+- Alojamiento: 
+
+### Itinerario por día
+1. Día 1: 
+2. Día 2: 
+
+### Equipaje y pendientes
+- [ ] Documentos y entradas
+- [ ] Cargadores y adaptador
+                """.trimIndent(),
+                defaultTags = listOf("viaje", "itinerario"),
+                defaultEmoji = "✈️",
+                defaultPageType = "PROJECT",
+                defaultStatus = "Inbox"
+            ),
+            JournalTemplate(
+                id = "sprint_tasks",
+                name = "Panel de tareas",
+                description = "Checklist priorizada para ejecutar rápido sin distracciones.",
+                iconName = "check_circle",
+                defaultTitle = "Pendientes: ",
+                defaultBody = """
+### Prioridad alta
+- [ ] 
+
+### En progreso
+- [ ] 
+
+### En espera / Seguimiento
+- [ ] 
+                """.trimIndent(),
+                defaultTags = listOf("tareas", "sprint"),
+                defaultEmoji = "✅",
+                defaultPageType = "TASK",
+                defaultStatus = "En curso"
+            ),
+            JournalTemplate(
+                id = "person_profile",
+                name = "Ficha de persona / CRM",
+                description = "Notas de contexto, intereses y acuerdos con alguien.",
+                iconName = "person",
+                defaultTitle = "Perfil: ",
+                defaultBody = """
+**Rol / Relación:** 
+**Contacto:** 
+
+### Contexto y temas en común
+- 
+
+### Historial de conversaciones
+- 
+                """.trimIndent(),
+                defaultTags = listOf("personas", "red"),
+                defaultEmoji = "👤",
+                defaultPageType = "DOC",
+                defaultStatus = "Listo"
             )
         )
     }
