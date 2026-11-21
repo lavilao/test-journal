@@ -49,13 +49,13 @@ fun EntityChip(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, textColor, icon) = when (type) {
-        EntityType.PERSON -> Triple(ForestPrimary.copy(alpha = 0.12f), ForestPrimary, Icons.Default.Person)
-        EntityType.PLACE -> Triple(TerracottaAccent.copy(alpha = 0.12f), TerracottaAccent, Icons.Default.Place)
-        EntityType.ORGANIZATION -> Triple(Color(0xFF4338CA).copy(alpha = 0.12f), Color(0xFF4338CA), Icons.Default.Business)
-        EntityType.TOPIC -> Triple(AmberNode.copy(alpha = 0.15f), Color(0xFF92400E), Icons.Default.Category)
-        EntityType.DATE -> Triple(Color(0xFF0F766E).copy(alpha = 0.12f), Color(0xFF0F766E), Icons.Default.CalendarToday)
-        EntityType.URL -> Triple(Color(0xFF0284C7).copy(alpha = 0.12f), Color(0xFF0284C7), Icons.Default.Link)
-        else -> Triple(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, Icons.Default.Category)
+        EntityType.PERSON -> Triple(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), MaterialTheme.colorScheme.primary, Icons.Default.Person)
+        EntityType.PLACE -> Triple(TerracottaAccent.copy(alpha = 0.14f), TerracottaAccent, Icons.Default.Place)
+        EntityType.ORGANIZATION -> Triple(Color(0xFF6366F1).copy(alpha = 0.14f), Color(0xFF6366F1), Icons.Default.Business)
+        EntityType.TOPIC -> Triple(AmberNode.copy(alpha = 0.16f), AmberNode, Icons.Default.Category)
+        EntityType.DATE -> Triple(Color(0xFF14B8A6).copy(alpha = 0.14f), Color(0xFF14B8A6), Icons.Default.CalendarToday)
+        EntityType.URL -> Triple(Color(0xFF38BDF8).copy(alpha = 0.14f), Color(0xFF0284C7), Icons.Default.Link)
+        else -> Triple(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f), MaterialTheme.colorScheme.onSurfaceVariant, Icons.Default.Category)
     }
 
     Surface(
@@ -140,15 +140,14 @@ fun EditorialCard(
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        tonalElevation = 1.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) {
         content()

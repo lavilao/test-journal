@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -122,9 +124,9 @@ import com.example.ai.needle.WhistleKeywordBuilder
 import com.example.semantic.MlKitAnalyzer
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
+import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.TagChip
 import com.example.ui.theme.AmberNode
-import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import java.text.SimpleDateFormat
@@ -304,15 +306,17 @@ fun EntryDetailScreen(
 
     if (entry == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = ForestPrimary)
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
         return
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text("Detalle de la memoria", style = MaterialTheme.typography.titleMedium) },
+                title = { Text("Detalle de la memoria", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("detail_back_button")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
@@ -323,7 +327,7 @@ fun EntryDetailScreen(
                         onClick = { showTranslateSheet = true },
                         modifier = Modifier.testTag("detail_translate_button")
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Traducir memoria", tint = ForestPrimary)
+                        Icon(Icons.Default.Translate, contentDescription = "Traducir memoria", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(
                         onClick = { onEdit(entry.id) },
@@ -339,7 +343,7 @@ fun EntryDetailScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
                 )
             )
         }
@@ -384,14 +388,14 @@ fun EntryDetailScreen(
                     Icon(
                         imageVector = Icons.Default.LocationOn,
                         contentDescription = null,
-                        tint = ForestPrimary,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = entry.location,
                         style = MaterialTheme.typography.labelMedium,
-                        color = ForestPrimary
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -425,14 +429,14 @@ fun EntryDetailScreen(
                     Icon(
                         imageVector = Icons.Default.Translate,
                         contentDescription = null,
-                        tint = ForestPrimary,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Traducir",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = ForestPrimary
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
 
@@ -485,9 +489,9 @@ fun EntryDetailScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     modifier = Modifier.testTag("add_photo_pill_button")
                 ) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Adjuntar foto", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                    Text("Adjuntar foto", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 }
 
                 // Add Section
@@ -497,9 +501,9 @@ fun EntryDetailScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     modifier = Modifier.testTag("add_section_pill_button")
                 ) {
-                    Icon(Icons.Default.NoteAdd, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.NoteAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Añadir sección", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ForestPrimary)
+                    Text("Añadir sección", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -571,8 +575,8 @@ fun EntryDetailScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Añadir foto", tint = ForestPrimary, modifier = Modifier.size(22.dp))
-                            Text("Añadir", style = MaterialTheme.typography.labelSmall, color = ForestPrimary)
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Añadir foto", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Text("Añadir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -589,7 +593,7 @@ fun EntryDetailScreen(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.weight(1f).testTag("photo_remove_bg_btn")
                     ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             when {
@@ -644,12 +648,12 @@ fun EntryDetailScreen(
                 var mirageAnalyzing by remember(media?.id) { mutableStateOf(false) }
                 if (media != null && (media.caption.isNotBlank() || media.labelsJson.isNotBlank() || media.faceCount > 0 || media.ocrText.isNotBlank() || mirageAvailable)) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(8.dp),
+                    LiquidGlassCard(
+                        cornerRadius = 16.dp,
+                        contentPadding = 12.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -710,7 +714,7 @@ fun EntryDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Face, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.Face, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "${media.faceCount} rostro${if (media.faceCount > 1) "s" else ""} detectado${if (media.faceCount > 1) "s" else ""}",
@@ -800,16 +804,15 @@ fun EntryDetailScreen(
             }
             Spacer(modifier = Modifier.height(8.dp))
             if (pages.isEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                    shape = RoundedCornerShape(10.dp),
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 12.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "Organiza esta memoria en sub-páginas o capítulos (p. ej. Día 1, Citas, Decisiones). Toca «Añadir sección» arriba.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(12.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
@@ -817,7 +820,7 @@ fun EntryDetailScreen(
                     EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("entry_page_${p.id}")) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Description, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = p.title.ifBlank { "Sección ${idx + 1}" },
@@ -881,7 +884,7 @@ fun EntryDetailScreen(
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp).testTag("detail_dictate_note_btn")
                         ) {
-                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Dictar", style = MaterialTheme.typography.labelSmall)
                         }
@@ -925,16 +928,15 @@ fun EntryDetailScreen(
             }
 
             if (audioRecords.isEmpty() && !isRecording) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                    shape = RoundedCornerShape(10.dp),
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 12.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "Todavía no hay grabaciones en esta memoria. Pulsa «Grabar» para capturar audio o «Dictar» para transcribir al instante.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(12.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
@@ -974,7 +976,7 @@ fun EntryDetailScreen(
                                             Icon(
                                                 imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                                 contentDescription = if (isThisPlaying) "Pausar" else "Reproducir",
-                                                tint = ForestPrimary,
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(28.dp)
                                             )
                                         }
@@ -986,7 +988,7 @@ fun EntryDetailScreen(
                                         Icon(
                                             imageVector = if (record.transcript.isBlank()) Icons.Default.RecordVoiceOver else Icons.Default.EditNote,
                                             contentDescription = "Transcribir o dictar",
-                                            tint = if (record.transcript.isBlank()) TerracottaAccent else ForestPrimary,
+                                            tint = if (record.transcript.isBlank()) TerracottaAccent else MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(26.dp)
                                         )
                                     }
@@ -1019,7 +1021,7 @@ fun EntryDetailScreen(
                                             Text(
                                                 text = "Transcripción:",
                                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = ForestPrimary
+                                                color = MaterialTheme.colorScheme.primary
                                             )
                                             TextButton(
                                                 onClick = { transcribingRecord = record },
@@ -1140,18 +1142,18 @@ fun EntryDetailScreen(
             if (semanticNeighbours.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(18.dp))
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = ForestPrimary.copy(alpha = 0.08f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().testTag("semantic_related_card")
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Relacionados por significado (IA local)",
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = ForestPrimary
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1226,7 +1228,7 @@ fun EntryDetailScreen(
                                             onClick = { viewModel.acceptSuggestedTag(suggested) },
                                             modifier = Modifier.size(24.dp).testTag("accept_tag_${suggested.name}")
                                         ) {
-                                            Icon(Icons.Default.Check, contentDescription = "Accept Tag", tint = ForestPrimary, modifier = Modifier.size(13.dp))
+                                            Icon(Icons.Default.Check, contentDescription = "Accept Tag", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
                                         }
                                         IconButton(
                                             onClick = { viewModel.dismissSuggestedTag(suggested.id) },
@@ -1343,13 +1345,13 @@ fun EntryDetailScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Surface(
-                                    color = ForestPrimary.copy(alpha = 0.12f),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
                                         text = "${(relDetail.relationship.score * 100).toInt()}% afín",
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = ForestPrimary,
+                                        color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -1365,7 +1367,7 @@ fun EntryDetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.navigationBarsPadding().height(32.dp))
         }
     }
 
@@ -1537,7 +1539,7 @@ fun EntryDetailScreen(
                     .verticalScroll(rememberScrollState())
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Translate, contentDescription = null, tint = ForestPrimary)
+                    Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Traducción sin conexión",
@@ -1598,7 +1600,7 @@ fun EntryDetailScreen(
                         )
                     },
                     enabled = !translationState.isTranslating,
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.fillMaxWidth().testTag("perform_translate_button")
                 ) {
                     if (translationState.isTranslating) {
@@ -1630,7 +1632,7 @@ fun EntryDetailScreen(
                             Text(
                                 text = "Traducción ($selectedLangName):",
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = ForestPrimary
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -1686,7 +1688,7 @@ fun EntryDetailScreen(
                             Toast.makeText(context, "Sección añadida ✓", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.testTag("confirm_add_section_btn")
                 ) {
                     Text("Añadir")
@@ -1770,7 +1772,7 @@ private fun AutolinkedText(
             pushStringAnnotation(tag = "ENTITY_LINK", annotation = span.entityId.toString())
             pushStyle(
                 SpanStyle(
-                    color = ForestPrimary,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                     textDecoration = TextDecoration.Underline
                 )

@@ -5,7 +5,7 @@ import android.app.TimePickerDialog
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,17 +31,11 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DirectionsWalk
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
@@ -67,11 +64,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
-import com.example.ui.components.GoogleRed
+import com.example.ui.components.GlassTopBar
+import com.example.ui.components.LiquidGlassCard
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
-import com.example.wallpaper.NowBriefAppBackground
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -90,13 +86,8 @@ fun GoogleNotificationsScreen(
     val calendarEvents by viewModel.upcomingCalendarEvents.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
-    // The event list is now a live StateFlow shared with the widget and the
-    // 5-minute background sync; on entering the tab we still re-query so a
-    // change made in another calendar app shows up immediately.
     LaunchedEffect(Unit) { viewModel.refreshCalendarEvents() }
 
-    // "Sincronizar" used to silently return nothing because the calendar
-    // permission was never requested from this screen. Now it asks first.
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -106,74 +97,58 @@ fun GoogleNotificationsScreen(
         viewModel.refreshTelemetry()
     }
 
-    val realWeather by viewModel.realWeather.collectAsState()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .testTag("google_notifications_screen")
     ) {
-        NowBriefAppBackground(
-            modifier = Modifier.fillMaxSize(),
-            weatherCode = realWeather.weatherCode
-        )
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top Header
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Tareas & Recordatorios",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                // Redesigned "new task" trigger: a proper FAB-style pill with
-                // a real touch target (the old 16dp icon + 12sp label in a
-                // text button looked cramped and ugly).
+        GlassTopBar(
+            title = "Agenda y Tareas",
+            subtitle = "Calendario del sistema y recordatorios",
+            actions = {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
-                    color = GoogleBlue,
+                    color = MaterialTheme.colorScheme.primary,
                     shadowElevation = 2.dp,
                     modifier = Modifier
-                        .height(44.dp)
+                        .height(42.dp)
                         .clip(RoundedCornerShape(24.dp))
                         .clickable { showAddDialog = true }
                         .testTag("new_task_button")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
                             Icons.Default.Add,
-                            contentDescription = null,
-                            tint = androidx.compose.ui.graphics.Color.White,
-                            modifier = Modifier.size(22.dp)
+                            contentDescription = "Nueva tarea",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Nueva tarea",
+                            text = "Nueva",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = androidx.compose.ui.graphics.Color.White
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
             }
-        }
+        )
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 16.dp,
+                bottom = navBottom + 96.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Android System Calendar Events Section
@@ -187,7 +162,7 @@ fun GoogleNotificationsScreen(
                         Icon(
                             imageVector = Icons.Default.CalendarMonth,
                             contentDescription = null,
-                            tint = GoogleBlue,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -199,53 +174,55 @@ fun GoogleNotificationsScreen(
                     }
 
                     TextButton(onClick = { viewModel.calendarSyncManager.openCalendarApp() }) {
-                        Text("Abrir Calendario", fontSize = 12.sp, color = GoogleBlue)
+                        Text("Abrir Calendario", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(2.dp))
-                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(13.dp), tint = GoogleBlue)
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
 
             if (calendarEvents.isEmpty()) {
                 item {
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    LiquidGlassCard(
+                        cornerRadius = 18.dp,
+                        contentPadding = 16.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            if (telemetry.hasCalendarPermission) {
-                                Text(
-                                    text = "Sin eventos próximos en el calendario de este dispositivo.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                TextButton(
-                                    onClick = { viewModel.refreshCalendarEvents() },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text("Sincronizar eventos ahora", fontSize = 12.sp)
-                                }
-                            } else {
-                                Text(
-                                    text = "Conecta tu calendario para ver aquí tus próximos eventos reales.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Button(
-                                    onClick = {
-                                        calendarPermissionLauncher.launch(
-                                            viewModel.calendarSyncManager.requiredCalendarPermissions()
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text("Permitir acceso al calendario", fontSize = 12.sp)
-                                }
+                        if (telemetry.hasCalendarPermission) {
+                            Text(
+                                text = "Sin eventos próximos en el calendario de este dispositivo.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            TextButton(
+                                onClick = { viewModel.refreshCalendarEvents() },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text("Sincronizar eventos ahora", fontSize = 12.sp)
+                            }
+                        } else {
+                            Text(
+                                text = "Conecta tu calendario para ver aquí tus próximos eventos reales.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    calendarPermissionLauncher.launch(
+                                        viewModel.calendarSyncManager.requiredCalendarPermissions()
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Permitir acceso al calendario", fontSize = 12.sp)
                             }
                         }
                     }
@@ -253,10 +230,11 @@ fun GoogleNotificationsScreen(
             } else {
                 items(calendarEvents, key = { "cal_${it.id}" }) { event ->
                     val timeFormat = remember { SimpleDateFormat("EEEE d, HH:mm", Locale.getDefault()) }
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
+                        tonalElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.calendarSyncManager.openCalendarApp() }
@@ -269,14 +247,14 @@ fun GoogleNotificationsScreen(
                         ) {
                             Surface(
                                 shape = CircleShape,
-                                color = GoogleBlue.copy(alpha = 0.12f),
-                                modifier = Modifier.size(36.dp)
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.CalendarToday,
                                         contentDescription = null,
-                                        tint = GoogleBlue,
+                                        tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -290,7 +268,7 @@ fun GoogleNotificationsScreen(
                                 )
                                 Text(
                                     text = timeFormat.format(Date(event.startMillis)),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodySmall.tabular,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (!event.location.isNullOrBlank()) {
@@ -311,13 +289,13 @@ fun GoogleNotificationsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp),
+                        .padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Mis tareas (${reminders.size})",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -325,25 +303,31 @@ fun GoogleNotificationsScreen(
 
             if (reminders.isEmpty()) {
                 item {
-                    Text(
-                        text = "No tienes tareas pendientes. Pulsa 'Nueva tarea' para agregar una con fecha y hora.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
+                    LiquidGlassCard(
+                        cornerRadius = 18.dp,
+                        contentPadding = 16.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "No tienes tareas pendientes. Pulsa 'Nueva' para agregar una con fecha y hora.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             } else {
                 items(reminders, key = { it.id }) { reminder ->
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
+                        tonalElevation = 1.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Checkbox(
@@ -351,7 +335,7 @@ fun GoogleNotificationsScreen(
                                 onCheckedChange = { isChecked ->
                                     viewModel.toggleReminder(reminder.id, isChecked)
                                 },
-                                colors = CheckboxDefaults.colors(checkedColor = GoogleBlue)
+                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Column(modifier = Modifier.weight(1f)) {
@@ -373,14 +357,13 @@ fun GoogleNotificationsScreen(
                                         val timeFormat = SimpleDateFormat(" • d MMM, HH:mm", Locale.getDefault())
                                         Text(
                                             text = timeFormat.format(Date(reminder.dueTimestamp)),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                                            color = GoogleBlue
+                                            style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.Medium),
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
                             }
 
-                            // Delete Task Button
                             IconButton(
                                 onClick = {
                                     viewModel.deleteReminder(reminder.id)
@@ -398,7 +381,6 @@ fun GoogleNotificationsScreen(
                     }
                 }
             }
-        }
         }
     }
 
@@ -545,7 +527,7 @@ fun GoogleNotificationsScreen(
                             showAddDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Guardar Tarea")
                 }

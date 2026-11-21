@@ -1,18 +1,21 @@
 package com.example.ui.screens
 
 import android.Manifest
-import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,18 +23,17 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,26 +48,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.assistant.AssistantIntent
-import com.example.assistant.AssistantParser
 import com.example.ai.needle.NeedleModelManager
 import com.example.ai.needle.NeedleRuntime
 import com.example.ai.needle.NeedleTools
 import com.example.ai.needle.WhistleDictationController
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
-import com.example.ui.theme.ForestPrimary
+import com.example.assistant.AssistantIntent
+import com.example.assistant.AssistantParser
+import com.example.ui.components.GlassTopBar
+import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -78,18 +81,15 @@ data class AssistantMessage(
 )
 
 /**
- * The on-device Google-Assistant replacement: speak or type a command in
- * Spanish and it is parsed LOCALLY (rule-based, no cloud, no GenAI) and
- * executed against real phone capabilities — open apps, call contacts,
- * search the device, read the weather, set timers/alarms, toggle the
- * flashlight, do math, take notes, launch the Lens scanner.
+ * The on-device Assistant: speak or type a command in Spanish and it is
+ * parsed and executed locally against phone capabilities and the semantic journal.
  */
 @Composable
 fun AssistantScreen(
     viewModel: JournalViewModel,
     onBack: () -> Unit,
     onOpenLens: () -> Unit,
-    onNavigateToDetail: (Long) -> Unit = {}
+    @Suppress("UNUSED_PARAMETER") onNavigateToDetail: (Long) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -106,7 +106,6 @@ fun AssistantScreen(
     var typedInput by rememberSaveable { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
 
-    // ---- optional local AI (Cactus Needle 3 + Whistle) ----
     var needleTick by remember { mutableIntStateOf(0) }
     val whistleController = remember { WhistleDictationController() }
     val whistleRecording by whistleController.isRecording.collectAsState()
@@ -119,12 +118,8 @@ fun AssistantScreen(
             NeedleModelManager.isWhistleDownloaded(context)
     }
     val needleUsable = needleSupported && needleEnabled && needleReady
-    // Whistle dictation no longer requires the Needle TEXT model: having
-    // only whistle.cact downloaded used to silently fall back to the system
-    // (Google) recognizer — the exact bug reported with the dictation test.
     val whistleUsable = needleSupported && whistleDictation && speechReady
 
-    // Load the downloaded models (if any) so the router is ready.
     LaunchedEffect(Unit) {
         NeedleModelManager.ensureLoaded(context)
         needleTick++
@@ -134,7 +129,6 @@ fun AssistantScreen(
         messages = messages + message
     }
 
-    /** Mic permission for the local Whistle dictation path. */
     val whistlePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -157,12 +151,6 @@ fun AssistantScreen(
         }
     }
 
-    /**
-     * Resolves an utterance to intents. The optional local AI (Cactus Needle)
-     * routes first when it is downloaded, enabled and initialized; the
-     * deterministic rule parser is always the fallback, so the assistant
-     * keeps working identically without the model.
-     */
     suspend fun resolveIntents(utterance: String): Pair<List<AssistantIntent>, Boolean> {
         if (needleUsable) {
             val routed = withTimeoutOrNull(25_000) { NeedleTools.route(utterance) }
@@ -171,173 +159,171 @@ fun AssistantScreen(
         return listOf(AssistantParser.parse(utterance)) to false
     }
 
-    /** Executes one parsed intent; appends the assistant's reply. */
     suspend fun runIntent(intent: AssistantIntent) {
         when (intent) {
-                is AssistantIntent.OpenApp -> {
-                    val app = viewModel.assistantManager.findApp(intent.appName)
-                    if (app != null) {
-                        viewModel.assistantManager.launchApp(app.packageName)
-                        post(AssistantMessage(false, "Abriendo ${app.appName}…"))
+            is AssistantIntent.OpenApp -> {
+                val app = viewModel.assistantManager.findApp(intent.appName)
+                if (app != null) {
+                    viewModel.assistantManager.launchApp(app.packageName)
+                    post(AssistantMessage(false, "Abriendo ${app.appName}…"))
+                } else {
+                    post(AssistantMessage(false, "No encontré una app llamada \"${intent.appName}\"."))
+                }
+            }
+            is AssistantIntent.CallContact -> {
+                if (!hasContactsPermission) {
+                    post(AssistantMessage(false, "Necesito el permiso de contactos para llamar. Actívalo en Ajustes → Permisos."))
+                } else {
+                    val contact = viewModel.assistantManager.searchContact(intent.contactName)
+                    if (contact?.phoneNumber != null) {
+                        viewModel.assistantManager.dialContact(contact.phoneNumber)
+                        post(AssistantMessage(false, "Llamando a ${contact.displayName}…"))
                     } else {
-                        post(AssistantMessage(false, "No encontré una app llamada \"${intent.appName}\"."))
+                        post(AssistantMessage(false, "No encontré a \"${intent.contactName}\" en tus contactos."))
                     }
                 }
-                is AssistantIntent.CallContact -> {
-                    if (!hasContactsPermission) {
-                        post(AssistantMessage(false, "Necesito el permiso de contactos para llamar. Actívalo en Ajustes → Permisos."))
+            }
+            is AssistantIntent.SearchDevice -> {
+                post(AssistantMessage(false, "Buscando \"${intent.query}\" en tu teléfono…"))
+                viewModel.searchDevice(intent.query)
+                kotlinx.coroutines.delay(700)
+                val fileCount = viewModel.deviceFilesResults.value.size
+                val contactCount = viewModel.deviceContactsResults.value.size
+                if (fileCount == 0 && contactCount == 0) {
+                    post(AssistantMessage(false, "No encontré \"${intent.query}\" en tu teléfono."))
+                } else {
+                    post(
+                        AssistantMessage(
+                            false,
+                            "Encontré $fileCount archivo(s) y $contactCount contacto(s) para \"${intent.query}\". Mira los resultados debajo."
+                        )
+                    )
+                }
+            }
+            is AssistantIntent.SearchWeb -> {
+                viewModel.assistantManager.webSearch(intent.query)
+                post(AssistantMessage(false, "Buscando \"${intent.query}\" en la web…"))
+            }
+            AssistantIntent.Weather -> {
+                post(AssistantMessage(false, viewModel.assistantManager.describeWeather(realWeather)))
+            }
+            is AssistantIntent.CreateNote -> {
+                viewModel.saveEntry(
+                    id = 0L,
+                    title = intent.text.take(40),
+                    body = intent.text,
+                    onComplete = { _ ->
+                        post(AssistantMessage(false, "Nota guardada."))
+                    }
+                )
+            }
+            is AssistantIntent.Calculate -> {
+                val value = AssistantParser.safeEvaluate(intent.expression)
+                val reply = if (value == null) {
+                    "No pude calcular eso."
+                } else {
+                    val pretty = if (value == value.toLong().toDouble()) {
+                        value.toLong().toString()
                     } else {
-                        val contact = viewModel.assistantManager.searchContact(intent.contactName)
-                        if (contact?.phoneNumber != null) {
-                            viewModel.assistantManager.dialContact(contact.phoneNumber)
-                            post(AssistantMessage(false, "Llamando a ${contact.displayName}…"))
+                        String.format(java.util.Locale.getDefault(), "%.4g", value)
+                    }
+                    pretty
+                }
+                post(AssistantMessage(false, reply))
+            }
+            is AssistantIntent.SetTimer -> {
+                viewModel.assistantManager.startTimer(intent.minutes)
+                post(AssistantMessage(false, "Temporizador de ${intent.minutes} min en marcha."))
+            }
+            is AssistantIntent.SetAlarm -> {
+                viewModel.assistantManager.setAlarm(intent.hour, intent.minute)
+                post(
+                    AssistantMessage(
+                        false,
+                        "Alarma a las ${"%02d".format(intent.hour)}:${"%02d".format(intent.minute)}."
+                    )
+                )
+            }
+            is AssistantIntent.Flashlight -> {
+                val ok = viewModel.assistantManager.setFlashlight(intent.on)
+                post(
+                    AssistantMessage(
+                        false,
+                        if (ok) {
+                            if (intent.on) "Linterna encendida." else "Linterna apagada."
                         } else {
-                            post(AssistantMessage(false, "No encontré a \"${intent.contactName}\" en tus contactos."))
-                        }
-                    }
-                }
-                is AssistantIntent.SearchDevice -> {
-                    post(AssistantMessage(false, "Buscando \"${intent.query}\" en tu teléfono…"))
-                    viewModel.searchDevice(intent.query)
-                    // searchDevice launches its own coroutine; give it a beat
-                    // to finish before counting the results.
-                    kotlinx.coroutines.delay(700)
-                    val fileCount = viewModel.deviceFilesResults.value.size
-                    val contactCount = viewModel.deviceContactsResults.value.size
-                    if (fileCount == 0 && contactCount == 0) {
-                        post(AssistantMessage(false, "No encontré \"${intent.query}\" en tu teléfono."))
-                    } else {
-                        post(
-                            AssistantMessage(
-                                false,
-                                "Encontré $fileCount archivo(s) y $contactCount contacto(s) para \"${intent.query}\". Mira los resultados debajo."
-                            )
-                        )
-                    }
-                }
-                is AssistantIntent.SearchWeb -> {
-                    viewModel.assistantManager.webSearch(intent.query)
-                    post(AssistantMessage(false, "Buscando \"${intent.query}\" en la web…"))
-                }
-                AssistantIntent.Weather -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.describeWeather(realWeather)))
-                }
-                is AssistantIntent.CreateNote -> {
-                    viewModel.saveEntry(
-                        id = 0L,
-                        title = intent.text.take(40),
-                        body = intent.text,
-                        onComplete = { newId ->
-                            post(AssistantMessage(false, "Nota guardada. Toca para abrirla."))
+                            "No pude controlar la linterna en este dispositivo."
                         }
                     )
-                }
-                is AssistantIntent.Calculate -> {
-                    val value = AssistantParser.safeEvaluate(intent.expression)
-                    val reply = if (value == null) {
-                        "No pude calcular eso."
-                    } else {
-                        val pretty = if (value == value.toLong().toDouble()) {
-                            value.toLong().toString()
-                        } else {
-                            String.format(java.util.Locale.getDefault(), "%.4g", value)
-                        }
-                        "$pretty"
-                    }
-                    post(AssistantMessage(false, reply))
-                }
-                is AssistantIntent.SetTimer -> {
-                    viewModel.assistantManager.startTimer(intent.minutes)
-                    post(AssistantMessage(false, "Temporizador de ${intent.minutes} min en marcha."))
-                }
-                is AssistantIntent.SetAlarm -> {
-                    viewModel.assistantManager.setAlarm(intent.hour, intent.minute)
-                    post(
-                        AssistantMessage(
-                            false,
-                            "Alarma a las ${"%02d".format(intent.hour)}:${"%02d".format(intent.minute)}."
+                )
+            }
+            AssistantIntent.Battery -> {
+                post(AssistantMessage(false, viewModel.assistantManager.formatBattery()))
+            }
+            AssistantIntent.Lens -> {
+                post(AssistantMessage(false, "Abriendo el Lens para escanear…"))
+                onOpenLens()
+            }
+            is AssistantIntent.CloseApp -> {
+                post(AssistantMessage(false, viewModel.assistantManager.closeApp(intent.appName)))
+            }
+            is AssistantIntent.SendMessage -> {
+                post(AssistantMessage(false, viewModel.assistantManager.sendMessage(intent.contactName, intent.message)))
+            }
+            is AssistantIntent.CreateTask -> {
+                post(AssistantMessage(false, viewModel.assistantManager.createTask(intent.title, intent.dueInMinutes)))
+            }
+            is AssistantIntent.CreateEvent -> {
+                post(
+                    AssistantMessage(
+                        false,
+                        viewModel.assistantManager.createEvent(
+                            intent.title, intent.startInMinutes, intent.durationMinutes, intent.location
                         )
                     )
-                }
-                is AssistantIntent.Flashlight -> {
-                    val ok = viewModel.assistantManager.setFlashlight(intent.on)
-                    post(
-                        AssistantMessage(
-                            false,
-                            if (ok) {
-                                if (intent.on) "Linterna encendida." else "Linterna apagada."
-                            } else {
-                                "No pude controlar la linterna en este dispositivo."
-                            }
-                        )
+                )
+            }
+            AssistantIntent.NextEvent -> {
+                post(AssistantMessage(false, viewModel.assistantManager.describeNextEvent()))
+            }
+            AssistantIntent.Steps -> {
+                post(AssistantMessage(false, viewModel.assistantManager.stepsToday()))
+            }
+            is AssistantIntent.Volume -> {
+                post(AssistantMessage(false, viewModel.assistantManager.setVolume(intent.level, intent.mode)))
+            }
+            is AssistantIntent.RecordVoiceNote -> {
+                post(AssistantMessage(false, "Grabando ${intent.seconds} s de audio…"))
+                post(AssistantMessage(false, viewModel.assistantManager.recordVoiceNote(intent.seconds, intent.title)))
+            }
+            is AssistantIntent.SaveCurrentPlace -> {
+                post(AssistantMessage(false, viewModel.assistantManager.saveCurrentPlace(intent.name)))
+            }
+            is AssistantIntent.RunCustomTool -> {
+                post(AssistantMessage(false, "Ejecutando tu herramienta «${intent.toolName}»…"))
+                post(
+                    AssistantMessage(
+                        false,
+                        viewModel.assistantManager.runCustomTool(intent.toolId, intent.toolName, intent.args)
                     )
-                }
-                AssistantIntent.Battery -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.formatBattery()))
-                }
-                AssistantIntent.Lens -> {
-                    post(AssistantMessage(false, "Abriendo el Lens para escanear…"))
-                    onOpenLens()
-                }
-                is AssistantIntent.CloseApp -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.closeApp(intent.appName)))
-                }
-                is AssistantIntent.SendMessage -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.sendMessage(intent.contactName, intent.message)))
-                }
-                is AssistantIntent.CreateTask -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.createTask(intent.title, intent.dueInMinutes)))
-                }
-                is AssistantIntent.CreateEvent -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.createEvent(
-                        intent.title, intent.startInMinutes, intent.durationMinutes, intent.location
-                    )))
-                }
-                AssistantIntent.NextEvent -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.describeNextEvent()))
-                }
-                AssistantIntent.Steps -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.stepsToday()))
-                }
-                is AssistantIntent.Volume -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.setVolume(intent.level, intent.mode)))
-                }
-                is AssistantIntent.RecordVoiceNote -> {
-                    post(AssistantMessage(false, "Grabando ${intent.seconds} s de audio…"))
-                    post(AssistantMessage(false, viewModel.assistantManager.recordVoiceNote(intent.seconds, intent.title)))
-                }
-                is AssistantIntent.SaveCurrentPlace -> {
-                    post(AssistantMessage(false, viewModel.assistantManager.saveCurrentPlace(intent.name)))
-                }
-                is AssistantIntent.RunCustomTool -> {
-                    post(AssistantMessage(false, "Ejecutando tu herramienta «${intent.toolName}»…"))
-                    post(
-                        AssistantMessage(
-                            false,
-                            viewModel.assistantManager.runCustomTool(intent.toolId, intent.toolName, intent.args)
-                        )
-                    )
-                }
-                is AssistantIntent.Translate -> {
-                    val target = intent.targetLangHint ?: "en"
-                    val source = com.example.semantic.MlKitAnalyzer.identifyLanguage(intent.text)
-                    val result = com.example.semantic.MlKitAnalyzer.translateText(intent.text, source, target)
-                    val reply = result.fold(
-                        onSuccess = { "\"${intent.text}\" → $it" },
-                        onFailure = { "No pude traducir ahora mismo (¿sin conexión para descargar el modelo?)." }
-                    )
-                    post(AssistantMessage(false, reply))
-                }
-                AssistantIntent.Unknown -> {
-                    post(AssistantMessage(false, HELP_TEXT))
-                }
+                )
+            }
+            is AssistantIntent.Translate -> {
+                val target = intent.targetLangHint ?: "en"
+                val source = com.example.semantic.MlKitAnalyzer.identifyLanguage(intent.text)
+                val result = com.example.semantic.MlKitAnalyzer.translateText(intent.text, source, target)
+                val reply = result.fold(
+                    onSuccess = { "\"${intent.text}\" → $it" },
+                    onFailure = { "No pude traducir ahora mismo (¿sin conexión para descargar el modelo?)." }
+                )
+                post(AssistantMessage(false, reply))
+            }
+            AssistantIntent.Unknown -> {
+                post(AssistantMessage(false, HELP_TEXT))
+            }
         }
     }
 
-    /**
-     * RAG over the journal: embedding retrieval + Needle's answer, for
-     * questions like «¿qué escribí sobre el proyecto X?».
-     */
     suspend fun tryAnswerFromJournal(command: String): String? {
         val text = command.lowercase(java.util.Locale.getDefault())
         val triggers = listOf(
@@ -362,17 +348,15 @@ fun AssistantScreen(
         }
     }
 
-    /** Routes an utterance and executes whatever it resolves to. */
     fun execute(utterance: String, fromUser: Boolean = true) {
         val clean = utterance.trim()
         if (clean.isBlank()) return
         if (fromUser) post(AssistantMessage(true, clean))
         thinking = true
         scope.launch {
-            // Journal memory first: RAG over the local embeddings.
             val memory = tryAnswerFromJournal(clean)
             if (memory != null) {
-                post(AssistantMessage(false, memory + " · IA local (memoria del diario)"))
+                post(AssistantMessage(false, "$memory · IA local (memoria del diario)"))
                 thinking = false
                 return@launch
             }
@@ -393,8 +377,6 @@ fun AssistantScreen(
         execute(clean, fromUser = false)
     }
 
-    // Voice input: local Whistle transcription when downloaded, otherwise
-    // one-shot system dictation.
     fun startVoiceInput() {
         if (whistleUsable) {
             startWhistleCapture()
@@ -408,9 +390,6 @@ fun AssistantScreen(
         }
     }
 
-    /** Stops the Whistle capture and processes the audio locally:
-     *  tool calls straight from audio when the text model is also present,
-     *  plain local transcription otherwise. */
     fun stopWhistleAndProcess() {
         val pcm = whistleController.stop()
         if (pcm.isEmpty()) {
@@ -424,7 +403,6 @@ fun AssistantScreen(
 
             val keywords = com.example.ai.needle.WhistleKeywordBuilder.forAssistant(context)
             if (NeedleRuntime.isReady()) {
-                // Audio → tool calls (both models loaded).
                 val raw = withTimeoutOrNull(45_000) {
                     NeedleRuntime.completeAudio(pcm, "es", keywords = keywords)
                 }
@@ -435,7 +413,6 @@ fun AssistantScreen(
                     ?.let { p -> p.calls.mapNotNull { NeedleTools.callToIntent(it) } }
                     .orEmpty()
             } else {
-                // Whistle-only install: transcribe locally, then route text.
                 val parsed = withTimeoutOrNull(60_000) {
                     NeedleRuntime.transcribeLongAudio(pcm, "es", keywords = keywords)
                 }
@@ -449,7 +426,6 @@ fun AssistantScreen(
                 post(AssistantMessage(false, describe(calls.first()) + " · IA local"))
                 for (intent in calls) runIntent(intent)
             } else if (transcript.isNotBlank()) {
-                // Nothing the model trusted: fall back to the normal text path.
                 execute(transcript, fromUser = false)
             } else {
                 post(AssistantMessage(false, "No te entendí (silencio o ruido)."))
@@ -458,43 +434,27 @@ fun AssistantScreen(
         }
     }
 
-    // Keep the log scrolled to the latest message
     LaunchedEffect(messages.size, thinking) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
 
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
+    val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .testTag("assistant_screen")
     ) {
-        // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Asistente",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                )
-                Text(
-                    text = if (needleUsable) {
-                        "100% en tu dispositivo · IA local activa"
-                    } else {
-                        "100% en tu dispositivo · sin nube"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        GlassTopBar(
+            title = "Asistente",
+            subtitle = if (needleUsable) {
+                "100% en tu dispositivo · IA local activa"
+            } else {
+                "100% en tu dispositivo · sin nube"
+            },
+            onBack = onBack
+        )
 
         // Conversation
         LazyColumn(
@@ -502,9 +462,7 @@ fun AssistantScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = 16.dp, vertical = 8.dp
-            ),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(messages) { message ->
@@ -519,40 +477,41 @@ fun AssistantScreen(
                         CircularProgressIndicator(
                             strokeWidth = 2.dp,
                             modifier = Modifier.size(16.dp),
-                            color = GoogleBlue
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "…",
-                            style = MaterialTheme.typography.bodyMedium,
+                            "Pensando…",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
-            // Search results inline (from the last device search)
             if (deviceFiles.isNotEmpty()) {
                 item {
                     Text(
                         "Archivos encontrados",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = GoogleBlue,
-                        modifier = Modifier.padding(horizontal = 8.dp)
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
                 items(deviceFiles.take(4), key = { "a_file_${it.id}" }) { file ->
-                    Card(
-                        shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable { viewModel.openDeviceFile(file) }
                     ) {
                         Text(
                             file.displayName,
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             maxLines = 1,
-                            modifier = Modifier.padding(10.dp)
+                            modifier = Modifier.padding(12.dp)
                         )
                     }
                 }
@@ -562,16 +521,18 @@ fun AssistantScreen(
                     Text(
                         "Contactos encontrados",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = GoogleGreen,
-                        modifier = Modifier.padding(horizontal = 8.dp)
+                        color = NowBriefVitalsGreen,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
                 items(deviceContacts.take(4), key = { "a_contact_${it.id}" }) { contact ->
-                    Card(
-                        shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable {
                                 contact.phoneNumber?.let { viewModel.assistantManager.dialContact(it) }
                             }
@@ -580,151 +541,159 @@ fun AssistantScreen(
                             "${contact.displayName}  ·  ${contact.phoneNumber ?: ""}",
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
-                            modifier = Modifier.padding(10.dp)
+                            modifier = Modifier.padding(12.dp)
                         )
                     }
                 }
             }
         }
 
-        // Suggestion chips
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // Frosted Glass Bottom Dock: suggestion chips + composer
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.80f),
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            SuggestionChip("¿Qué tiempo hace?") { submit(it) }
-            SuggestionChip("Abre la linterna") { submit(it) }
-            SuggestionChip("Batería") { submit(it) }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SuggestionChip("Cuánto es 12 por 7") { submit(it) }
-            SuggestionChip("Apunta comprar café") { submit(it) }
-            SuggestionChip("Escanea esto") { submit(it) }
-        }
-
-        // Input row: text field + mic + send.
-        // NOTE: no imePadding() here — the Scaffold's contentWindowInsets
-        // already include the IME (safeDrawing) and the activity now uses
-        // adjustResize; double-insetting used to push the field off-screen.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = typedInput,
-                onValueChange = { typedInput = it },
-                placeholder = { Text("Pregunta o pide algo…", fontSize = 14.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { submit(typedInput) }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = GoogleBlue.copy(alpha = 0.6f),
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                ),
-                modifier = Modifier.weight(1f)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            if (whistleRecording) {
-                Surface(
-                    shape = CircleShape,
-                    color = ForestPrimary,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clickable { stopWhistleAndProcess() }
-                        .testTag("assistant_whistle_stop")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = "Procesar con IA local",
-                            tint = androidx.compose.ui.graphics.Color.White
-                        )
-                    }
-                }
-            } else if (isDictating) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clickable { viewModel.stopDictation() }
-                        .testTag("assistant_stop_mic")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = "Detener escucha",
-                            tint = MaterialTheme.colorScheme.onError
-                        )
-                    }
-                }
-            } else {
-                Surface(
-                    shape = CircleShape,
-                    color = GoogleBlue,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clickable { startVoiceInput() }
-                        .testTag("assistant_mic")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.Mic,
-                            contentDescription = "Hablar",
-                            tint = androidx.compose.ui.graphics.Color.White
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            IconButton(
-                onClick = { submit(typedInput) },
-                enabled = typedInput.isNotBlank(),
-                modifier = Modifier.testTag("assistant_send")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Enviar",
-                    tint = if (typedInput.isNotBlank()) GoogleBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
-            }
-        }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.14f))
 
-        // Live partial transcript caption (system dictation), or the local
-        // Whistle capture indicator.
-        if (whistleRecording) {
-            Text(
-                text = "Escuchando (IA local)… pulsa detener para procesar",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-            )
-        } else if (isDictating && partialTranscript.isNotBlank()) {
-            Text(
-                text = "Escuchando: $partialTranscript",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-            )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SuggestionChip("¿Qué tiempo hace?") { submit(it) }
+                    SuggestionChip("Abre la linterna") { submit(it) }
+                    SuggestionChip("Batería") { submit(it) }
+                    SuggestionChip("Cuánto es 12 por 7") { submit(it) }
+                    SuggestionChip("Apunta comprar café") { submit(it) }
+                    SuggestionChip("Escanea esto") { submit(it) }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = typedInput,
+                        onValueChange = { typedInput = it },
+                        placeholder = { Text("Pregunta o pide algo…", fontSize = 14.sp) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submit(typedInput) }),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    if (whistleRecording) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { stopWhistleAndProcess() }
+                                .testTag("assistant_whistle_stop")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Stop,
+                                    contentDescription = "Procesar con IA local",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+                    } else if (isDictating) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { viewModel.stopDictation() }
+                                .testTag("assistant_stop_mic")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Stop,
+                                    contentDescription = "Detener escucha",
+                                    tint = MaterialTheme.colorScheme.onError
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { startVoiceInput() }
+                                .testTag("assistant_mic")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Mic,
+                                    contentDescription = "Hablar",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    IconButton(
+                        onClick = { submit(typedInput) },
+                        enabled = typedInput.isNotBlank(),
+                        modifier = Modifier.testTag("assistant_send")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Enviar",
+                            tint = if (typedInput.isNotBlank()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            }
+                        )
+                    }
+                }
+
+                if (whistleRecording) {
+                    Text(
+                        text = "Escuchando (IA local)… pulsa detener para procesar",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                    )
+                } else if (isDictating && partialTranscript.isNotBlank()) {
+                    Text(
+                        text = "Escuchando: $partialTranscript",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -737,19 +706,29 @@ private fun MessageBubble(message: AssistantMessage) {
     ) {
         Surface(
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (message.isUser) 16.dp else 4.dp,
-                bottomEnd = if (message.isUser) 4.dp else 16.dp
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (message.isUser) 18.dp else 4.dp,
+                bottomEnd = if (message.isUser) 4.dp else 18.dp
             ),
-            color = if (message.isUser) GoogleBlue else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            color = if (message.isUser) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)
+            },
+            border = if (message.isUser) {
+                null
+            } else {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+            },
+            tonalElevation = if (message.isUser) 0.dp else 1.dp,
             modifier = Modifier.widthIn(max = 320.dp)
         ) {
             Text(
                 text = message.text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (message.isUser) {
-                    androidx.compose.ui.graphics.Color.White
+                    MaterialTheme.colorScheme.onPrimary
                 } else {
                     MaterialTheme.colorScheme.onSurface
                 },
@@ -763,15 +742,18 @@ private fun MessageBubble(message: AssistantMessage) {
 private fun SuggestionChip(text: String, onClick: (String) -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = ForestPrimary.copy(alpha = 0.10f),
-        modifier = Modifier.clickable { onClick(text) }
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)),
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onClick(text) }
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = ForestPrimary,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.primary,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
         )
     }
 }
@@ -783,7 +765,7 @@ private fun describe(intent: AssistantIntent): String = when (intent) {
     is AssistantIntent.SendMessage -> "Preparando el mensaje…"
     is AssistantIntent.SearchDevice -> "Buscando \"${intent.query}\" en tu teléfono…"
     is AssistantIntent.SearchWeb -> "Buscando en la web…"
-    is AssistantIntent.Weather -> "Consultando el clima…"
+    AssistantIntent.Weather -> "Consultando el clima…"
     is AssistantIntent.CreateNote -> "Guardando tu nota…"
     is AssistantIntent.CreateTask -> "Creando la tarea…"
     is AssistantIntent.CreateEvent -> "Creando el evento…"

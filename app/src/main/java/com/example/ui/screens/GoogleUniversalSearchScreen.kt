@@ -1,10 +1,9 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,11 +12,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,22 +30,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.ContactPhone
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,18 +67,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.contacts.ContactsHelper
-import com.example.data.DeviceFileInfo
 import com.example.rss.RssArticle
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
-import com.example.ui.components.GoogleRed
+import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
-import com.example.ui.theme.ForestPrimary
+import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
-import com.example.wallpaper.NowBriefAppBackground
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 enum class UniversalSearchTab {
     TODO,
@@ -129,8 +121,8 @@ fun GoogleUniversalSearchScreen(
             val q = searchQuery.trim().lowercase()
             entries.filter { item ->
                 item.entry.title.lowercase().contains(q) ||
-                item.entry.body.lowercase().contains(q) ||
-                item.tags.any { it.name.lowercase().contains(q) }
+                    item.entry.body.lowercase().contains(q) ||
+                    item.tags.any { it.name.lowercase().contains(q) }
             }
         }
     }
@@ -143,9 +135,6 @@ fun GoogleUniversalSearchScreen(
         }
     }
 
-    // Storage permission: without READ_MEDIA_* / READ_EXTERNAL_STORAGE the
-    // MediaStore query only returns this app's own files, which made the
-    // "Files" tab look permanently empty.
     var storageGranted by remember { mutableStateOf(viewModel.deviceSearchManager.hasStoragePermission()) }
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -154,29 +143,30 @@ fun GoogleUniversalSearchScreen(
         if (searchQuery.isNotBlank()) viewModel.searchDevice(searchQuery)
     }
 
-    val realWeather by viewModel.realWeather.collectAsState()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .testTag("universal_search_screen")
     ) {
-        NowBriefAppBackground(
-            modifier = Modifier.fillMaxSize(),
-            weatherCode = realWeather.weatherCode
-        )
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Search Header Bar
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
+        // Frosted Glass Search Header Bar extending cleanly beneath status bar
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Surface(
                     shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    border = BorderStroke(1.dp, glassBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(26.dp))
@@ -211,7 +201,7 @@ fun GoogleUniversalSearchScreen(
                             }
                         }
                         IconButton(onClick = onOpenVoiceModal) {
-                            Icon(Icons.Default.Mic, contentDescription = "Voz", tint = GoogleBlue)
+                            Icon(Icons.Default.Mic, contentDescription = "Voz", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -236,45 +226,55 @@ fun GoogleUniversalSearchScreen(
                         FilterChip(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            label = { Text(label, fontSize = 12.sp) },
+                            label = { Text(label, fontSize = 12.sp, style = MaterialTheme.typography.labelMedium.tabular) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = GoogleBlue.copy(alpha = 0.15f),
-                                selectedLabelColor = GoogleBlue
+                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                                selectedLabelColor = MaterialTheme.colorScheme.primary
                             )
                         )
                     }
                 }
             }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.14f))
 
-            // Search Content List
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 104.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+        // Search Content List
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 14.dp,
+                bottom = navBottom + 96.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             if (searchQuery.isBlank()) {
                 item {
-                    Text(
-                        text = "Escribe para buscar contactos en tu agenda, archivos guardados en el teléfono o tus notas personales.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp)
-                    )
+                    LiquidGlassCard(
+                        cornerRadius = 18.dp,
+                        contentPadding = 16.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Escribe para buscar contactos en tu agenda, archivos guardados en el teléfono, notas personales o titulares descargados.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             } else {
-                // Contextual storage permission card
                 if (!storageGranted) {
                     item {
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        LiquidGlassCard(
+                            cornerRadius = 18.dp,
+                            contentPadding = 14.dp,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -294,7 +294,7 @@ fun GoogleUniversalSearchScreen(
                                             viewModel.requiredStoragePermissions()
                                         )
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
                                     Text("Permitir", fontSize = 12.sp)
                                 }
@@ -302,28 +302,36 @@ fun GoogleUniversalSearchScreen(
                         }
                     }
                 }
+
                 // SECTION: Contactos
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.CONTACTOS) {
                     if (!contactsPermissionGranted) {
                         item {
-                            Card(
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            LiquidGlassCard(
+                                cornerRadius = 18.dp,
+                                contentPadding = 14.dp,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Buscar en tus contactos", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                        Text("Permite a la app encontrar personas en tu agenda telefónica.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "Buscar en tus contactos",
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        Text(
+                                            "Permite a la app encontrar personas en tu agenda telefónica.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Button(
                                         onClick = { contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                     ) {
                                         Text("Permitir", fontSize = 12.sp)
                                     }
@@ -332,12 +340,18 @@ fun GoogleUniversalSearchScreen(
                         }
                     } else if (contactResults.isNotEmpty()) {
                         item {
-                            Text("Contactos encontrados", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                            Text(
+                                "Contactos encontrados",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                         items(contactResults, key = { "contact_${it.id}" }) { contact ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = glassSurface,
+                                border = BorderStroke(1.dp, glassBorder),
+                                tonalElevation = 1.dp,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -346,24 +360,28 @@ fun GoogleUniversalSearchScreen(
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = GoogleGreen.copy(alpha = 0.15f),
+                                        color = NowBriefVitalsGreen.copy(alpha = 0.16f),
                                         modifier = Modifier.size(38.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.Person, contentDescription = null, tint = GoogleGreen, modifier = Modifier.size(20.dp))
+                                            Icon(Icons.Default.Person, contentDescription = null, tint = NowBriefVitalsGreen, modifier = Modifier.size(20.dp))
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(contact.displayName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-                                        Text(contact.phoneNumber ?: "Sin teléfono", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            contact.phoneNumber ?: "Sin teléfono",
+                                            style = MaterialTheme.typography.bodySmall.tabular,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     if (!contact.phoneNumber.isNullOrBlank()) {
                                         IconButton(onClick = { ContactsHelper.dialContact(context, contact.phoneNumber) }) {
-                                            Icon(Icons.Default.Call, contentDescription = "Llamar", tint = GoogleGreen, modifier = Modifier.size(20.dp))
+                                            Icon(Icons.Default.Call, contentDescription = "Llamar", tint = NowBriefVitalsGreen, modifier = Modifier.size(20.dp))
                                         }
                                         IconButton(onClick = { ContactsHelper.messageContact(context, contact.phoneNumber) }) {
-                                            Icon(Icons.Default.Message, contentDescription = "Mensaje", tint = GoogleBlue, modifier = Modifier.size(20.dp))
+                                            Icon(Icons.Default.Message, contentDescription = "Mensaje", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                         }
                                     }
                                 }
@@ -385,12 +403,18 @@ fun GoogleUniversalSearchScreen(
                         }
                     } else if (fileResults.isNotEmpty()) {
                         item {
-                            Text("Archivos en el dispositivo", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                            Text(
+                                "Archivos en el dispositivo",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                         items(fileResults, key = { "file_${it.id}" }) { file ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = glassSurface,
+                                border = BorderStroke(1.dp, glassBorder),
+                                tonalElevation = 1.dp,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { viewModel.openDeviceFile(file) }
@@ -400,23 +424,42 @@ fun GoogleUniversalSearchScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        modifier = Modifier.size(36.dp)
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(38.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                                            Icon(
+                                                Icons.Default.InsertDriveFile,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(file.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            file.displayName,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         val kb = file.sizeBytes / 1024
                                         val sizeStr = if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"
-                                        Text("$sizeStr • ${file.mimeType}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "$sizeStr • ${file.mimeType}",
+                                            style = MaterialTheme.typography.labelSmall.tabular,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     IconButton(onClick = { viewModel.openDeviceFile(file) }) {
-                                        Icon(Icons.Default.OpenInNew, contentDescription = "Abrir", tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                                        Icon(
+                                            Icons.Default.OpenInNew,
+                                            contentDescription = "Abrir",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
                                 }
                             }
@@ -428,12 +471,18 @@ fun GoogleUniversalSearchScreen(
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.NOTAS) {
                     if (matchedNotes.isNotEmpty()) {
                         item {
-                            Text("Notas y memorias", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                            Text(
+                                "Notas y memorias",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                         items(matchedNotes, key = { "note_${it.entry.id}" }) { item ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = glassSurface,
+                                border = BorderStroke(1.dp, glassBorder),
+                                tonalElevation = 1.dp,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onNavigateToDetail(item.entry.id) }
@@ -441,7 +490,13 @@ fun GoogleUniversalSearchScreen(
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(item.entry.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text(item.entry.body, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        item.entry.body,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -452,26 +507,38 @@ fun GoogleUniversalSearchScreen(
                 if (selectedTab == UniversalSearchTab.TODO || selectedTab == UniversalSearchTab.NOTICIAS) {
                     if (matchedNews.isNotEmpty()) {
                         item {
-                            Text("Noticias", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = GoogleBlue)
+                            Text(
+                                "Noticias",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                         items(matchedNews, key = { "news_${it.id}" }) { article ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = glassSurface,
+                                border = BorderStroke(1.dp, glassBorder),
+                                tonalElevation = 1.dp,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { activeReadingArticle = article }
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(article.sourceTitle, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = GoogleRed)
-                                    Text(article.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                                    Text(
+                                        article.sourceTitle,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                    Text(
+                                        article.title,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
-        }
         }
     }
 

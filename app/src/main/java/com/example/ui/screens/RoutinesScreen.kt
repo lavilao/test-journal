@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,22 +27,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -77,10 +75,11 @@ import com.example.routine.RoutineEngine.Action
 import com.example.routine.RoutineEngine.Trigger
 import com.example.routine.RoutineEngine.UserRoutine
 import com.example.ui.components.AppIconImage
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
-import com.example.ui.components.GoogleRed
+import com.example.ui.components.GlassTopBar
+import com.example.ui.components.LiquidGlassCard
+import com.example.ui.theme.NowBriefVitalsGreen
 import com.example.ui.theme.TerracottaAccent
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -170,52 +169,41 @@ fun RoutinesScreen(
         refreshSensors()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-    ) {
-        // ---------------- Header ----------------
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp, bottom = 4.dp)
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Rutinas aprendidas",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                )
-                Text(
-                    text = "Todo se aprende y se queda en tu teléfono",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = {
-                loading = true
-                scope.launch {
-                    viewModel.refreshHabitFacts()
-                    eventCounts = HabitEngine.eventCounts(context)
-                    loading = false
+    Column(modifier = Modifier.fillMaxSize()) {
+        GlassTopBar(
+            title = "Rutinas aprendidas",
+            subtitle = "Todo se aprende y se queda en tu teléfono",
+            onBack = onBack,
+            actions = {
+                IconButton(onClick = {
+                    loading = true
+                    scope.launch {
+                        viewModel.refreshHabitFacts()
+                        eventCounts = HabitEngine.eventCounts(context)
+                        loading = false
+                    }
+                }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
                 }
-            }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
             }
-        }
-
-        val days = digest?.daysObserved ?: 0
-        Text(
-            text = if (days >= 2) "$days días observados · ${digest?.eventCount ?: 0} eventos" else "Aprendiendo — necesito un par de días",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
         )
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            Spacer(modifier = Modifier.height(10.dp))
+            val days = digest?.daysObserved ?: 0
+            Text(
+                text = if (days >= 2) "$days días observados · ${digest?.eventCount ?: 0} eventos" else "Aprendiendo — necesito un par de días",
+                style = MaterialTheme.typography.bodySmall.tabular,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+            )
 
         if (loading && digest == null) {
             Box(
@@ -332,7 +320,7 @@ fun RoutinesScreen(
         val d = digest
 
         // ---------------- Sleep ----------------
-        SectionCard(title = "Sueño", icon = { Icon(Icons.Default.Bedtime, null, tint = GoogleBlue) }) {
+        SectionCard(title = "Sueño", icon = { Icon(Icons.Default.Bedtime, null, tint = MaterialTheme.colorScheme.primary) }) {
             val sleep = d?.sleep
             if (sleep == null || sleep.nightsWithData < 2) {
                 LearningText("Aprendiendo tu ventana de sueño — déjame un par de noches más.")
@@ -363,7 +351,7 @@ fun RoutinesScreen(
                     FactRow(
                         "Deuda de sueño",
                         "${HabitMiners.formatDuration(it.toLong())} menos que tu mediana (3 últimas noches)",
-                        valueColor = if (it > 90) GoogleRed else TerracottaAccent
+                        valueColor = if (it > 90) MaterialTheme.colorScheme.error else TerracottaAccent
                     )
                 }
                 sleep.bedtimeDriftMinutesPerNight?.let {
@@ -383,7 +371,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Apps ----------------
-        SectionCard(title = "Apps y predicciones", icon = { Icon(Icons.Default.Bolt, null, tint = GoogleBlue) }) {
+        SectionCard(title = "Apps y predicciones", icon = { Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary) }) {
             val apps = d?.apps
             if (apps == null || (apps.signature.isEmpty() && apps.predictedNow.isEmpty())) {
                 LearningText("Activa el acceso de uso para aprender tus apps.")
@@ -453,7 +441,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Places ----------------
-        SectionCard(title = "Lugares", icon = { Icon(Icons.Default.LocationOn, null, tint = GoogleGreen) }) {
+        SectionCard(title = "Lugares", icon = { Icon(Icons.Default.LocationOn, null, tint = NowBriefVitalsGreen) }) {
             val places = d?.places
             if (places == null || (places.homeBssid == null && places.workBssid == null)) {
                 LearningText("Con el permiso de ubicación aprenderé casa y trabajo del Wi-Fi nocturno/diurno.")
@@ -487,7 +475,7 @@ fun RoutinesScreen(
                             Text(
                                 text = "Guardada en tus lugares ✓",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = GoogleGreen,
+                                color = NowBriefVitalsGreen,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
                         }
@@ -523,7 +511,7 @@ fun RoutinesScreen(
                             Text(
                                 text = "Guardado en tus lugares ✓",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = GoogleGreen,
+                                color = NowBriefVitalsGreen,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
                         }
@@ -539,7 +527,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Battery coach ----------------
-        SectionCard(title = "Entrenador de batería", icon = { Icon(Icons.Default.BatteryStd, null, tint = GoogleGreen) }) {
+        SectionCard(title = "Entrenador de batería", icon = { Icon(Icons.Default.BatteryStd, null, tint = NowBriefVitalsGreen) }) {
             val battery = d?.battery
             if (battery == null || battery.drainPerHour == null) {
                 LearningText("Necesito unas horas de uso para estimar tu consumo real.")
@@ -553,7 +541,7 @@ fun RoutinesScreen(
                     FactRow(
                         "Llegada a la hora de dormir",
                         "~$it%",
-                        valueColor = if (it <= 15) GoogleRed else GoogleGreen
+                        valueColor = if (it <= 15) MaterialTheme.colorScheme.error else NowBriefVitalsGreen
                     )
                 }
                 battery.typicalChargeMinuteOfDay?.let {
@@ -564,7 +552,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Attention ----------------
-        SectionCard(title = "Atención y pantalla", icon = { Icon(Icons.Default.TrendingUp, null, tint = GoogleBlue) }) {
+        SectionCard(title = "Atención y pantalla", icon = { Icon(Icons.Default.TrendingUp, null, tint = MaterialTheme.colorScheme.primary) }) {
             val attention = d?.attention
             if (attention == null || attention.screenByDay.size < 2) {
                 LearningText("Aún mido tu tiempo de pantalla y desbloqueos.")
@@ -602,7 +590,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Notifications ----------------
-        SectionCard(title = "Interrupciones", icon = { Icon(Icons.Default.Notifications, null, tint = GoogleRed) }) {
+        SectionCard(title = "Interrupciones", icon = { Icon(Icons.Default.Notifications, null, tint = MaterialTheme.colorScheme.error) }) {
             val notifs = d?.notifications
             if (notifs == null || notifs.topInterruptors.isEmpty()) {
                 LearningText("Concede el acceso de notificaciones para ver quién te interrumpe.")
@@ -624,7 +612,7 @@ fun RoutinesScreen(
                             text = "~${t.perDay.toInt()}/día" +
                                 (t.ignoreRate?.let { " · ignoras el ${(it * 100).toInt()}%" } ?: ""),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if ((t.ignoreRate ?: 0f) > 0.6f) GoogleRed else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if ((t.ignoreRate ?: 0f) > 0.6f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -632,7 +620,7 @@ fun RoutinesScreen(
         }
 
         // ---------------- Steps ----------------
-        SectionCard(title = "Pasos", icon = { Icon(Icons.Default.DirectionsWalk, null, tint = GoogleGreen) }) {
+        SectionCard(title = "Pasos", icon = { Icon(Icons.Default.DirectionsWalk, null, tint = NowBriefVitalsGreen) }) {
             val steps = d?.steps
             // Provenance, the user's «no sé de dónde saca los pasos»:
             val sourceLabel = when (com.example.health.HealthConnectManager.currentStepsSource(context)) {
@@ -661,7 +649,7 @@ fun RoutinesScreen(
 
         // ---------------- Routine change ----------------
         d?.rhythmChange?.let { rhythm ->
-            SectionCard(title = "Cambio de rutina", icon = { Icon(Icons.Default.TrendingUp, null, tint = GoogleRed) }) {
+            SectionCard(title = "Cambio de rutina", icon = { Icon(Icons.Default.TrendingUp, null, tint = MaterialTheme.colorScheme.error) }) {
                 Text(
                     text = rhythm.summary,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
@@ -680,7 +668,7 @@ fun RoutinesScreen(
         // ---------------- Daily brief (local AI) ----------------
         SectionCard(
             title = "Brief del día · IA local",
-            icon = { Icon(Icons.Default.AutoAwesome, null, tint = GoogleBlue) },
+            icon = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) },
             testTag = "routines_brief_card"
         ) {
             if (generatingBrief) {
@@ -730,7 +718,7 @@ fun RoutinesScreen(
                         }
                     },
                     enabled = digest != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
@@ -775,7 +763,7 @@ fun RoutinesScreen(
                 Text(
                     text = "Próximo: ${SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(Date(nextMorning))}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = GoogleGreen,
+                    color = NowBriefVitalsGreen,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -808,7 +796,7 @@ fun RoutinesScreen(
                 Text(
                     text = "Próximo: ${SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(Date(nextWeekly))}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = GoogleGreen,
+                    color = NowBriefVitalsGreen,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -858,7 +846,7 @@ fun RoutinesScreen(
                         Text(
                             text = if (hcGranted) "Concedidos ✔" else "No concedidos todavía",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (hcGranted) GoogleGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (hcGranted) NowBriefVitalsGreen else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     OutlinedButton(onClick = {
@@ -945,13 +933,14 @@ fun RoutinesScreen(
                     .padding(top = 4.dp)
                     .testTag("routines_delete_btn")
             ) {
-                Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = GoogleRed)
+                Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Borrar todos los datos de hábitos", color = GoogleRed)
+                Text("Borrar todos los datos de hábitos", color = MaterialTheme.colorScheme.error)
             }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+        }
     }
 
     if (showDeleteDialog) {
@@ -969,7 +958,7 @@ fun RoutinesScreen(
                     }
                     showDeleteDialog = false
                 }) {
-                    Text("Borrar", color = GoogleRed)
+                    Text("Borrar", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
@@ -1340,28 +1329,27 @@ private fun SectionCard(
     testTag: String? = null,
     content: @Composable () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
+    LiquidGlassCard(
+        cornerRadius = 18.dp,
+        contentPadding = 16.dp,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .let { m -> if (testTag != null) m.testTag(testTag) else m }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                icon?.invoke()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                icon()
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            content()
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        content()
     }
 }
 
@@ -1385,7 +1373,7 @@ private fun SensorRow(
             modifier = Modifier
                 .size(10.dp)
                 .background(
-                    if (granted) GoogleGreen else MaterialTheme.colorScheme.outline,
+                    if (granted) NowBriefVitalsGreen else MaterialTheme.colorScheme.outline,
                     CircleShape
                 )
         ) {}
@@ -1405,7 +1393,7 @@ private fun SensorRow(
             Text(
                 text = "activo",
                 style = MaterialTheme.typography.labelMedium,
-                color = GoogleGreen
+                color = NowBriefVitalsGreen
             )
         } else {
             TextButton(onClick = onAction) {
@@ -1451,7 +1439,7 @@ private fun FactRow(
                     modifier = Modifier
                         .fillMaxWidth(progress.coerceIn(0f, 1f))
                         .height(6.dp)
-                        .background(GoogleBlue, RoundedCornerShape(3.dp))
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
                 )
             }
         }
@@ -1483,7 +1471,7 @@ private fun Sparkline(values: List<Float>, modifier: Modifier = Modifier) {
                     .weight(1f)
                     .height((fraction * 44).dp)
                     .background(
-                        if (v == values.last()) GoogleBlue else GoogleBlue.copy(alpha = 0.45f),
+                        if (v == values.last()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
                         RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
                     )
             )

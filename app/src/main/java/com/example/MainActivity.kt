@@ -16,8 +16,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
@@ -58,6 +59,7 @@ import com.example.ui.screens.VoiceAndAssistantScreen
 import com.example.ui.theme.NowBriefTheme
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
+import com.example.wallpaper.NowBriefAppBackground
 import kotlinx.coroutines.flow.MutableStateFlow
 
 sealed interface AppScreen {
@@ -221,6 +223,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         mutableStateOf<AppScreen>(AppScreen.Main(MainNavTab.INICIO))
     }
     val currentTab by viewModel.currentTab.collectAsState()
+    val realWeather by viewModel.realWeather.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val appContext = androidx.compose.ui.platform.LocalContext.current
 
@@ -353,7 +356,8 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
         }
 
         Scaffold(
-            contentWindowInsets = WindowInsets.safeDrawing,
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
             Box(
@@ -361,6 +365,12 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
+                if (screenState !is AppScreen.Lens) {
+                    NowBriefAppBackground(
+                        modifier = Modifier.fillMaxSize(),
+                        weatherCode = realWeather.weatherCode
+                    )
+                }
                 AnimatedContent(
                     targetState = screenState,
                     transitionSpec = { fadeIn(animationSpec = tween(180)) togetherWith fadeOut(animationSpec = tween(140)) },
@@ -478,6 +488,7 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
                             .padding(bottom = 10.dp)
                     ) {
                         NowBriefGlassNavBar(

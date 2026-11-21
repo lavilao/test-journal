@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -101,9 +104,8 @@ import com.example.data.model.JournalTemplate
 import com.example.media.PlaybackState
 import com.example.media.RecordingState
 import com.example.ui.components.EmojiMoodPicker
+import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.LiveMarkdownEditor
-import com.example.ui.components.GoogleBlue
-import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.launch
@@ -279,17 +281,18 @@ fun EntryEditScreen(
     }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         if (entryId == null || entryId == 0L) "Nueva memoria" else "Editar memoria",
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        // Back = save (Day One behavior) when there is content.
                         if (title.isNotBlank() || body.isNotBlank()) {
                             persistEntry { onBack() }
                         } else {
@@ -328,7 +331,7 @@ fun EntryEditScreen(
                             }
                         },
                         enabled = title.isNotBlank() || body.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
                             .padding(end = 8.dp)
                             .testTag("save_entry_button")
@@ -339,7 +342,7 @@ fun EntryEditScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
                 )
             )
         }
@@ -348,6 +351,8 @@ fun EntryEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
         ) {
@@ -632,17 +637,17 @@ fun EntryEditScreen(
                             key(tag) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = ForestPrimary.copy(alpha = 0.12f)
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
                                     ) {
-                                        Text("#$tag", style = MaterialTheme.typography.labelMedium, color = ForestPrimary)
+                                        Text("#$tag", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                         Icon(
                                             Icons.Default.Close,
                                             contentDescription = "Quitar etiqueta",
-                                            tint = ForestPrimary,
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier
                                                 .size(14.dp)
                                                 .clickable { tagsList.remove(tag) }
@@ -676,7 +681,7 @@ fun EntryEditScreen(
                             },
                             modifier = Modifier.testTag("add_tag_button")
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = "Añadir etiqueta", tint = ForestPrimary)
+                            Icon(Icons.Default.Add, contentDescription = "Añadir etiqueta", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
 
@@ -700,16 +705,13 @@ fun EntryEditScreen(
                         }
                     }
                     pages.forEachIndexed { index, page ->
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                            shape = RoundedCornerShape(10.dp),
+                        LiquidGlassCard(
+                            cornerRadius = 16.dp,
+                            contentPadding = 0.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
                                 .clickable {
-                                    // v1.6: sections are EDITABLE after
-                                    // creation — tap opens the same dialog
-                                    // pre-filled (before: delete-only).
                                     editingPageIndex = index
                                     newPageTitle = page.title
                                     newPageBody = page.body
@@ -830,7 +832,7 @@ fun EntryEditScreen(
                             editingPageIndex = null
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text(if (isEditing) "Guardar cambios" else "Añadir")
                 }
@@ -897,7 +899,7 @@ fun EntryEditScreen(
                                 ContactsHelper.dialContact(context, contact.phoneNumber)
                                 selectedContactAction = null
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
                             Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
                             Text("Llamar")
@@ -950,7 +952,7 @@ private fun ActionChip(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
         }
@@ -997,7 +999,7 @@ private fun VoiceRecordingBar(
                         Icon(
                             if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                             contentDescription = "Pausa/Reanudar",
-                            tint = ForestPrimary
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                     IconButton(
@@ -1032,12 +1034,14 @@ private fun AttachedVoiceNote(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    LiquidGlassCard(
+        cornerRadius = 16.dp,
+        contentPadding = 12.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -1046,7 +1050,7 @@ private fun AttachedVoiceNote(
                     Icon(
                         if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Reproducir",
-                        tint = ForestPrimary
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -1061,7 +1065,7 @@ private fun AttachedVoiceNote(
                     }
                 }
                 IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Editar transcripción", tint = ForestPrimary)
+                    Icon(Icons.Default.Edit, contentDescription = "Editar transcripción", tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error)

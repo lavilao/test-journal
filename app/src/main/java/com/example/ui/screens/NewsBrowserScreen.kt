@@ -9,9 +9,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,8 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -46,31 +49,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.rss.RssArticle
-import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleDiscoverCard
+import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
-import com.example.wallpaper.NowBriefAppBackground
 import kotlinx.coroutines.launch
 
-/**
- * v1.6 — Full news browser, shared by BOTH interface modes (feature parity:
- * everything you can see and DO in one mode exists in the other). Samsung
- * mode gets it on the aurora background, Google mode on the plain surface —
- * but the cards, the reading, the saving and the source filters are exactly
- * the same components.
- *
- * Adds what neither home had: per-source filtering of the whole article
- * list, plus an explicit refresh with visible progress.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewsBrowserScreen(
     viewModel: JournalViewModel,
-    isSamsungMode: Boolean,
+    @Suppress("UNUSED_PARAMETER") isSamsungMode: Boolean = true,
     onBack: () -> Unit,
     onNavigateToDetail: (Long) -> Unit
 ) {
@@ -87,13 +81,19 @@ fun NewsBrowserScreen(
         if (selectedSource == null) rssArticles
         else rssArticles.filter { it.sourceTitle == selectedSource }
     }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Scaffold(
-        containerColor = if (isSamsungMode) MaterialTheme.colorScheme.surface.copy(alpha = 0f)
-        else MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text("Noticias", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+                title = {
+                    Text(
+                        "Noticias",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
@@ -102,7 +102,9 @@ fun NewsBrowserScreen(
                 actions = {
                     if (isRssLoading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp).padding(end = 4.dp),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(end = 4.dp),
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -119,85 +121,85 @@ fun NewsBrowserScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (isSamsungMode) MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                    else MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
                 )
             )
         }
     ) { padding ->
-        val realWeather by viewModel.realWeather.collectAsState()
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (isSamsungMode) {
-                NowBriefAppBackground(
-                    modifier = Modifier.fillMaxSize(),
-                    weatherCode = realWeather.weatherCode
-                )
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                // Source filter chips (horizontally scrollable)
-                if (rssSources.size > 1) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            if (rssSources.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedSource == null,
+                        onClick = { selectedSource = null },
+                        leadingIcon = {
+                            Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(14.dp))
+                        },
+                        label = {
+                            Text("Todas (${rssArticles.size})", style = MaterialTheme.typography.labelMedium.tabular)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            selectedLabelColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    rssSources.forEach { source ->
+                        val count = rssArticles.count { it.sourceTitle == source.name }
                         FilterChip(
-                            selected = selectedSource == null,
-                            onClick = { selectedSource = null },
-                            leadingIcon = {
-                                Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(14.dp))
+                            selected = selectedSource == source.name,
+                            onClick = {
+                                selectedSource = if (selectedSource == source.name) null else source.name
                             },
-                            label = { Text("Todas (${rssArticles.size})") },
+                            label = {
+                                Text("${source.name} ($count)", style = MaterialTheme.typography.labelMedium.tabular)
+                            },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = GoogleBlue.copy(alpha = 0.15f),
-                                selectedLabelColor = GoogleBlue
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         )
-                        rssSources.forEach { source ->
-                            val count = rssArticles.count { it.sourceTitle == source.name }
-                            FilterChip(
-                                selected = selectedSource == source.name,
-                                onClick = {
-                                    selectedSource = if (selectedSource == source.name) null else source.name
-                                },
-                                label = { Text("${source.name} ($count)") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                    }
+                }
+            }
+
+            when {
+                visibleArticles.isEmpty() && isRssLoading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Descargando tus fuentes…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
-
-                when {
-                    visibleArticles.isEmpty() && isRssLoading -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    "Descargando tus fuentes…",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                    visibleArticles.isEmpty() -> {
-                        // Honest empty state: no fabricated articles.
-                        Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                visibleArticles.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                        LiquidGlassCard(
+                            cornerRadius = 24.dp,
+                            contentPadding = 24.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Surface(
                                     shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
                                     modifier = Modifier.size(64.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -222,53 +224,67 @@ fun NewsBrowserScreen(
                                         "Añade canales RSS en Ajustes → Fuentes de noticias, o importa tu OPML."
                                     else "Toca actualizar o revisa tu conexión — la lista se guarda tal cual estaba.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable {
-                                        scope.launch { viewModel.refreshRssFeeds() }
-                                    }
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable {
+                                            scope.launch { viewModel.refreshRssFeeds() }
+                                        }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Actualizar", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                                        Text(
+                                            "Actualizar",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
                                     }
                                 }
                             }
                         }
                     }
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(visibleArticles, key = { it.id }) { article ->
-                                GoogleDiscoverCard(
-                                    article = article,
-                                    onClick = { readerArticle = article },
-                                    onSaveToJournal = { savedArticle ->
-                                        viewModel.saveEntry(
-                                            id = 0L,
-                                            title = savedArticle.title,
-                                            body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
-                                            onComplete = { newId ->
-                                                Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
-                                                onNavigateToDetail(newId)
-                                            }
-                                        )
-                                    }
-                                )
-                            }
-                            item { Spacer(modifier = Modifier.height(24.dp)) }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 8.dp,
+                            bottom = navBottom + 24.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(visibleArticles, key = { it.id }) { article ->
+                            GoogleDiscoverCard(
+                                article = article,
+                                onClick = { readerArticle = article },
+                                onSaveToJournal = { savedArticle ->
+                                    viewModel.saveEntry(
+                                        id = 0L,
+                                        title = savedArticle.title,
+                                        body = "${savedArticle.fullContent}\n\nFuente: ${savedArticle.link}",
+                                        onComplete = { newId ->
+                                            Toast.makeText(context, "Artículo guardado en tus notas", Toast.LENGTH_SHORT).show()
+                                            onNavigateToDetail(newId)
+                                        }
+                                    )
+                                }
+                            )
                         }
                     }
                 }
@@ -276,7 +292,6 @@ fun NewsBrowserScreen(
         }
     }
 
-    // Same offline reader as both homes — parity of the reading experience.
     readerArticle?.let { article ->
         RssOfflineReaderModal(
             article = article,

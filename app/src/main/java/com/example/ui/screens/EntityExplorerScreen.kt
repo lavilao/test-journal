@@ -1,7 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,11 +9,15 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,20 +27,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.BubbleChart
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
@@ -61,13 +52,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.model.EntityItem
 import com.example.data.model.EntityType
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EntityChip
-import com.example.ui.theme.AmberNode
-import com.example.ui.theme.ForestPrimary
-import com.example.ui.theme.TerracottaAccent
+import com.example.ui.components.LiquidGlassCard
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -85,7 +74,7 @@ fun EntityExplorerScreen(
     val selectedEntityMedia by viewModel.selectedEntityMedia.collectAsState()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabs = listOf("All", "People", "Places", "Topics", "Orgs")
+    val tabs = listOf("Todos", "Personas", "Lugares", "Temas", "Orgs")
 
     val filteredEntities = when (selectedTabIndex) {
         1 -> entities.filter { it.type == EntityType.PERSON }
@@ -96,51 +85,68 @@ fun EntityExplorerScreen(
     }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Screen Header
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            Text(
-                text = "Personal Knowledge Base",
-                style = MaterialTheme.typography.displayLarge.copy(fontSize = 26.sp),
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "Automatically generated entity pages and cross-entry memory associations",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        // Tabs
-        PrimaryTabRow(
-            selectedTabIndex = selectedTabIndex,
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = ForestPrimary
+        // Frosted Glass Screen Header extending beneath status bar
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTabIndex == index,
-                    onClick = { selectedTabIndex = index },
-                    text = { Text(title, style = MaterialTheme.typography.labelMedium) },
-                    modifier = Modifier.testTag("entity_tab_$title")
-                )
+            Column(modifier = Modifier.statusBarsPadding()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Base de Conocimiento",
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Entidades extraídas y conexiones automáticas entre tus memorias",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                PrimaryTabRow(
+                    selectedTabIndex = selectedTabIndex,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.0f),
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = { selectedTabIndex = index },
+                            text = { Text(title, style = MaterialTheme.typography.labelMedium) },
+                            modifier = Modifier.testTag("entity_tab_$title")
+                        )
+                    }
+                }
             }
         }
 
         // Entities List
         if (filteredEntities.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = navBottom + 72.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         imageVector = Icons.Default.BubbleChart,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "No entities found in this category",
+                        text = "Sin entidades en esta categoría",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -151,7 +157,12 @@ fun EntityExplorerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .testTag("entity_list"),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 14.dp,
+                    bottom = navBottom + 96.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(filteredEntities, key = { it.id }) { entity ->
@@ -176,15 +187,15 @@ fun EntityExplorerScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Mentioned in ${entity.mentionCount} journal ${if (entity.mentionCount == 1) "entry" else "entries"}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    text = "Mencionado en ${entity.mentionCount} ${if (entity.mentionCount == 1) "memoria" else "memorias"}",
+                                    style = MaterialTheme.typography.bodySmall.tabular,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -199,7 +210,6 @@ fun EntityExplorerScreen(
         val entity = detail.entity
         val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
 
-        // Calculate co-occurring entities
         val entryIds = detail.entries.map { it.id }.toSet()
         val coOccurringEntities = allEntries
             .filter { entryIds.contains(it.entry.id) }
@@ -220,7 +230,6 @@ fun EntityExplorerScreen(
                     .padding(horizontal = 20.dp, vertical = 12.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -229,15 +238,15 @@ fun EntityExplorerScreen(
                     Column {
                         Text(
                             text = entity.displayName,
-                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 26.sp),
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             EntityChip(name = entity.type.name, type = entity.type)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Auto-generated Entity Page",
+                                text = "Página de entidad automática",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -247,48 +256,46 @@ fun EntityExplorerScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Metadata Metrics Card
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                    shape = RoundedCornerShape(12.dp),
+                LiquidGlassCard(
+                    cornerRadius = 16.dp,
+                    contentPadding = 14.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = "${detail.entries.size}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = ForestPrimary
+                                style = MaterialTheme.typography.titleLarge.tabular.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
                             )
-                            Text("Memories", style = MaterialTheme.typography.labelSmall)
+                            Text("Memorias", style = MaterialTheme.typography.labelSmall)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = dateFormat.format(Date(entity.firstSeen)),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleSmall.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text("First Mention", style = MaterialTheme.typography.labelSmall)
+                            Text("Primera vez", style = MaterialTheme.typography.labelSmall)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = dateFormat.format(Date(entity.lastSeen)),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleSmall.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text("Most Recent", style = MaterialTheme.typography.labelSmall)
+                            Text("Más reciente", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
 
-                // Co-occurring Concepts & Entities
                 if (coOccurringEntities.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Frequently Associated With",
+                        text = "Asociado frecuentemente con",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -307,11 +314,10 @@ fun EntityExplorerScreen(
                     }
                 }
 
-                // Associated Media / Photos
                 if (selectedEntityMedia.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Photos Associated with ${entity.displayName}",
+                        text = "Fotos asociadas a ${entity.displayName}",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -327,20 +333,19 @@ fun EntityExplorerScreen(
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .size(100.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                             )
                         }
                     }
                 }
 
-                // Timeline of Entries
                 Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Timeline Occurrences (${detail.entries.size})",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    text = "Línea temporal (${detail.entries.size})",
+                    style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -351,7 +356,9 @@ fun EntityExplorerScreen(
                             viewModel.clearSelectedEntity()
                             onNavigateToEntry(entry.id)
                         },
-                        modifier = Modifier.padding(vertical = 4.dp).testTag("entity_linked_entry_${entry.id}")
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .testTag("entity_linked_entry_${entry.id}")
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Row(
@@ -359,13 +366,13 @@ fun EntityExplorerScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = entry.title.ifBlank { "Untitled" },
+                                    text = entry.title.ifBlank { "Sin título" },
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = dateFormat.format(Date(entry.journalDate)),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.tabular,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }

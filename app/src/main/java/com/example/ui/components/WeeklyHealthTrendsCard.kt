@@ -23,14 +23,13 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.example.ui.theme.tabular
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -77,18 +76,15 @@ fun WeeklyHealthTrendsCard(
         HealthMetricType.ACTIVITY -> HealthActivityColor
     }
 
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+    LiquidGlassCard(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("weekly_health_trends_card")
+            .testTag("weekly_health_trends_card"),
+        cornerRadius = 22.dp,
+        contentPadding = 18.dp
     ) {
         Column(
-            modifier = Modifier
-                .padding(18.dp)
-                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+            modifier = Modifier.animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
         ) {
             // Header: Title + Health Connect / Sensor status pill
             Row(
@@ -131,9 +127,10 @@ fun WeeklyHealthTrendsCard(
                 }
 
                 // Source indicator
+                val badgeColor = if (trends.isHealthConnectActive) HealthStepsColor else MaterialTheme.colorScheme.primary
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = (if (trends.isHealthConnectActive) HealthStepsColor else GoogleBlue).copy(alpha = 0.10f),
+                    color = badgeColor.copy(alpha = 0.12f),
                     modifier = Modifier.then(
                         if (onConnectHealthClick != null) Modifier.clickable(onClick = onConnectHealthClick) else Modifier
                     )
@@ -146,7 +143,7 @@ fun WeeklyHealthTrendsCard(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(if (trends.isHealthConnectActive) HealthStepsColor else GoogleBlue)
+                                .background(badgeColor)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
@@ -155,7 +152,7 @@ fun WeeklyHealthTrendsCard(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 10.sp
                             ),
-                            color = if (trends.isHealthConnectActive) HealthStepsColor else GoogleBlue
+                            color = badgeColor
                         )
                     }
                 }
@@ -258,7 +255,7 @@ fun WeeklyHealthTrendsCard(
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = statValue,
-                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            style = MaterialTheme.typography.headlineMedium.tabular.copy(fontWeight = FontWeight.Bold),
                             color = activeColor
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -272,7 +269,7 @@ fun WeeklyHealthTrendsCard(
                     Text(
                         text = statSubtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -284,7 +281,7 @@ fun WeeklyHealthTrendsCard(
                     ) {
                         Text(
                             text = "${it.dayLabel} · ${it.date.dayOfMonth}/${it.date.monthValue}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.labelSmall.tabular.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
@@ -481,7 +478,7 @@ private fun SummaryPill(
         ) {
             Text(
                 text = value,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.labelMedium.tabular.copy(fontWeight = FontWeight.Bold),
                 color = color
             )
             Text(

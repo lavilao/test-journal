@@ -30,7 +30,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CloudOff
@@ -55,8 +54,6 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -99,9 +96,11 @@ import com.example.speech.hotword.HotwordService
 import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
 import com.example.speech.voiceprint.VoiceSampleRecorder
-import com.example.ui.components.GoogleGreen
 import com.example.ui.components.ExpandableHint
-import com.example.ui.theme.ForestPrimary
+import com.example.ui.components.GlassTopBar
+import com.example.ui.components.LiquidGlassCard
+import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -662,45 +661,25 @@ fun VoiceAndAssistantScreen(
     // Screen
     // ------------------------------------------------------------------
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-    ) {
-        // Header
-        Row(
+    Column(modifier = Modifier.fillMaxSize()) {
+        GlassTopBar(
+            title = "Voz y asistente",
+            subtitle = "Motores sin conexión, activación y perfil de voz",
+            onBack = onBack
+        )
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            Column {
-                Text(
-                    text = "Voz y asistente",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Text(
-                    text = "Motores sin conexión, activación y perfil de voz",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
 
         // ============ 1. Recognition engine ============
         SettingsCard(
-            icon = { Icon(Icons.Default.RecordVoiceOver, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            icon = { Icon(Icons.Default.RecordVoiceOver, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
             title = "Servicio de dictado del sistema",
             badge = {
-                BadgePill(text = resolvedEngine.label, color = GoogleGreen)
+                BadgePill(text = resolvedEngine.label, color = NowBriefVitalsGreen)
             }
         ) {
             ExpandableHint(
@@ -727,16 +706,16 @@ fun VoiceAndAssistantScreen(
 
         // ============ 2. Offline voice models ============
         SettingsCard(
-            icon = { Icon(Icons.Default.CloudOff, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            icon = { Icon(Icons.Default.CloudOff, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
             title = "Modelos de voz sin conexión",
             badge = {
                 val installed = offlineSupport?.let { s ->
                     s.installed.any { it == localeTag || it.startsWith(localeTag.substringBefore('-')) }
                 }
-                if (installed == true) BadgePill("Instalado", GoogleGreen)
+                if (installed == true) BadgePill("Instalado", NowBriefVitalsGreen)
                 else BadgePill(
                     if (offlineSupport == null) "Android 12−" else "Sin instalar",
-                    Color(0xFFB3261E)
+                    MaterialTheme.colorScheme.error
                 )
             }
         ) {
@@ -791,7 +770,7 @@ fun VoiceAndAssistantScreen(
                         )
                     },
                     enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.weight(1f).testTag("download_offline_model_btn")
                 ) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
@@ -825,13 +804,13 @@ fun VoiceAndAssistantScreen(
 
         // ============ 2.5 Local AI ============
         SettingsCard(
-            icon = { Icon(Icons.Default.AutoAwesome, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            icon = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
             title = "IA privada en el dispositivo",
             badge = {
                 when {
-                    !needleSupported -> BadgePill("No compatible", Color(0xFFB3261E))
-                    needleDownloaded && needleLoaded -> BadgePill("Activa", GoogleGreen)
-                    needleDownloaded -> BadgePill("Descargado", GoogleGreen)
+                    !needleSupported -> BadgePill("No compatible", MaterialTheme.colorScheme.error)
+                    needleDownloaded && needleLoaded -> BadgePill("Activa", NowBriefVitalsGreen)
+                    needleDownloaded -> BadgePill("Descargado", NowBriefVitalsGreen)
                     else -> BadgePill("Opcional", MaterialTheme.colorScheme.outline)
                 }
             }
@@ -868,8 +847,8 @@ fun VoiceAndAssistantScreen(
                     )
                     Text(
                         text = "${(dl.progress * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = ForestPrimary
+                        style = MaterialTheme.typography.labelMedium.tabular,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
@@ -880,7 +859,7 @@ fun VoiceAndAssistantScreen(
                 Text(
                     text = "${NeedleModelManager.formatBytes(dl.receivedBytes)} / " +
                             NeedleModelManager.formatBytes(dl.totalBytes),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.tabular,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 dl.error?.let { err ->
@@ -979,7 +958,7 @@ fun VoiceAndAssistantScreen(
                     importLauncher.launch(arrayOf("*/*"))
                 },
                 enabled = !importBusy && needleDownload == null,
-                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.fillMaxWidth().testTag("import_cact_auto_btn")
             ) {
                 if (importBusy) {
@@ -1121,7 +1100,7 @@ fun VoiceAndAssistantScreen(
                 Icon(
                     imageVector = if (showModelBackup) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = null,
-                    tint = ForestPrimary
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
             AnimatedVisibility(visible = showModelBackup) {
@@ -1199,17 +1178,15 @@ fun VoiceAndAssistantScreen(
 
         // ============ 2.55 Advanced assistant tools & self-tests (collapsible) ============
         var showAdvancedTools by remember { mutableStateOf(false) }
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            ),
+        LiquidGlassCard(
+            cornerRadius = 20.dp,
+            contentPadding = 16.dp,
+            onClick = { showAdvancedTools = !showAdvancedTools },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp)
-                .clickable { showAdvancedTools = !showAdvancedTools }
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column {
                 val activeCount = remember(needleTick) {
                     NeedleTools.TOOL_CATALOG.count { NeedleTools.isToolEnabled(context, it.id) }
                 }
@@ -1219,7 +1196,7 @@ fun VoiceAndAssistantScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Tune, null, tint = ForestPrimary, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.Tune, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
@@ -1236,7 +1213,7 @@ fun VoiceAndAssistantScreen(
                     Icon(
                         imageVector = if (showAdvancedTools) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (showAdvancedTools) "Ocultar opciones" else "Mostrar opciones",
-                        tint = ForestPrimary
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
 
@@ -1314,7 +1291,7 @@ fun VoiceAndAssistantScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Science, null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Science, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Pruebas de diagnóstico", fontWeight = FontWeight.Bold)
                         }
@@ -1324,7 +1301,7 @@ fun VoiceAndAssistantScreen(
                         fun TestStateChip(state: String?) {
                             when (state) {
                                 "running" -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                                "pass" -> BadgePill("OK", GoogleGreen)
+                                "pass" -> BadgePill("OK", NowBriefVitalsGreen)
                                 "fail" -> BadgePill("Revisar", MaterialTheme.colorScheme.error)
                             }
                         }
@@ -1410,11 +1387,11 @@ fun VoiceAndAssistantScreen(
 
         // ============ 3. Hotword ============
         SettingsCard(
-            icon = { Icon(Icons.Default.GraphicEq, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            icon = { Icon(Icons.Default.GraphicEq, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
             title = "Hotword — «$wakeWordField»",
             badge = {
                 if (hotwordRunning) {
-                    BadgePill(if (hotwordListening) "Escuchando" else "Activo", GoogleGreen)
+                    BadgePill(if (hotwordListening) "Escuchando" else "Activo", NowBriefVitalsGreen)
                 } else {
                     BadgePill("Apagado", MaterialTheme.colorScheme.outline)
                 }
@@ -1425,7 +1402,7 @@ fun VoiceAndAssistantScreen(
                     text = "Motor de escucha: ${hotwordEngine.ifBlank { "decidiendo…" }}",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = ForestPrimary
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
             }
@@ -1548,10 +1525,10 @@ fun VoiceAndAssistantScreen(
 
         // ============ 4. Voice Match ============
         SettingsCard(
-            icon = { Icon(Icons.Default.Fingerprint, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+            icon = { Icon(Icons.Default.Fingerprint, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
             title = "Perfil de voz (Voice Match)",
             badge = {
-                if (enrolled) BadgePill("Inscrito · $sampleCount muestras", GoogleGreen)
+                if (enrolled) BadgePill("Inscrito · $sampleCount muestras", NowBriefVitalsGreen)
                 else BadgePill("Sin inscribir", MaterialTheme.colorScheme.outline)
             }
         ) {
@@ -1574,7 +1551,7 @@ fun VoiceAndAssistantScreen(
                                 voiceEnrollPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier.weight(1f).testTag("voice_enroll_btn")
                     ) {
                         Icon(if (enrolled) Icons.Default.Refresh else Icons.Default.Mic, null,
@@ -1615,14 +1592,14 @@ fun VoiceAndAssistantScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 val good = testVerdict == true
                 Surface(
-                    color = (if (good) GoogleGreen else MaterialTheme.colorScheme.error).copy(alpha = 0.12f),
+                    color = (if (good) NowBriefVitalsGreen else MaterialTheme.colorScheme.error).copy(alpha = 0.12f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         text = "Similitud ${(s * 100).toInt()}% · umbral ${(thresholdValue * 100).toInt()}% → " +
                                 (if (good) "ACEPTADA" else "RECHAZADA"),
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = if (good) GoogleGreen else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold).tabular,
+                        color = if (good) NowBriefVitalsGreen else MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
@@ -1650,7 +1627,7 @@ fun VoiceAndAssistantScreen(
                         OutlinedButton(
                             onClick = { store.setThreshold(key); refreshAll() },
                             colors = if (selected) {
-                                ButtonDefaults.outlinedButtonColors(contentColor = ForestPrimary)
+                                ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                             } else {
                                 ButtonDefaults.outlinedButtonColors()
                             }
@@ -1741,6 +1718,7 @@ fun VoiceAndAssistantScreen(
         }
 
         Spacer(modifier = Modifier.navigationBarsPadding().height(36.dp))
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1805,43 +1783,39 @@ private fun SettingsCard(
     badge: @Composable () -> Unit,
     content: @Composable () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
+    LiquidGlassCard(
+        cornerRadius = 20.dp,
+        contentPadding = 16.dp,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    icon()
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                badge()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                icon()
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            content()
+            badge()
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        content()
     }
 }
 
 @Composable
 private fun BadgePill(text: String, color: Color) {
-    Surface(color = color.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
+    Surface(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(8.dp)) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold).tabular,
             color = color,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
@@ -1865,7 +1839,7 @@ private fun RecordingIndicator(phase: String, countdown: Int, label: String) {
                 "countdown", "enroll-countdown", "test-countdown" -> {
                     Text(
                         text = "$countdown",
-                        style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.ExtraBold)
+                        style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Bold).tabular
                     )
                     Text("preparado(a) para hablar…", style = MaterialTheme.typography.bodySmall)
                 }
@@ -1904,11 +1878,11 @@ private fun CustomToolsCard(
     var editing by remember { mutableStateOf<CustomTool?>(null) }
 
     SettingsCard(
-        icon = { Icon(Icons.Default.Build, null, tint = ForestPrimary, modifier = Modifier.size(22.dp)) },
+        icon = { Icon(Icons.Default.Build, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
         title = "Tus propias herramientas",
         badge = {
             val active = tools.count { it.enabled }
-            BadgePill("$active / ${tools.size} activas", ForestPrimary)
+            BadgePill("$active / ${tools.size} activas", MaterialTheme.colorScheme.primary)
         }
     ) {
         ExpandableHint(
@@ -1940,7 +1914,7 @@ private fun CustomToolsCard(
                     )
                 }
                 IconButton(onClick = { editing = tool; showEditor = true }, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.Edit, "Editar", modifier = Modifier.size(16.dp), tint = ForestPrimary)
+                    Icon(Icons.Default.Edit, "Editar", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(
                     onClick = {
@@ -1980,7 +1954,7 @@ private fun CustomToolsCard(
         Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = { editing = null; showEditor = true },
-            colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
         ) {
             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
@@ -2203,7 +2177,7 @@ private fun CustomToolEditorDialog(
                         onDismiss()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) { Text("Guardar") }
         },
         dismissButton = {

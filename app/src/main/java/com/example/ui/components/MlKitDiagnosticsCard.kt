@@ -29,19 +29,15 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,12 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.semantic.MindForgerSemanticEngine
 import com.example.semantic.MlKitAnalyzer
-import com.example.ui.theme.AmberNode
-import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.TerracottaAccent
-import kotlinx.coroutines.Dispatchers
+import com.example.ui.theme.tabular
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class ModelDiagnosticItem(
     val name: String,
@@ -157,15 +150,14 @@ fun MlKitDiagnosticsCard(
         )
     )
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+    LiquidGlassCard(
+        cornerRadius = 18.dp,
+        contentPadding = 16.dp,
         modifier = modifier
             .fillMaxWidth()
             .testTag("mlkit_diagnostics_card")
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -175,7 +167,7 @@ fun MlKitDiagnosticsCard(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = ForestPrimary,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -232,8 +224,8 @@ fun MlKitDiagnosticsCard(
                     }
                 },
                 enabled = !isRunningTest,
-                colors = ButtonDefaults.buttonColors(containerColor = ForestPrimary),
-                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("run_model_diagnostics_button")
@@ -241,7 +233,7 @@ fun MlKitDiagnosticsCard(
                 if (isRunningTest) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -257,7 +249,7 @@ fun MlKitDiagnosticsCard(
             if (testLog != null) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Surface(
-                    color = ForestPrimary.copy(alpha = 0.08f),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -265,12 +257,12 @@ fun MlKitDiagnosticsCard(
                         Text(
                             text = "Resultados de la prueba",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = ForestPrimary
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = testLog ?: "",
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace).tabular,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -291,14 +283,14 @@ fun MlKitDiagnosticsCard(
                 ) {
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
                         modifier = Modifier.size(36.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = model.icon,
                                 contentDescription = null,
-                                tint = ForestPrimary,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -322,15 +314,15 @@ fun MlKitDiagnosticsCard(
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 10.sp
-                            ),
-                            color = if (model.isReady) ForestPrimary else TerracottaAccent
+                            ).tabular,
+                            color = if (model.isReady) MaterialTheme.colorScheme.primary else TerracottaAccent
                         )
                     }
 
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = "Disponible",
-                        tint = ForestPrimary,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                 }

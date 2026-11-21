@@ -24,11 +24,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,7 +53,6 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Contacts
@@ -119,20 +124,17 @@ import com.example.telemetry.WeatherCity
 import com.example.ui.components.CityPickerModal
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.GlassRing
-import com.example.ui.components.GoogleBlue
 import com.example.ui.components.GoogleGreen
 import com.example.ui.components.GoogleRed
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.RssOfflineReaderModal
-import com.example.ui.components.VoiceTranscriptionModal
-import com.example.ui.theme.ForestPrimary
 import com.example.ui.theme.NowBriefNewsBlue
 import com.example.ui.theme.NowBriefPrimaryDark
 import com.example.ui.theme.NowBriefPrimaryLight
 import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
 import com.example.viewmodel.MainNavTab
-import com.example.wallpaper.NowBriefAppBackground
 import com.example.wallpaper.SunCycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -193,8 +195,6 @@ fun NowBriefHomeScreen(
     var showCityPicker by remember { mutableStateOf(false) }
     var showPhotoChoiceDialog by remember { mutableStateOf(false) }
     var readerArticle by remember { mutableStateOf<RssArticle?>(null) }
-    var showQuickDictateModal by remember { mutableStateOf(false) }
-    var fabExpanded by remember { mutableStateOf(false) }
 
     // Multi-select memories (long-press to enter, tap to toggle, batch delete)
     var selectionMode by remember { mutableStateOf(false) }
@@ -363,16 +363,14 @@ fun NowBriefHomeScreen(
 
     val searchResults = semanticSearch.hits
 
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag("nowbrief_home_root")
     ) {
-        NowBriefAppBackground(
-            modifier = Modifier.fillMaxSize(),
-            weatherCode = weather.weatherCode
-        )
-
         PullToRefreshBox(
             isRefreshing = isRefreshing || isRssLoading,
             onRefresh = {
@@ -384,60 +382,94 @@ fun NowBriefHomeScreen(
                     isRefreshing = false
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = if (statusTop > 0.dp) 8.dp else 12.dp,
+                    bottom = navBottom + 104.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Header: Living clock + date + clickable city + clean Settings & Refresh actions
-                // (No duplicate Assistant/Lens buttons here — Mic & Camera live inside the Search Pill)
+                // Unified Living Hero Header: Clock + Editorial Greeting + Date + City + Quick Actions
                 item(key = "header") {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = timeFormat.format(Date(nowMillis)),
-                                style = MaterialTheme.typography.displaySmall.copy(
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 30.sp,
-                                    letterSpacing = (-0.5).sp
-                                ),
-                                color = heroColor
-                            )
-                            Text(
-                                text = dateFormat.format(Date(nowMillis)).replaceFirstChar { it.uppercase() },
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    letterSpacing = 0.5.sp,
-                                    fontSize = 11.sp
-                                ),
-                                color = headerSecondaryColor
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { showCityPicker = true }
-                                    .padding(vertical = 2.dp, horizontal = 2.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.LocationOn,
-                                    contentDescription = "Cambiar ciudad",
-                                    tint = headerAccentColor,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
+                            Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = weather.locationName
-                                        ?: selectedCity?.name
-                                        ?: "Elige tu ciudad",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                                    text = timeFormat.format(Date(nowMillis)),
+                                    style = MaterialTheme.typography.displayLarge.tabular.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 30.sp,
+                                        lineHeight = 34.sp
+                                    ),
+                                    color = heroColor
+                                )
+                                if (homeSearchQuery.isBlank()) {
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "¡$greeting!",
+                                        style = MaterialTheme.typography.titleLarge.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 20.sp
+                                        ),
+                                        color = heroColor.copy(alpha = 0.92f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(bottom = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = dateFormat.format(Date(nowMillis)).replaceFirstChar { it.uppercase() },
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.3.sp,
+                                        fontSize = 12.sp
+                                    ),
                                     color = headerSecondaryColor
                                 )
+                                Text(
+                                    text = " · ",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = headerSecondaryColor.copy(alpha = 0.7f)
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showCityPicker = true }
+                                        .padding(vertical = 2.dp, horizontal = 3.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = "Cambiar ciudad",
+                                        tint = headerAccentColor,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = weather.locationName
+                                            ?: selectedCity?.name
+                                            ?: "Elige tu ciudad",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                                        color = headerSecondaryColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
 
@@ -446,7 +478,9 @@ fun NowBriefHomeScreen(
                                 viewModel.refreshRssFeeds()
                                 viewModel.syncNow()
                             },
-                            modifier = Modifier.testTag("home_refresh_btn")
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("home_refresh_btn")
                         ) {
                             if (isRssLoading) {
                                 CircularProgressIndicator(
@@ -459,14 +493,16 @@ fun NowBriefHomeScreen(
                                     Icons.Default.Refresh,
                                     contentDescription = "Actualizar",
                                     tint = headerSecondaryColor,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(21.dp)
                                 )
                             }
                         }
 
                         IconButton(
                             onClick = { viewModel.selectTab(MainNavTab.SETTINGS) },
-                            modifier = Modifier.testTag("top_settings_avatar")
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("top_settings_avatar")
                         ) {
                             Icon(
                                 Icons.Default.Settings,
@@ -475,21 +511,6 @@ fun NowBriefHomeScreen(
                                 modifier = Modifier.size(22.dp)
                             )
                         }
-                    }
-                }
-
-                // Greeting hero (collapses automatically while searching)
-                if (homeSearchQuery.isBlank()) {
-                    item(key = "greeting") {
-                        Text(
-                            text = "¡$greeting!",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 32.sp
-                            ),
-                            color = heroColor,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
                     }
                 }
 
@@ -517,7 +538,7 @@ fun NowBriefHomeScreen(
                                     GlassPermissionPill(
                                         icon = Icons.Default.Folder,
                                         text = "Permitir buscar archivos",
-                                        tint = ForestPrimary,
+                                        tint = MaterialTheme.colorScheme.primary,
                                         onClick = {
                                             storagePermissionLauncher.launch(
                                                 viewModel.requiredStoragePermissions()
@@ -1096,46 +1117,29 @@ fun NowBriefHomeScreen(
             }
         }
 
-        // Floating quick-capture expandable FAB (sits cleanly above the floating NowBriefGlassNavBar)
-        Column(
-            horizontalAlignment = Alignment.End,
+        // Clean single-action FAB for creating a new memory (Mic & Camera already live in Search Pill)
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary,
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 96.dp)
+                .navigationBarsPadding()
+                .padding(end = 20.dp, bottom = 94.dp)
+                .size(56.dp)
         ) {
-            if (fabExpanded) {
-                GlassQuickAction(label = "Nueva memoria", icon = Icons.Default.Edit) {
-                    fabExpanded = false
-                    onNavigateToNewEntry()
-                }
-                GlassQuickAction(label = "Nota de voz", icon = Icons.Default.Mic) {
-                    fabExpanded = false
-                    showQuickDictateModal = true
-                }
-                GlassQuickAction(label = "Escanear con Lens", icon = Icons.Default.DocumentScanner) {
-                    fabExpanded = false
-                    onOpenLens()
-                }
-            }
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                shadowElevation = 10.dp,
-                modifier = Modifier.size(56.dp)
+            IconButton(
+                onClick = onNavigateToNewEntry,
+                modifier = Modifier
+                    .size(56.dp)
+                    .testTag("quick_capture_fab")
             ) {
-                IconButton(
-                    onClick = { fabExpanded = !fabExpanded },
-                    modifier = Modifier
-                        .size(56.dp)
-                        .testTag("quick_capture_fab")
-                ) {
-                    Icon(
-                        if (fabExpanded) Icons.Default.Clear else Icons.Default.Add,
-                        contentDescription = "Captura rápida",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Nueva memoria",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }
@@ -1214,25 +1218,6 @@ fun NowBriefHomeScreen(
             },
             onFetchFullText = { art ->
                 viewModel.rssFeedManager.fetchFullArticleText(art)
-            }
-        )
-    }
-
-    if (showQuickDictateModal) {
-        VoiceTranscriptionModal(
-            title = "Dictado de Voz Rápido",
-            viewModel = viewModel,
-            onDismiss = { showQuickDictateModal = false },
-            onSaveTranscript = { text ->
-                if (text.isNotBlank()) {
-                    viewModel.saveEntry(
-                        id = 0L,
-                        title = "Nota de Voz",
-                        body = text,
-                        onComplete = { newId -> onNavigateToDetail(newId) }
-                    )
-                }
-                showQuickDictateModal = false
             }
         )
     }
@@ -1694,42 +1679,6 @@ private fun GlassMemoryCard(
     }
 }
 
-/** Small glass pill used by the expanded FAB quick actions. */
-@Composable
-private fun GlassQuickAction(
-    label: String,
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-        shadowElevation = 6.dp,
-        modifier = Modifier.padding(bottom = 10.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .clickable(onClick = onClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
 @Composable
 private fun WeatherHeroCard(
     weather: RealWeatherData,
@@ -1748,25 +1697,26 @@ private fun WeatherHeroCard(
 
     LiquidGlassCard(
         modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 24.dp,
-        contentPadding = 18.dp
+        cornerRadius = 22.dp,
+        contentPadding = 16.dp
     ) {
         GlassLabel(text = "🌤 Tu clima", accent = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         if (hasWeather) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(38.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "${weather.temperature}°",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 54.sp
+                    style = MaterialTheme.typography.displayLarge.tabular.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 46.sp,
+                        lineHeight = 50.sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1859,7 +1809,7 @@ private fun WeatherHeroCard(
                             )
                             Text(
                                 text = "${bucket.temperature}°",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleLarge.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
@@ -1892,7 +1842,7 @@ private fun WeatherHeroCard(
                             )
                             Text(
                                 text = "${day.maxTemp}° ${day.minTemp}°",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.bodyMedium.tabular.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
@@ -2007,7 +1957,7 @@ private fun RingStat(
             )
             Text(
                 text = valueText,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                style = MaterialTheme.typography.titleMedium.tabular.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
@@ -2089,7 +2039,7 @@ private fun TodayGlassCard(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = eventTimeFormat.format(Date(nextEvent.startMillis)),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        style = MaterialTheme.typography.titleLarge.tabular.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(

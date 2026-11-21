@@ -1,41 +1,36 @@
 package com.example.ui.screens
 
-import android.content.Context
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,12 +56,13 @@ import androidx.compose.ui.unit.sp
 import com.example.health.HealthInsightsManager
 import com.example.ui.components.AppIconImage
 import com.example.ui.components.FileIconImage
-import com.example.ui.components.GoogleBlue
-import com.example.ui.components.GoogleGreen
+import com.example.ui.components.GlassTopBar
+import com.example.ui.components.GoogleRed
+import com.example.ui.components.LiquidGlassCard
 import com.example.ui.components.WeeklyHealthTrendsCard
-import com.example.ui.theme.ForestPrimary
+import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.ui.theme.tabular
 import com.example.viewmodel.JournalViewModel
-import com.example.wallpaper.NowBriefAppBackground
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -84,10 +80,9 @@ fun GoogleActivityScreen(
     val recentFiles by viewModel.recentDeviceFiles.collectAsState()
     val recentApps by viewModel.recentDeviceApps.collectAsState()
     val habitDigest by viewModel.habitDigest.collectAsState()
-
     val weeklyTrends by viewModel.weeklyHealthTrends.collectAsState()
+    val telemetry by viewModel.telemetry.collectAsState()
 
-    // Activity Recognition / Health Connect permission launcher
     val activityPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -102,9 +97,6 @@ fun GoogleActivityScreen(
     }
 
     var hasUsageAccess by remember { mutableStateOf(viewModel.deviceSearchManager.hasUsageStatsPermission()) }
-
-    // Digital health report (screen time, top apps, steps, sleep hints) —
-    // computed from THIS device's local usage data only.
     var healthInsights by remember { mutableStateOf<List<com.example.health.HealthInsight>>(emptyList()) }
     var healthLoading by remember { mutableStateOf(true) }
 
@@ -114,9 +106,6 @@ fun GoogleActivityScreen(
         healthLoading = false
     }
 
-    // Re-check the permission when the user comes back from system settings —
-    // this was the cause of the "activate usage access" button reappearing
-    // even though the permission was already granted.
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -136,53 +125,42 @@ fun GoogleActivityScreen(
 
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val glassBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+    val glassSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
 
-    val realWeather by viewModel.realWeather.collectAsState()
-
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .testTag("google_activity_screen")
     ) {
-        NowBriefAppBackground(
-            modifier = Modifier.fillMaxSize(),
-            weatherCode = realWeather.weatherCode
-        )
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top Bar
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Actividad del Dispositivo",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+        GlassTopBar(
+            title = "Actividad del Dispositivo",
+            subtitle = "Salud digital, rutinas y registros locales",
+            actions = {
                 IconButton(onClick = {
                     viewModel.refreshRecentActivity()
                     hasUsageAccess = viewModel.deviceSearchManager.hasUsageStatsPermission()
                 }) {
-                    Icon(Icons.Default.History, contentDescription = "Refrescar", tint = GoogleBlue)
+                    Icon(
+                        Icons.Default.History,
+                        contentDescription = "Refrescar",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
-        }
+        )
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 104.dp),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 14.dp,
+                bottom = navBottom + 96.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // SECTION: Weekly Health Trends (Activity Recognition & Health Connect)
             weeklyTrends?.let { trends ->
                 item {
                     WeeklyHealthTrendsCard(
@@ -194,198 +172,194 @@ fun GoogleActivityScreen(
                 }
             }
 
-            // SECTION: Digital health report (local data only)
+            // Digital health report (local data only)
             item {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("health_report_card")
+                LiquidGlassCard(
+                    cornerRadius = 18.dp,
+                    contentPadding = 16.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("health_report_card")
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Informe de salud digital",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "hoy",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        if (healthLoading) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = GoogleBlue
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "Analizando el uso local de hoy…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            healthInsights.forEach { insight ->
-                                val color = when (insight.severity) {
-                                    "good" -> GoogleGreen
-                                    "warn" -> com.example.ui.components.GoogleRed
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 5.dp),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Text(
-                                        text = insight.emoji,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = insight.title,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = if (insight.severity == "info") {
-                                                MaterialTheme.colorScheme.onSurface
-                                            } else color
-                                        )
-                                        Text(
-                                            text = insight.detail,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                text = "Todo viene del registro de uso del propio " +
-                                    "teléfono (UsageStats local) y del sensor de pasos; " +
-                                    "nada sale del dispositivo.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Informe de salud digital",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "hoy",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                }
-            }
-
-            // SECTION: Learned routines (habit engine digest)
-            item {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("routines_summary_card")
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Rutinas aprendidas",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (healthLoading) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "${habitDigest?.daysObserved ?: 0} días",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val routineLines = buildList {
-                            habitDigest?.sleep?.lastNight?.let { n ->
-                                add(
-                                    "Anoche dormiste " + com.example.habit.HabitMiners.formatDuration(
-                                        (n.endMillis - n.startMillis) / 60_000L
-                                    )
-                                )
-                            }
-                            habitDigest?.apps?.predictedNow?.firstOrNull()?.let {
-                                add("A esta hora sueles abrir " + com.example.habit.HabitMiners.appLabel(context, it.pkg))
-                            }
-                            habitDigest?.battery?.projectedBedtimeLevel?.let {
-                                add("Batería a la hora de dormir: ~$it%")
-                            }
-                            habitDigest?.notifications?.topInterruptors?.firstOrNull()?.let { t ->
-                                t.ignoreRate?.let { r ->
-                                    add(
-                                        "Ignoras el " + (r * 100).toInt() + "% de los avisos de " +
-                                            com.example.habit.HabitMiners.appLabel(context, t.pkg)
-                                    )
-                                }
-                            }
-                        }
-                        if (routineLines.isEmpty()) {
-                            Text(
-                                text = "Aprendiendo de tu uso, sueño, lugares y batería — todo local.",
+                                "Analizando el uso local de hoy…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        } else {
-                            routineLines.take(3).forEach { line ->
+                        }
+                    } else {
+                        healthInsights.forEach { insight ->
+                            val color = when (insight.severity) {
+                                "good" -> NowBriefVitalsGreen
+                                "warn" -> GoogleRed
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 5.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
                                 Text(
-                                    text = "• $line",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(vertical = 2.dp)
+                                    text = insight.emoji,
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = insight.title,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (insight.severity == "info") {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            color
+                                        }
+                                    )
+                                    Text(
+                                        text = insight.detail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = onOpenRoutines,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Ver rutinas y brief del día")
-                        }
+                        Text(
+                            text = "Todo viene del registro de uso del propio " +
+                                "teléfono (UsageStats local) y del sensor de pasos; " +
+                                "nada sale del dispositivo.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
 
-            // SECTION: Screen time today (parity with the Samsung vitals ring)
+            // Learned routines (habit engine digest)
             item {
-                val telemetry by viewModel.telemetry.collectAsState()
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                LiquidGlassCard(
+                    cornerRadius = 18.dp,
+                    contentPadding = 16.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("routines_summary_card")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Rutinas aprendidas",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${habitDigest?.daysObserved ?: 0} días",
+                            style = MaterialTheme.typography.labelSmall.tabular,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val routineLines = buildList {
+                        habitDigest?.sleep?.lastNight?.let { n ->
+                            add(
+                                "Anoche dormiste " + com.example.habit.HabitMiners.formatDuration(
+                                    (n.endMillis - n.startMillis) / 60_000L
+                                )
+                            )
+                        }
+                        habitDigest?.apps?.predictedNow?.firstOrNull()?.let {
+                            add("A esta hora sueles abrir " + com.example.habit.HabitMiners.appLabel(context, it.pkg))
+                        }
+                        habitDigest?.battery?.projectedBedtimeLevel?.let {
+                            add("Batería a la hora de dormir: ~$it%")
+                        }
+                        habitDigest?.notifications?.topInterruptors?.firstOrNull()?.let { t ->
+                            t.ignoreRate?.let { r ->
+                                add(
+                                    "Ignoras el " + (r * 100).toInt() + "% de los avisos de " +
+                                        com.example.habit.HabitMiners.appLabel(context, t.pkg)
+                                )
+                            }
+                        }
+                    }
+                    if (routineLines.isEmpty()) {
+                        Text(
+                            text = "Aprendiendo de tu uso, sueño, lugares y batería — todo local.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        routineLines.take(3).forEach { line ->
+                            Text(
+                                text = "• $line",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onOpenRoutines,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Ver rutinas y brief del día")
+                    }
+                }
+            }
+
+            // Screen time today
+            item {
+                LiquidGlassCard(
+                    cornerRadius = 18.dp,
+                    contentPadding = 14.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.Smartphone,
                             contentDescription = null,
-                            tint = GoogleBlue,
-                            modifier = Modifier.size(18.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Tiempo de pantalla hoy",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -400,21 +374,20 @@ fun GoogleActivityScreen(
                                     val m = minutes % 60
                                     if (h > 0) "${h} h ${m} min" else "${m} min"
                                 },
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.tabular,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(modifier = Modifier.weight(1f))
                         if (!hasUsageAccess) {
                             TextButton(onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() }) {
-                                Text("Activar", fontSize = 11.sp, color = GoogleBlue)
+                                Text("Activar", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
                 }
             }
 
-            // SECTION: Aplicaciones Usadas Recientemente (UsageStatsManager)
+            // Apps usadas recientemente
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -422,7 +395,12 @@ fun GoogleActivityScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Apps, contentDescription = null, tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.Apps,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Apps usadas recientemente",
@@ -432,7 +410,7 @@ fun GoogleActivityScreen(
                     }
                     if (hasUsageAccess) {
                         TextButton(onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() }) {
-                            Text("Ajustes de uso", fontSize = 11.sp, color = GoogleBlue)
+                            Text("Ajustes de uso", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -440,51 +418,48 @@ fun GoogleActivityScreen(
 
             if (!hasUsageAccess) {
                 item {
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    LiquidGlassCard(
+                        cornerRadius = 18.dp,
+                        contentPadding = 14.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = "Para mostrar las aplicaciones que has abierto recientemente en tu teléfono, Android requiere permiso de acceso al uso.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Button(
-                                onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() },
-                                colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("Activar Acceso de Uso", fontSize = 12.sp)
-                            }
+                        Text(
+                            text = "Para mostrar las aplicaciones que has abierto recientemente en tu teléfono, Android requiere permiso de acceso al uso.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { viewModel.deviceSearchManager.openUsageAccessSettings() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Activar Acceso de Uso", fontSize = 12.sp)
                         }
                     }
                 }
             } else if (recentApps.isEmpty()) {
                 item {
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    LiquidGlassCard(
+                        cornerRadius = 18.dp,
+                        contentPadding = 14.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "Sin registro de apps recientes en las últimas horas.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(14.dp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             } else {
                 items(recentApps, key = { it.packageName }) { app ->
                     val mins = (app.totalTimeInForegroundMs / (1000 * 60)).coerceAtLeast(1)
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
+                        tonalElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.launchDeviceApp(app.packageName) }
@@ -493,8 +468,6 @@ fun GoogleActivityScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // The app's REAL launcher icon (used to be a
-                            // generic phone glyph — looked unfinished).
                             AppIconImage(
                                 packageName = app.packageName,
                                 sizeDp = 40
@@ -504,29 +477,39 @@ fun GoogleActivityScreen(
                                 Text(app.appName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
                                 Text(
                                     text = "Abierta hoy a las ${timeFormat.format(Date(app.lastTimeUsedMs))} • ~$mins min de uso",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.tabular,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             IconButton(onClick = { viewModel.launchDeviceApp(app.packageName) }) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = "Abrir app", tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.OpenInNew,
+                                    contentDescription = "Abrir app",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // SECTION: Archivos Recientes del Dispositivo (MediaStore)
+            // Archivos Recientes del Dispositivo (MediaStore)
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp),
+                        .padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = ForestPrimary, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.InsertDriveFile,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Archivos recientes del teléfono",
@@ -550,10 +533,11 @@ fun GoogleActivityScreen(
                 items(recentFiles, key = { "rec_file_${it.id}" }) { file ->
                     val kb = file.sizeBytes / 1024
                     val sizeStr = if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = glassSurface,
+                        border = BorderStroke(1.dp, glassBorder),
+                        tonalElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.openDeviceFile(file) }
@@ -562,37 +546,50 @@ fun GoogleActivityScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Type-aware icon with image thumbnails (used to
-                            // be the same generic file glyph for everything).
                             FileIconImage(file = file, sizeDp = 40)
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(file.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    file.displayName,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 Text(
                                     text = "$sizeStr • ${dateFormat.format(Date(file.dateModifiedMs))}",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.tabular,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             IconButton(onClick = { viewModel.openDeviceFile(file) }) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = "Abrir archivo", tint = GoogleBlue, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.OpenInNew,
+                                    contentDescription = "Abrir archivo",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // SECTION: Notas y Memorias Locales
+            // Notas y Memorias Locales
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp),
+                        .padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Description, contentDescription = null, tint = GoogleGreen, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.Description,
+                            contentDescription = null,
+                            tint = NowBriefVitalsGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Notas y escritos recientes",
@@ -602,30 +599,46 @@ fun GoogleActivityScreen(
                     }
 
                     TextButton(onClick = onNavigateToGraph) {
-                        Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(14.dp), tint = ForestPrimary)
+                        Icon(
+                            Icons.Default.Hub,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Ver Grafo", fontSize = 11.sp, color = ForestPrimary)
+                        Text("Ver Grafo", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
 
             items(entries.take(5), key = { "entry_${it.entry.id}" }) { item ->
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = glassSurface,
+                    border = BorderStroke(1.dp, glassBorder),
+                    tonalElevation = 1.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onNavigateToDetail(item.entry.id) }
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(item.entry.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            item.entry.title,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(item.entry.body, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            item.entry.body,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
         }
-        }
     }
 }
+

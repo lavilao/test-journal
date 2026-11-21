@@ -108,3 +108,8 @@ val Typography = Typography(
         letterSpacing = 0.3.sp
     )
 )
+
+/** Tabular figures (fixed-width digits) so live clocks, steps, and metrics never jitter. */
+val TextStyle.tabular: TextStyle
+    get() = copy(fontFeatureSettings = "tnum")
+
