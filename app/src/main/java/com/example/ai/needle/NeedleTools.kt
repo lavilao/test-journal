@@ -31,8 +31,11 @@ data class NeedleParsed(
  * (needle_init itself fails and reports the token count when the catalogue
  * exceeds the window; the engine docs recommend "tool retrieval" to avoid
  * declaring everything at once). That is exactly what per-tool gating gives
- * us here: disabled tools never enter the prompt, so the router stays sharp
- * and the weekly-report / journal tools only cost tokens while enabled.
+ * us here: disabled tools never enter the prompt, so the router stays sharp.
+ *
+ * The catalogue below holds only actions the ASSISTANT can be asked to do.
+ * Jobs the app performs by itself (semantic ranking, journal RAG, daily and
+ * weekly reports) live in [INTERNAL_TOOLS] and are never offered to the user.
  */
 data class ToolSpec(
     val id: String,
@@ -70,8 +73,6 @@ object NeedleTools {
         ToolSpec("mandar_mensaje", "Mensajes SMS", "«mensaje a papa: ya salgo»", defaultEnabled = false),
         ToolSpec("buscar_en_telefono", "Buscar en el teléfono", "«busca la factura»"),
         ToolSpec("buscar_en_web", "Buscar en internet", "«busca en internet…»"),
-        ToolSpec("buscar_en_notas", "Búsqueda semántica del diario", "«busca en mis notas…»"),
-        ToolSpec("consultar_diario", "Preguntar al diario (memoria RAG)", "«¿qué escribí sobre…?»"),
         ToolSpec("clima_hoy", "Clima", "«qué tiempo hace»"),
         ToolSpec("crear_nota", "Crear notas", "«apunta comprar leche»"),
         ToolSpec("crear_tarea", "Crear tareas", "«recuérdame llamar al dentista»"),
@@ -87,15 +88,105 @@ object NeedleTools {
         ToolSpec("grabar_audio", "Nota de voz", "«graba mi voz 30 segundos»", defaultEnabled = false),
         ToolSpec("abrir_escaner_lens", "Escáner Lens", "«escanea esto»"),
         ToolSpec("traducir_texto", "Traducción", "«traduce hola al inglés»"),
-        ToolSpec("guardar_lugar", "Guardar lugar actual", "«guarda este lugar como gym»", defaultEnabled = false),
-        ToolSpec("resumen_habitos", "Brief del día", "usado por la app al redactar el brief"),
-        ToolSpec("resumen_semanal", "Informe semanal", "usado por la app el domingo")
+        ToolSpec("guardar_lugar", "Guardar lugar actual", "«guarda este lugar como gym»", defaultEnabled = false)
+    )
+
+    /**
+     * Tools the APP calls itself and the assistant never routes: semantic
+     * note re-ranking, RAG answers over the journal, the daily brief and the
+     * weekly report.
+     *
+     * Their user-facing job is already covered by other parts of the app
+     * (SemanticSearchEngine ranks the journal, the journal RAG answers
+     * questions, HabitMiners has a template brief and BriefScheduler a
+     * template weekly report), and none of them had an intent mapping, so a
+     * routed call was discarded anyway. Keeping them out of [TOOL_CATALOG]
+     * removes them from the tools menu and from the gate count.
+     *
+     * They still have to be declared to the engine: Needle's grammar only
+     * emits calls for declared tools, so [buildToolsJson] and
+     * [buildCoreToolsJson] always append them.
+     */
+    private val INTERNAL_TOOLS = listOf(
+        "buscar_en_notas", "consultar_diario", "resumen_habitos", "resumen_semanal"
     )
 
     /** Compact fallback set used when the full catalogue overflows context. */
     private val CORE_TOOLS = setOf(
         "abrir_app", "llamar_contacto", "crear_nota", "crear_tarea",
-        "crear_alarma", "crear_temporizador", "linterna", "buscar_en_notas"
+        "crear_alarma", "crear_temporizador", "linterna"
+    )
+
+    /**
+     * Case-insensitive regexes that force ONE tool for unambiguous Spanish
+     * commands (the "triggers" field of the Cactus tool schema). A triggered
+     * request must produce that call even below the confidence floor, so only
+     * commands that cannot be mistaken for another action get one; open-ended
+     * intents (open/close app, call, message, search, event) keep relying on
+     * the model plus the deterministic rule parser.
+     *
+     * The engine validates every regex and ignores (and logs) the invalid
+     * ones. Its matcher walks UTF-8 bytes and is case-insensitive but not
+     * accent-insensitive, so accented letters are written as `.` spans of at
+     * most two bytes ("bater.{0,2}a" covers both "bateria" and "batería")
+     * instead of character classes, which would split the two-byte letter.
+     */
+    private val TOOL_TRIGGERS: Map<String, List<String>> = mapOf(
+        "linterna" to listOf(
+            "\\b(?:enciend|prend|activ)\\w*\\b.*\\blinterna\\b",
+            "\\b(?:apag|desactiv)\\w*\\b.*\\blinterna\\b",
+            "\\blinterna\\b.*\\b(?:on|off|encendida|apagada)\\b"
+        ),
+        "nivel_bateria" to listOf(
+            "\\b(?:cu.{0,2}nta|nivel de|porcentaje de)\\s+(?:bater.{0,2}a|carga)\\b",
+            "\\bbater.{0,2}a\\b.*\\b(?:queda|lleva|tiene|restante)\\b"
+        ),
+        "clima_hoy" to listOf(
+            "\\b(?:qu.{0,2}\\s+tiempo|clima|temperatura)\\b",
+            "\\b(?:va a llover|est.{0,2} lloviendo|hace (?:fr.{0,2}o|calor))\\b"
+        ),
+        "pasos_hoy" to listOf(
+            "\\b(?:cu.{0,2}ntos|n.{0,2}mero de)\\s+pasos\\b",
+            "\\bpasos\\s+(?:de hoy|llevo|he (?:dado|caminado))\\b"
+        ),
+        "calcular" to listOf(
+            "\\b(?:cu.{0,2}nto\\s+(?:es|son)|calcula|calcular|resultado de)\\b.*\\d"
+        ),
+        "crear_temporizador" to listOf(
+            "\\b(?:temporizador|cron.{0,2}metro|timer)\\b"
+        ),
+        "crear_alarma" to listOf(
+            "\\b(?:pon|ponme|poner|crea|crear)\\s+(?:una\\s+)?alarma\\b",
+            "\\balarma\\s+(?:a las|para las|en)\\b"
+        ),
+        "siguiente_evento" to listOf(
+            "\\b(?:pr.{0,2}ximo|siguiente)\\s+evento\\b",
+            "\\bqu.{0,2}\\s+tengo\\s+(?:hoy|ma.{0,2}ana|esta semana)\\b",
+            "\\bagenda\\s+de\\s+(?:hoy|ma.{0,2}ana)\\b"
+        ),
+        "volumen" to listOf(
+            "\\b(?:sube|subir|baja|bajar|aumenta|aumentar|reduce|reducir|pon|poner|ajusta|ajustar)\\b.*\\bvolumen\\b",
+            "\\bvolumen\\s+(?:al|a)\\s*\\d",
+            "\\b(?:silencio|silenciar|modo silencio|vibraci.{0,2}n|modo vibraci.{0,2}n|mute)\\b"
+        ),
+        "crear_nota" to listOf(
+            "\\b(?:apunta|anota|toma nota|nueva nota|crea (?:una )?nota)\\b"
+        ),
+        "crear_tarea" to listOf(
+            "\\b(?:recu.{0,2}rdame|nueva tarea|crea (?:una )?tarea|ap.{0,2}ntame)\\b"
+        ),
+        "grabar_audio" to listOf(
+            "\\b(?:graba|grabar|graba mi voz|nota de voz)\\b"
+        ),
+        "abrir_escaner_lens" to listOf(
+            "\\b(?:escanea|escanear|esc.{0,2}ner|lens|ocr)\\b"
+        ),
+        "traducir_texto" to listOf(
+            "\\b(?:traduce|traducir|traducci.{0,2}n)\\b"
+        ),
+        "guardar_lugar" to listOf(
+            "\\bguarda(?:r)?\\s+(?:este|el|esta)?\\s*lugar\\b"
+        )
     )
 
     // ------------------------------------------------------------------
@@ -140,7 +231,12 @@ object NeedleTools {
             )
 
     /** Builds the JSON declaration for ONE tool by id (null when unknown). */
-    private fun buildTool(id: String): JSONObject? {
+    private fun buildTool(id: String): JSONObject? =
+        buildToolBody(id)?.apply {
+            TOOL_TRIGGERS[id]?.let { triggers -> put("triggers", JSONArray(triggers)) }
+        }
+
+    private fun buildToolBody(id: String): JSONObject? {
         fun prop(type: String, description: String) =
             JSONObject().put("type", type).put("description", description)
         return when (id) {
@@ -373,6 +469,9 @@ object NeedleTools {
         enabledIds(context).forEach { id ->
             buildTool(id)?.let { tools.put(it) }
         }
+        // App-internal tools are always declared: the engine can only emit
+        // calls to tools present in the grammar.
+        INTERNAL_TOOLS.forEach { id -> buildTool(id)?.let { tools.put(it) } }
         // User-made tools (in-memory registry; refreshed from Room before
         // every applyToolGating). Gated by their own `enabled` column.
         try {
@@ -390,6 +489,7 @@ object NeedleTools {
         CORE_TOOLS.forEach { id ->
             buildTool(id)?.let { tools.put(it) }
         }
+        INTERNAL_TOOLS.forEach { id -> buildTool(id)?.let { tools.put(it) } }
         return tools.toString()
     }
 
@@ -400,11 +500,8 @@ object NeedleTools {
         return "Eres el enrutador de comandos del asistente local de Mnemosyne en un teléfono " +
             "Android. Hoy es $now. El usuario habla en español. Escucha lo que pide y elige la " +
             "herramienta correcta rellenando todos los argumentos. Si nada encaja con lo pedido, " +
-            "devuelve una lista de llamadas vacía en lugar de adivinar. Para buscar o preguntar " +
-            "por el diario del usuario usa buscar_en_notas (entendiendo sinónimos e intención, no " +
-            "solo palabras exactas); para buscar en archivos/contactos del teléfono usa " +
-            "buscar_en_telefono. Cuando el mensaje traiga estadísticas y pida un resumen, llama a " +
-            "resumen_habitos o resumen_semanal con el texto redactado."
+            "devuelve una lista de llamadas vacía en lugar de adivinar. Para buscar en " +
+            "archivos, notas y contactos del teléfono usa buscar_en_telefono."
     }
 
     // ------------------------------------------------------------------
