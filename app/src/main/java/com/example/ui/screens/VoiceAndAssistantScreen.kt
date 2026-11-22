@@ -1249,13 +1249,7 @@ fun VoiceAndAssistantScreen(
                                         NeedleTools.setToolEnabled(context, spec.id, checked)
                                         WhistleKeywordBuilder.invalidate()
                                         needleTick++
-                                        scope.launch {
-                                            try {
-                                                NeedleRuntime.applyToolGating(context)
-                                            } catch (_: Exception) {
-                                            }
-                                            needleTick++
-                                        }
+                                        NeedleRuntime.scheduleToolGating(context) { needleTick++ }
                                     }
                                 )
                             }
@@ -1273,13 +1267,7 @@ fun VoiceAndAssistantScreen(
                             WhistleKeywordBuilder.invalidate()
                             toolOverrides = emptyMap()
                             needleTick++
-                            scope.launch {
-                                try {
-                                    NeedleRuntime.applyToolGating(context)
-                                } catch (_: Exception) {
-                                }
-                                needleTick++
-                            }
+                            NeedleRuntime.scheduleToolGating(context) { needleTick++ }
                         }) {
                             Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -1376,11 +1364,8 @@ fun VoiceAndAssistantScreen(
                 WhistleKeywordBuilder.invalidate()
                 scope.launch {
                     CustomToolRegistry.refresh(context)
-                    try {
-                        NeedleRuntime.applyToolGating(context)
-                    } catch (_: Exception) {
-                    }
                     needleTick++
+                    NeedleRuntime.scheduleToolGating(context) { needleTick++ }
                 }
             }
         )

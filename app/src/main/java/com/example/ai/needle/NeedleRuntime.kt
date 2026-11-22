@@ -3,7 +3,12 @@ package com.example.ai.needle
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,6 +44,15 @@ object NeedleRuntime {
     @Volatile var lastErrorMessage: String? = null
         private set
     @Volatile private var visionLoadError: String? = null
+
+    /**
+     * Cached bitmask of loaded models. [nativeModels] takes the native engine
+     * mutex, and the UI asks for this during composition on the main thread;
+     * querying the engine there made the app freeze for as long as a
+     * `cactus_init` (tool-gating re-declare) was running. Refreshed only on
+     * the engine thread (load / probe / reset).
+     */
+    @Volatile private var cachedModels: Int = 0
 
     /**
      * Tokenized length of the static prefix (system prompt + declared
@@ -123,7 +137,7 @@ object NeedleRuntime {
     fun supportError(): String? = if (libraryLoaded) null else libraryError
 
     /** Bitmask of loaded model kinds (MODEL_TEXT / MODEL_SPEECH / MODEL_VISION). */
-    fun loadedModels(): Int = if (libraryLoaded) nativeModels() else 0
+    fun loadedModels(): Int = if (libraryLoaded) cachedModels else 0
 
     fun isTextModelLoaded(): Boolean = (loadedModels() and MODEL_TEXT) != 0
     fun isSpeechModelLoaded(): Boolean = (loadedModels() and MODEL_SPEECH) != 0
@@ -147,18 +161,22 @@ object NeedleRuntime {
             return@withLock 0
         }
         withContext(needleDispatcher) {
+            // Authoritative, mutex-taking query: safe here (engine thread).
+            cachedModels = nativeModels()
             val dir = modelsDir(context)
             val textFile = File(dir, NeedleModelManager.NEEDLE_FILE)
             val speechFile = File(dir, NeedleModelManager.WHISTLE_FILE)
             val visionFile = File(dir, NeedleModelManager.MIRAGE_FILE)
             if (textFile.exists() && !isTextModelLoaded()) {
                 val rc = nativeLoadModel(textFile.absolutePath)
+                cachedModels = nativeModels()
                 if (rc < 0) {
                     lastErrorMessage = lastError() ?: "no se pudo cargar ${textFile.name}"
                 }
             }
             if (speechFile.exists() && !isSpeechModelLoaded()) {
                 val rc = nativeLoadModel(speechFile.absolutePath)
+                cachedModels = nativeModels()
                 if (rc < 0) {
                     lastErrorMessage = lastError() ?: "no se pudo cargar ${speechFile.name}"
                 }
@@ -169,6 +187,7 @@ object NeedleRuntime {
                     lastErrorMessage = visionLoadError
                 } else {
                     val rc = nativeLoadModel(visionFile.absolutePath)
+                    cachedModels = nativeModels()
                     if (rc < 0) {
                         visionLoadError = lastError() ?: "no se pudo cargar ${visionFile.name} (versión o formato .cact incompatible)"
                         lastErrorMessage = visionLoadError
@@ -180,7 +199,8 @@ object NeedleRuntime {
             if (isTextModelLoaded() && !initialized) {
                 declareTools(context)
             }
-            loadedModels()
+            cachedModels = nativeModels()
+            cachedModels
         }
     }
 
@@ -194,6 +214,7 @@ object NeedleRuntime {
         if (!isSupported() || !file.exists() || file.length() <= 0L) return@withLock 0
         withContext(needleDispatcher) {
             nativeReset()
+            cachedModels = nativeModels()
             initialized = false
             lastErrorMessage = null
             visionLoadError = null
@@ -203,6 +224,7 @@ object NeedleRuntime {
                 lastErrorMessage = lastError() ?: "formato .cact incompatible o dañado"
             }
             nativeReset()
+            cachedModels = nativeModels()
             detected
         }
     }
@@ -224,6 +246,35 @@ object NeedleRuntime {
         WhistleKeywordBuilder.invalidate()
         initialized = false
         declareTools(context)
+    }
+
+    private val gatingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val gatingLock = Any()
+    private var gatingGeneration = 0
+
+    /**
+     * Coalesced [applyToolGating] for the tools menu: flipping several
+     * switches re-declares the catalogue ONCE, after the user stops, instead
+     * of queueing one `cactus_init` per tap. The models are never reloaded or
+     * freed here — only the system prompt + enabled tool JSON are re-tokenized.
+     */
+    fun scheduleToolGating(
+        context: Context,
+        debounceMs: Long = 400L,
+        onDone: (() -> Unit)? = null
+    ) {
+        val appContext = context.applicationContext
+        val generation = synchronized(gatingLock) { ++gatingGeneration }
+        gatingScope.launch {
+            delay(debounceMs)
+            val stillLatest = synchronized(gatingLock) { generation == gatingGeneration }
+            if (!stillLatest) return@launch
+            try {
+                applyToolGating(appContext)
+            } catch (_: Exception) {
+            }
+            onDone?.invoke()
+        }
     }
 
     private suspend fun declareTools(context: Context): Boolean =
@@ -513,6 +564,7 @@ object NeedleRuntime {
     suspend fun reset() = apiMutex.withLock {
         withContext(needleDispatcher) {
             if (libraryLoaded) nativeReset()
+            cachedModels = 0
             initialized = false
             lastErrorMessage = null
         }
