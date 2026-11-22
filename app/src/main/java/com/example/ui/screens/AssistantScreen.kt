@@ -314,6 +314,15 @@ fun AssistantScreen(
                 viewModel.assistantManager.webSearch(intent.query)
                 post(AssistantMessage(false, "Buscando \"${intent.query}\" en la web…"))
             }
+            is AssistantIntent.SearchJournal -> {
+                val answer = journalLookup(intent.query, requireQuestion = false)
+                post(
+                    AssistantMessage(
+                        false,
+                        answer ?: "No encontré nada en tu diario sobre \"${intent.query}\"."
+                    )
+                )
+            }
             AssistantIntent.Weather -> {
                 post(AssistantMessage(false, viewModel.assistantManager.describeWeather(realWeather)))
             }
@@ -434,7 +443,14 @@ fun AssistantScreen(
         }
     }
 
-    suspend fun tryAnswerFromJournal(command: String): String? {
+    suspend fun tryAnswerFromJournal(command: String): String? = journalLookup(command)
+
+    /**
+     * Journal answer for [command]. With [requireQuestion] the utterance must
+     * look like a question (the legacy heuristic); when Needle already routed
+     * a journal intent the query is taken as-is.
+     */
+    suspend fun journalLookup(command: String, requireQuestion: Boolean = true): String? {
         val text = command.lowercase(java.util.Locale.getDefault()).trim()
         val explicitTriggers = listOf(
             "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
@@ -451,7 +467,7 @@ fun AssistantScreen(
             text.startsWith("cuál ") || text.startsWith("cual ")) &&
             AssistantParser.parse(command) is AssistantIntent.Unknown
 
-        if (!isExplicit && !isNaturalQuestion) return null
+        if (requireQuestion && !isExplicit && !isNaturalQuestion) return null
         return try {
             val entries = viewModel.repository.allEntriesWithRelations.first().take(600)
             if (entries.isEmpty()) return null
@@ -459,7 +475,7 @@ fun AssistantScreen(
             if (NeedleEmbeddings.isAvailable(context)) {
                 val vectorHits = NeedleEmbeddings.search(context, command, entries, topK = 3)
                 val bestCosine = vectorHits.firstOrNull()?.second ?: 0f
-                if (vectorHits.isNotEmpty() && (isExplicit || bestCosine >= 0.78f)) {
+                if (vectorHits.isNotEmpty() && (isExplicit || !requireQuestion || bestCosine >= 0.78f)) {
                     val fragments = NeedleEmbeddings.ragFragments(context, command, entries, k = 3)
                     if (fragments.isNotEmpty()) {
                         val aiAnswer = withTimeoutOrNull(25_000) {
@@ -471,7 +487,7 @@ fun AssistantScreen(
                 }
             }
 
-            if (isExplicit) {
+            if (isExplicit || !requireQuestion) {
                 val lexical = SemanticSearchEngine.instantLexicalHits(command, entries, limit = 2)
                 if (lexical.isNotEmpty()) {
                     return lexical.joinToString("\n• ", prefix = "En tus notas encontré:\n• ") { hit ->
@@ -978,6 +994,7 @@ private fun describe(intent: AssistantIntent): String = when (intent) {
     is AssistantIntent.SendMessage -> "Preparando el mensaje…"
     is AssistantIntent.SearchDevice -> "Buscando \"${intent.query}\" en tu teléfono…"
     is AssistantIntent.SearchWeb -> "Buscando en la web…"
+    is AssistantIntent.SearchJournal -> "Repasando tu diario…"
     AssistantIntent.Weather -> "Consultando el clima…"
     is AssistantIntent.CreateNote -> "Guardando tu nota…"
     is AssistantIntent.CreateTask -> "Creando la tarea…"
@@ -999,7 +1016,7 @@ private fun describe(intent: AssistantIntent): String = when (intent) {
 }
 
 private val WELCOME_TEXT = "Hola. Soy tu asistente local — todo corre en tu teléfono, sin nube. " +
-    "Prueba: \"qué tiempo hace\", \"abre whatsapp\", \"llama a mamá\", \"apunta comprar pan\", " +
+    "Prueba: \"qué nota habla de viajes\", \"abre whatsapp\", \"llama a mamá\", \"escribe comprar pan\", " +
     "\"cuánto es 12 por 7\", \"escanea esto\" o \"enciende la linterna\"."
 
 private val HELP_TEXT = "Puedo:\n" +
@@ -1007,10 +1024,11 @@ private val HELP_TEXT = "Puedo:\n" +
     "• Llamar a contactos — \"llama a maría\"\n" +
     "• Buscar en el teléfono — \"busca factura\"\n" +
     "• Buscar en la web — \"busca en internet…\"\n" +
-    "• Decirte el clima — \"qué tiempo hace\"\n" +
-    "• Tomar notas — \"apunta comprar café\"\n" +
+    "• Buscar en tu diario — \"qué nota habla de viajes\"\n" +
+    "• Tomar notas — \"apunta\" o \"escribe comprar café\"\n" +
+    "• Crear tareas — \"recuérdame…\" o \"tengo que…\"\n" +
     "• Calcular — \"cuánto es 12 por 7\"\n" +
     "• Poner temporizadores y alarmas\n" +
-    "• Linterna y batería\n" +
+    "• Linterna\n" +
     "• Traducir — \"traduce good morning al español\"\n" +
     "• Escanear con la cámara — \"escanea esto\""

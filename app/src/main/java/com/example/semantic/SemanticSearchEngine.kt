@@ -250,7 +250,7 @@ object SemanticSearchEngine {
                 .append(clean)
                 .append('\n')
         }
-        sb.append("Llama a buscar_en_notas con consulta=«")
+        sb.append("Llama a rank_notas con consulta=«")
             .append(query.trim())
             .append("» e ids_relevantes= los ids que de VERDAD responden a la consulta ")
             .append("(sinónimos e intención cuentan), del más al menos relevante. ")

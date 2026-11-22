@@ -41,6 +41,9 @@ sealed class AssistantIntent {
     /** Web search: "busca en internet recetas veganas". */
     data class SearchWeb(val query: String) : AssistantIntent()
 
+    /** Answer from the journal: "qué nota habla de viajes", "qué escribí sobre el piso". */
+    data class SearchJournal(val query: String) : AssistantIntent()
+
     /** Weather question: "qué tiempo hace". */
     data object Weather : AssistantIntent()
 
@@ -195,14 +198,18 @@ object AssistantParser {
             if (what.isNotBlank()) return AssistantIntent.OpenApp(what)
         }
 
-        // --- Create note: "apunta comprar leche" / "crea una nota ..." ---
+        // --- Create note: "apunta comprar leche" / "escribe ..." / "crea una nota ..." ---
         listOf(
-            "apunta ", "apuntar ", "anota ", "anotar ", "crea una nota ",
-            "crear una nota ", "nueva nota ", "toma nota ", "tomar nota "
+            "apunta ", "apuntar ", "anota ", "anotar ", "escribe ", "escribir ",
+            "escríbeme ", "escribeme ", "crea una nota ", "crear una nota ",
+            "nueva nota ", "toma nota ", "tomar nota ", "guarda nota "
         ).forEach { prefix ->
             if (text.startsWith(prefix)) {
                 val body = text.removePrefix(prefix).trim()
-                if (body.isNotBlank()) return AssistantIntent.CreateNote(body)
+                // "escríbeme un mensaje a…" is a text message, not a note.
+                val looksLikeMessage = body.startsWith("mensaje") || body.startsWith("un mensaje") ||
+                    body.startsWith("sms")
+                if (body.isNotBlank() && !looksLikeMessage) return AssistantIntent.CreateNote(body)
             }
         }
 
@@ -246,8 +253,13 @@ object AssistantParser {
             }
         }
 
-        // --- Task: "recuérdame X" / "tarea X" ---
-        listOf("recuérdame ", "recuerdame ", "recuérdame que ", "recuerdame que ", "tarea ", "nueva tarea ", "apúntame ").forEach { prefix ->
+        // --- Task: "recuérdame X" / "tarea X" / "tengo que X" ---
+        listOf(
+            "recuérdame ", "recuerdame ", "recuérdame que ", "recuerdame que ",
+            "tarea ", "nueva tarea ", "pon una tarea ", "ponme una tarea ",
+            "crea una tarea ", "crear una tarea ", "apúntame ", "apuntame ",
+            "tengo que "
+        ).forEach { prefix ->
             if (text.startsWith(prefix)) {
                 val body = text.removePrefix(prefix).trim()
                 if (body.isNotBlank()) return AssistantIntent.CreateTask(body, null)
@@ -292,6 +304,18 @@ object AssistantParser {
             val name = m.groupValues[1].trim()
             if (name.isNotBlank()) return AssistantIntent.SaveCurrentPlace(name)
         }
+
+        // --- Journal search: "qué nota habla de ..." / "busca en mis notas ..." ---
+        Regex("^(?:qué|que) notas? (?:habla|trata|dice|menciona|tengo|hay|existe)(?: de| sobre| acerca de)? (.+)$")
+            .find(text)?.let { m ->
+                val q = m.groupValues[1].trim()
+                if (q.isNotBlank()) return AssistantIntent.SearchJournal(q)
+            }
+        Regex("^(?:busca|buscar|encuentra|encontrar) en (?:mis |las )?notas(?: sobre| de| acerca de)? (.+)$")
+            .find(text)?.let { m ->
+                val q = m.groupValues[1].trim()
+                if (q.isNotBlank()) return AssistantIntent.SearchJournal(q)
+            }
 
         // --- Web search: "busca en internet ..." / "busca en google ..." ---
         Regex("^(?:busca|buscar|consulta)\\s+(?:en\\s+)?(?:internet|google|la web|el navegador|online)\\s+(.+)$").find(text)?.let { m ->

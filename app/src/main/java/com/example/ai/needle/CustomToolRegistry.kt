@@ -135,9 +135,9 @@ object CustomToolRegistry {
     private val BUILT_IN_NAMES = setOf(
         "abrir_app", "cerrar_app", "llamar_contacto", "mandar_mensaje",
         "buscar_en_telefono", "buscar_en_web", "buscar_en_notas",
-        "consultar_diario", "clima_hoy", "crear_nota", "crear_tarea",
+        "consultar_diario", "rank_notas", "crear_nota", "crear_tarea",
         "crear_evento", "siguiente_evento", "calcular", "crear_temporizador",
-        "crear_alarma", "linterna", "nivel_bateria", "pasos_hoy", "volumen",
+        "crear_alarma", "linterna", "pasos_hoy", "volumen",
         "grabar_audio", "abrir_escaner_lens", "traducir_texto", "guardar_lugar",
         "resumen_habitos", "resumen_semanal"
     )

@@ -73,8 +73,8 @@ object NeedleTools {
         ToolSpec("mandar_mensaje", "Mensajes SMS", "«mensaje a papa: ya salgo»", defaultEnabled = false),
         ToolSpec("buscar_en_telefono", "Buscar en el teléfono", "«busca la factura»"),
         ToolSpec("buscar_en_web", "Buscar en internet", "«busca en internet…»"),
-        ToolSpec("clima_hoy", "Clima", "«qué tiempo hace»"),
-        ToolSpec("crear_nota", "Crear notas", "«apunta comprar leche»"),
+        ToolSpec("buscar_en_notas", "Buscar en notas", "«qué nota habla de viajes»"),
+        ToolSpec("crear_nota", "Crear notas", "«apunta comprar leche», «escribe…»"),
         ToolSpec("crear_tarea", "Crear tareas", "«recuérdame llamar al dentista»"),
         ToolSpec("crear_evento", "Crear eventos", "«evento dentista el jueves a las 10»", defaultEnabled = false),
         ToolSpec("siguiente_evento", "Próximo evento", "«qué tengo hoy»"),
@@ -82,7 +82,6 @@ object NeedleTools {
         ToolSpec("crear_temporizador", "Temporizadores", "«temporizador 10 minutos»"),
         ToolSpec("crear_alarma", "Alarmas", "«alarma a las 7»"),
         ToolSpec("linterna", "Linterna", "«enciende la linterna»"),
-        ToolSpec("nivel_bateria", "Batería", "«cuánta batería queda»"),
         ToolSpec("pasos_hoy", "Pasos de hoy", "«cuántos pasos llevo»"),
         ToolSpec("volumen", "Volumen y silencio", "«volumen al 50», «silencio»"),
         ToolSpec("grabar_audio", "Nota de voz", "«graba mi voz 30 segundos»", defaultEnabled = false),
@@ -92,23 +91,23 @@ object NeedleTools {
     )
 
     /**
-     * Tools the APP calls itself and the assistant never routes: semantic
-     * note re-ranking, RAG answers over the journal, the daily brief and the
-     * weekly report.
+     * Tools the APP calls itself and the assistant never offers as a
+     * standalone action: semantic note re-ranking, RAG answers over the
+     * journal, the daily brief and the weekly report.
      *
-     * Their user-facing job is already covered by other parts of the app
-     * (SemanticSearchEngine ranks the journal, the journal RAG answers
-     * questions, HabitMiners has a template brief and BriefScheduler a
-     * template weekly report), and none of them had an intent mapping, so a
-     * routed call was discarded anyway. Keeping them out of [TOOL_CATALOG]
-     * removes them from the tools menu and from the gate count.
+     * The user-facing journal question ("qué nota habla de…") is
+     * [buscar_en_notas], which IS in the catalogue; this is only the ranking
+     * step SemanticSearchEngine runs over its own candidates, so it stays
+     * out of the menu. Habit summaries are already on the dashboard and the
+     * reports are written by BriefScheduler/HabitMiners, so none of these
+     * are user actions.
      *
      * They still have to be declared to the engine: Needle's grammar only
      * emits calls for declared tools, so [buildToolsJson] and
      * [buildCoreToolsJson] always append them.
      */
     private val INTERNAL_TOOLS = listOf(
-        "buscar_en_notas", "consultar_diario", "resumen_habitos", "resumen_semanal"
+        "rank_notas", "consultar_diario", "resumen_habitos", "resumen_semanal"
     )
 
     /** Compact fallback set used when the full catalogue overflows context. */
@@ -137,13 +136,11 @@ object NeedleTools {
             "\\b(?:apag|desactiv)\\w*\\b.*\\blinterna\\b",
             "\\blinterna\\b.*\\b(?:on|off|encendida|apagada)\\b"
         ),
-        "nivel_bateria" to listOf(
-            "\\b(?:cu.{0,2}nta|nivel de|porcentaje de)\\s+(?:bater.{0,2}a|carga)\\b",
-            "\\bbater.{0,2}a\\b.*\\b(?:queda|lleva|tiene|restante)\\b"
-        ),
-        "clima_hoy" to listOf(
-            "\\b(?:qu.{0,2}\\s+tiempo|clima|temperatura)\\b",
-            "\\b(?:va a llover|est.{0,2} lloviendo|hace (?:fr.{0,2}o|calor))\\b"
+        "buscar_en_notas" to listOf(
+            "\\bqu.{0,2}\\s+notas?.{0,3}\\b(?:habla|trata|dice|menciona|tengo|hay|existe)\\b",
+            "\\bnotas?\\s+(?:sobre|de|acerca de)\\b",
+            "\\b(?:busca|buscar|encuentra|encontrar)\\s+(?:en\\s+)?mis\\s+notas\\b",
+            "\\bqu.{0,2}\\s+(?:escrib.{0,2}|anot.{0,2}|apunt.{0,2}|guard.{0,2})\\s+sobre\\b"
         ),
         "pasos_hoy" to listOf(
             "\\b(?:cu.{0,2}ntos|n.{0,2}mero de)\\s+pasos\\b",
@@ -170,10 +167,10 @@ object NeedleTools {
             "\\b(?:silencio|silenciar|modo silencio|vibraci.{0,2}n|modo vibraci.{0,2}n|mute)\\b"
         ),
         "crear_nota" to listOf(
-            "\\b(?:apunta|anota|toma nota|nueva nota|crea (?:una )?nota)\\b"
+            "\\b(?:apunta|anota|escribe|escr.{0,2}beme|toma nota|nueva nota|guarda(?:r)? nota|crea(?:r)? (?:una )?nota)\\b"
         ),
         "crear_tarea" to listOf(
-            "\\b(?:recu.{0,2}rdame|nueva tarea|crea (?:una )?tarea|ap.{0,2}ntame)\\b"
+            "\\b(?:recu.{0,2}rdame|nueva tarea|crea(?:r)? (?:una )?tarea|pon(?:me)? (?:una )?tarea|ap.{0,2}ntame)\\b"
         ),
         "grabar_audio" to listOf(
             "\\b(?:graba|grabar|graba mi voz|nota de voz)\\b"
@@ -281,7 +278,17 @@ object NeedleTools {
 
             "buscar_en_notas" -> tool(
                 "buscar_en_notas",
-                "Busca en las NOTAS DEL DIARIO del usuario y devuelve las relevantes para una consulta semántica (no literal).",
+                "Busca en las NOTAS y recuerdos del diario del usuario por significado, no por palabras literales. " +
+                    "Úsala cuando pregunte qué nota habla de un tema, qué escribió, anotó o apuntó sobre algo, " +
+                    "o cuándo ocurrió algo que contó antes.",
+                mapOf(
+                    "consulta" to prop("string", "La pregunta o el tema reformulado con claridad, con sus sinónimos")
+                )
+            )
+
+            "rank_notas" -> tool(
+                "rank_notas",
+                "Ordena candidatos de búsqueda y devuelve solo los que responden a la consulta (uso interno de la app).",
                 mapOf(
                     "consulta" to prop("string", "La intención de búsqueda reformulada con claridad"),
                     "ids_relevantes" to JSONObject()
@@ -300,12 +307,6 @@ object NeedleTools {
                         "Respuesta breve en español basada únicamente en los fragmentos; si no la saben, dilo"
                     )
                 )
-            )
-
-            "clima_hoy" -> tool(
-                "clima_hoy",
-                "Lee el clima actual de la ciudad configurada en la app.",
-                emptyMap()
             )
 
             "crear_nota" -> tool(
@@ -381,12 +382,6 @@ object NeedleTools {
                 "linterna",
                 "Enciende o apaga la linterna del teléfono.",
                 mapOf("encender" to prop("boolean", "true para encender, false para apagar"))
-            )
-
-            "nivel_bateria" -> tool(
-                "nivel_bateria",
-                "Lee el porcentaje de batería restante.",
-                emptyMap()
             )
 
             "pasos_hoy" -> tool(
@@ -498,10 +493,11 @@ object NeedleTools {
         val now = java.text.SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy", Locale("es"))
             .format(java.util.Date())
         return "Eres el enrutador de comandos del asistente local de Mnemosyne en un teléfono " +
-            "Android. Hoy es $now. El usuario habla en español. Escucha lo que pide y elige la " +
-            "herramienta correcta rellenando todos los argumentos. Si nada encaja con lo pedido, " +
-            "devuelve una lista de llamadas vacía en lugar de adivinar. Para buscar en " +
-            "archivos, notas y contactos del teléfono usa buscar_en_telefono."
+            "Android. Hoy es $now. El usuario habla en español y no siempre usa las mismas " +
+            "palabras: deduce la intención. Elige la herramienta correcta rellenando todos los " +
+            "argumentos; si nada encaja, devuelve una lista de llamadas vacía en lugar de adivinar. " +
+            "Para archivos y contactos del teléfono usa buscar_en_telefono; para cualquier pregunta " +
+            "sobre lo que el usuario escribió en su diario usa buscar_en_notas."
     }
 
     // ------------------------------------------------------------------
@@ -560,7 +556,8 @@ object NeedleTools {
             "buscar_en_web" -> a.optString("consulta").takeIf { it.isNotBlank() }
                 ?.let { AssistantIntent.SearchWeb(it) }
 
-            "clima_hoy" -> AssistantIntent.Weather
+            "buscar_en_notas" -> a.optString("consulta").takeIf { it.isNotBlank() }
+                ?.let { AssistantIntent.SearchJournal(it) }
 
             "crear_nota" -> a.optString("texto").takeIf { it.isNotBlank() }
                 ?.let { AssistantIntent.CreateNote(it) }
@@ -628,8 +625,6 @@ object NeedleTools {
 
             "linterna" -> AssistantIntent.Flashlight(a.optBoolean("encender", true))
 
-            "nivel_bateria" -> AssistantIntent.Battery
-
             "abrir_escaner_lens" -> AssistantIntent.Lens
 
             "traducir_texto" -> {
@@ -675,14 +670,14 @@ object NeedleTools {
 
     /**
      * Semantic note ranking: given a search turn (query + numbered
-     * candidate excerpts) the model must call buscar_en_notas with the ids
+     * candidate excerpts) the model must call rank_notas with the ids
      * that truly answer the query, best first. Returns null when the model
      * is unusable or did not cooperate (caller keeps the lexical ranking).
      */
     suspend fun rankNotes(searchTurn: String): List<Long>? {
         val raw = NeedleRuntime.completeText(searchTurn, 220) ?: return null
         val parsed = parseResponse(raw) ?: return null
-        val call = parsed.calls.firstOrNull { it.name == "buscar_en_notas" } ?: return null
+        val call = parsed.calls.firstOrNull { it.name == "rank_notas" } ?: return null
         if (parsed.confidence < MIN_CONFIDENCE) return null
         val ids = call.args.optJSONArray("ids_relevantes") ?: return null
         val ranked = mutableListOf<Long>()

@@ -877,17 +877,35 @@ class HotwordService : Service(), RecognitionListener {
     }
 
     /** RAG over the journal: embeddings retrieval + Needle's answer. */
-    private suspend fun tryAnswerFromJournal(command: String): String? {
-        if (!isJournalQuestion(command)) return null
-        if (!com.example.semantic.NeedleEmbeddings.isAvailable(this)) return null
+    private suspend fun tryAnswerFromJournal(command: String): String? = journalLookup(command)
+
+    /**
+     * Journal answer. [requireQuestion] keeps the legacy keyword gate for the
+     * pre-router step; a routed SearchJournal intent skips it.
+     */
+    private suspend fun journalLookup(command: String, requireQuestion: Boolean = true): String? {
+        if (requireQuestion && !isJournalQuestion(command)) return null
         return try {
             val snapshots = AppDatabase.getInstance(this).journalDao().getAllEntriesSnapshot()
             val entries = snapshots.take(600).map { EntryWithRelations(entry = it) }
             if (entries.isEmpty()) return null
-            val fragments = com.example.semantic.NeedleEmbeddings.ragFragments(this, command, entries, k = 3)
-            if (fragments.isEmpty()) return null
-            withTimeoutOrNull(25_000) { NeedleTools.answerFromJournal(command, fragments) }
-                ?: "Encontré ${fragments.size} entradas relacionadas en tu diario; abre la app para verlas."
+            if (com.example.semantic.NeedleEmbeddings.isAvailable(this)) {
+                val fragments = com.example.semantic.NeedleEmbeddings.ragFragments(this, command, entries, k = 3)
+                if (fragments.isNotEmpty()) {
+                    val answer = withTimeoutOrNull(25_000) { NeedleTools.answerFromJournal(command, fragments) }
+                    if (!answer.isNullOrBlank()) return answer
+                    return "Encontré ${fragments.size} entradas relacionadas en tu diario; abre la app para verlas."
+                }
+            }
+            // The model asked for the journal but there are no embeddings yet:
+            // fall back to the app's lexical journal search.
+            val lexical = com.example.semantic.SemanticSearchEngine
+                .instantLexicalHits(command, entries, limit = 2)
+            if (lexical.isEmpty()) return null
+            lexical.joinToString("\n• ", prefix = "En tus notas encontré:\n• ") { hit ->
+                val snippet = hit.snippet.ifBlank { hit.reason }
+                "«${hit.title}» — ${snippet.take(120)}"
+            }
         } catch (_: Exception) {
             null
         }
@@ -969,6 +987,10 @@ class HotwordService : Service(), RecognitionListener {
                 is AssistantIntent.SearchDevice ->
                     "Buscando \"${intent.query}\"… abre la app para ver los resultados."
 
+                is AssistantIntent.SearchJournal ->
+                    journalLookup(intent.query, requireQuestion = false)
+                        ?: "No encontré nada en tu diario sobre \"${intent.query}\"."
+
                 is AssistantIntent.SearchWeb -> {
                     assistantManager.webSearch(intent.query)
                     "Buscando \"${intent.query}\" en la web…"
@@ -1047,7 +1069,7 @@ class HotwordService : Service(), RecognitionListener {
 
                 AssistantIntent.Unknown ->
                     "No entendí el comando. Prueba: «abre whatsapp», " +
-                            "«llama a maría», «cuánta batería queda», «linterna», «cuánto es 12 por 7»."
+                            "«llama a maría», «qué nota habla de viajes», «linterna», «cuánto es 12 por 7»."
             }
         } catch (e: Exception) {
             "El comando falló: ${e.message}"
