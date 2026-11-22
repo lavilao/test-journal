@@ -148,9 +148,14 @@ object MirageVision {
     private fun decodeScaledBitmap(context: Context, uri: Uri, maxDim: Int): Pair<Bitmap?, String?> {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         try {
-            openUriStream(context, uri)?.use { stream ->
+            // NOTE: with inJustDecodeBounds = true decodeStream intentionally
+            // returns null even when the image is read fine, so the stream (not
+            // the bitmap) is what decides whether the image could be opened.
+            val boundsStream = openUriStream(context, uri)
+                ?: return null to "no se pudo abrir la imagen ($uri)"
+            boundsStream.use { stream ->
                 BitmapFactory.decodeStream(stream, null, bounds)
-            } ?: return null to "no se pudo abrir la imagen ($uri)"
+            }
         } catch (t: Throwable) {
             return null to "sin acceso a la imagen (${t.message ?: t.javaClass.simpleName})"
         }
