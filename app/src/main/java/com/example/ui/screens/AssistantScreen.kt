@@ -261,6 +261,63 @@ fun AssistantScreen(
         }
     }
 
+    /**
+     * Journal answer for [command]. With [requireQuestion] the utterance must
+     * look like a question (the legacy heuristic); when Needle already routed
+     * a journal intent the query is taken as-is.
+     */
+    suspend fun journalLookup(command: String, requireQuestion: Boolean = true): String? {
+        val text = command.lowercase(java.util.Locale.getDefault()).trim()
+        val explicitTriggers = listOf(
+            "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
+            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "mis notas sobre",
+            "qué recuerdo", "que recuerdo", "qué sé sobre", "que se sobre", "busca en mi diario"
+        )
+        val isExplicit = explicitTriggers.any { text.contains(it) }
+        val isNaturalQuestion = (text.contains('?') ||
+            text.startsWith("qué ") || text.startsWith("que ") ||
+            text.startsWith("cuándo ") || text.startsWith("cuando ") ||
+            text.startsWith("dónde ") || text.startsWith("donde ") ||
+            text.startsWith("quién ") || text.startsWith("quien ") ||
+            text.startsWith("cómo ") || text.startsWith("como ") ||
+            text.startsWith("cuál ") || text.startsWith("cual ")) &&
+            AssistantParser.parse(command) is AssistantIntent.Unknown
+
+        if (requireQuestion && !isExplicit && !isNaturalQuestion) return null
+        return try {
+            val entries = viewModel.repository.allEntriesWithRelations.first().take(600)
+            if (entries.isEmpty()) return null
+
+            if (NeedleEmbeddings.isAvailable(context)) {
+                val vectorHits = NeedleEmbeddings.search(context, command, entries, topK = 3)
+                val bestCosine = vectorHits.firstOrNull()?.second ?: 0f
+                if (vectorHits.isNotEmpty() && (isExplicit || !requireQuestion || bestCosine >= 0.78f)) {
+                    val fragments = NeedleEmbeddings.ragFragments(context, command, entries, k = 3)
+                    if (fragments.isNotEmpty()) {
+                        val aiAnswer = withTimeoutOrNull(25_000) {
+                            NeedleTools.answerFromJournal(command, fragments)
+                        }
+                        if (!aiAnswer.isNullOrBlank()) return aiAnswer
+                        return "Encontré esto en tu diario:\n${fragments.take(2).joinToString("\n• ", prefix = "• ")}"
+                    }
+                }
+            }
+
+            if (isExplicit || !requireQuestion) {
+                val lexical = SemanticSearchEngine.instantLexicalHits(command, entries, limit = 2)
+                if (lexical.isNotEmpty()) {
+                    return lexical.joinToString("\n• ", prefix = "En tus notas encontré:\n• ") { hit ->
+                        val snippet = hit.snippet.ifBlank { hit.reason }
+                        "«${hit.title}» — ${snippet.take(120)}"
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun resolveIntents(utterance: String): Pair<List<AssistantIntent>, Boolean> {
         if (needleUsable) {
             val routed = withTimeoutOrNull(25_000) { NeedleTools.route(utterance) }
@@ -443,72 +500,13 @@ fun AssistantScreen(
         }
     }
 
-    suspend fun tryAnswerFromJournal(command: String): String? = journalLookup(command)
-
-    /**
-     * Journal answer for [command]. With [requireQuestion] the utterance must
-     * look like a question (the legacy heuristic); when Needle already routed
-     * a journal intent the query is taken as-is.
-     */
-    suspend fun journalLookup(command: String, requireQuestion: Boolean = true): String? {
-        val text = command.lowercase(java.util.Locale.getDefault()).trim()
-        val explicitTriggers = listOf(
-            "qué escribí", "que escribí", "qué apunté", "que apunte", "qué anoté", "que anote",
-            "qué dice mi diario", "que dice mi diario", "mi diario sobre", "mis notas sobre",
-            "qué recuerdo", "que recuerdo", "qué sé sobre", "que se sobre", "busca en mi diario"
-        )
-        val isExplicit = explicitTriggers.any { text.contains(it) }
-        val isNaturalQuestion = (text.contains('?') ||
-            text.startsWith("qué ") || text.startsWith("que ") ||
-            text.startsWith("cuándo ") || text.startsWith("cuando ") ||
-            text.startsWith("dónde ") || text.startsWith("donde ") ||
-            text.startsWith("quién ") || text.startsWith("quien ") ||
-            text.startsWith("cómo ") || text.startsWith("como ") ||
-            text.startsWith("cuál ") || text.startsWith("cual ")) &&
-            AssistantParser.parse(command) is AssistantIntent.Unknown
-
-        if (requireQuestion && !isExplicit && !isNaturalQuestion) return null
-        return try {
-            val entries = viewModel.repository.allEntriesWithRelations.first().take(600)
-            if (entries.isEmpty()) return null
-
-            if (NeedleEmbeddings.isAvailable(context)) {
-                val vectorHits = NeedleEmbeddings.search(context, command, entries, topK = 3)
-                val bestCosine = vectorHits.firstOrNull()?.second ?: 0f
-                if (vectorHits.isNotEmpty() && (isExplicit || !requireQuestion || bestCosine >= 0.78f)) {
-                    val fragments = NeedleEmbeddings.ragFragments(context, command, entries, k = 3)
-                    if (fragments.isNotEmpty()) {
-                        val aiAnswer = withTimeoutOrNull(25_000) {
-                            NeedleTools.answerFromJournal(command, fragments)
-                        }
-                        if (!aiAnswer.isNullOrBlank()) return aiAnswer
-                        return "Encontré esto en tu diario:\n${fragments.take(2).joinToString("\n• ", prefix = "• ")}"
-                    }
-                }
-            }
-
-            if (isExplicit || !requireQuestion) {
-                val lexical = SemanticSearchEngine.instantLexicalHits(command, entries, limit = 2)
-                if (lexical.isNotEmpty()) {
-                    return lexical.joinToString("\n• ", prefix = "En tus notas encontré:\n• ") { hit ->
-                        val snippet = hit.snippet.ifBlank { hit.reason }
-                        "«${hit.title}» — ${snippet.take(120)}"
-                    }
-                }
-            }
-            null
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     fun execute(utterance: String, fromUser: Boolean = true) {
         val clean = utterance.trim()
         if (clean.isBlank()) return
         if (fromUser) post(AssistantMessage(true, clean))
         thinking = true
         scope.launch {
-            val memory = tryAnswerFromJournal(clean)
+            val memory = journalLookup(clean)
             if (memory != null) {
                 post(AssistantMessage(false, "$memory · IA local (memoria del diario)"))
                 thinking = false
