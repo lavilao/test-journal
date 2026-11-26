@@ -39,6 +39,8 @@ import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
 import com.example.speech.voiceprint.VoiceSampleRecorder
 import com.example.telemetry.WeatherService
+import com.example.tts.kitten.KittenTtsEngine
+import com.example.tts.kitten.KittenTtsModelStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -247,6 +249,7 @@ class HotwordService : Service(), RecognitionListener {
         destroyRecognizer()
         try { toneGenerator?.release() } catch (_: Exception) {}
         toneGenerator = null
+        try { KittenTtsEngine.stop() } catch (_: Exception) {}
         try { tts?.shutdown() } catch (_: Exception) {}
         tts = null
         super.onDestroy()
@@ -1099,7 +1102,7 @@ class HotwordService : Service(), RecognitionListener {
     }
 
     private fun initTts() {
-        if (!ttsReplyEnabled(this)) return
+        if (tts != null) return
         try {
             tts = TextToSpeech(applicationContext) { initStatus ->
                 ttsReady = initStatus == TextToSpeech.SUCCESS
@@ -1107,8 +1110,30 @@ class HotwordService : Service(), RecognitionListener {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Reads the reply aloud with the engine chosen in Ajustes → Voz y
+     * asistente: KittenTTS 2 (pico, on-device) or the Android system TTS.
+     * KittenTTS falls back to the system engine when its model for the
+     * selected language has not been downloaded yet.
+     */
     private fun speak(text: String) {
-        if (!ttsReplyEnabled(this) || !ttsReady) return
+        if (!ttsReplyEnabled(this) || text.isBlank()) return
+        if (KittenTtsModelStore.isKittenSelected(this)) {
+            serviceScope.launch(Dispatchers.IO) {
+                val spoken = try {
+                    KittenTtsEngine.speakSelected(applicationContext, text)
+                } catch (_: Throwable) {
+                    false
+                }
+                if (!spoken) mainHandler.post { systemSpeak(text) }
+            }
+            return
+        }
+        systemSpeak(text)
+    }
+
+    private fun systemSpeak(text: String) {
+        initTts()
         try {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "hotword_reply")
         } catch (_: Exception) {}

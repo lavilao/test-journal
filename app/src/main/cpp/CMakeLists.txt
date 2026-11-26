@@ -10,6 +10,21 @@ project(mnemosyne_needle LANGUAGES CXX)
 
 add_library(needlejni SHARED needle_jni.cpp)
 
+# KittenTTS 2 (pico) phoneme front end: JNI shim over eSpeak-NG 1.52.0.
+# The prebuilt library keeps its SONAME (libttsespeak.so); ABIs without it
+# (x86_64 emulators) build the shim as a stub that reports "unavailable".
+set(TTSESPEAK_PREBUILT "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libttsespeak.so")
+add_library(kittenttsjni SHARED kitten_tts_jni.cpp)
+if (EXISTS "${TTSESPEAK_PREBUILT}")
+    add_library(ttsespeak SHARED IMPORTED)
+    set_target_properties(ttsespeak PROPERTIES
+        IMPORTED_LOCATION "${TTSESPEAK_PREBUILT}")
+    target_compile_definitions(kittenttsjni PRIVATE KITTEN_TTS_ESPEAK=1)
+    target_link_libraries(kittenttsjni ttsespeak log)
+else()
+    target_link_libraries(kittenttsjni log)
+endif()
+
 set(CACTUS_PREBUILT "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libcactus.a")
 
 if (EXISTS "${CACTUS_PREBUILT}")

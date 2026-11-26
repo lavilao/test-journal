@@ -16,6 +16,7 @@ import com.example.ai.needle.WhistleKeywordBuilder
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -63,6 +66,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -96,6 +100,9 @@ import com.example.speech.hotword.HotwordService
 import com.example.speech.voiceprint.VoicePrintEngine
 import com.example.speech.voiceprint.VoicePrintStore
 import com.example.speech.voiceprint.VoiceSampleRecorder
+import com.example.tts.kitten.KittenTtsCatalog
+import com.example.tts.kitten.KittenTtsEngine
+import com.example.tts.kitten.KittenTtsModelStore
 import com.example.ui.components.ExpandableHint
 import com.example.ui.components.GlassTopBar
 import com.example.ui.components.LiquidGlassCard
@@ -155,6 +162,21 @@ fun VoiceAndAssistantScreen(
     var voiceMatchChecked by remember(refreshTick) {
         mutableStateOf(HotwordService.voiceMatchEnabled(context))
     }
+
+    // ---- KittenTTS 2 (pico) state ----
+    var kittenEngine by remember(refreshTick) { mutableStateOf(KittenTtsModelStore.engine(context)) }
+    var kittenLanguage by remember(refreshTick) { mutableStateOf(KittenTtsModelStore.language(context)) }
+    var kittenVoice by remember(refreshTick) { mutableStateOf(KittenTtsModelStore.voice(context)) }
+    var kittenSpeed by remember(refreshTick) { mutableStateOf(KittenTtsModelStore.speed(context)) }
+    var kittenMenu by remember { mutableStateOf<String?>(null) }
+    var kittenMessage by remember { mutableStateOf<String?>(null) }
+    var kittenBusy by remember { mutableStateOf(false) }
+    val kittenDownload by KittenTtsModelStore.downloadState.collectAsState()
+    val kittenModelReady = remember(kittenLanguage, refreshTick) {
+        KittenTtsModelStore.isDownloaded(context, kittenLanguage)
+    }
+    val kittenLanguageInfo = KittenTtsCatalog.language(kittenLanguage)
+    val kittenVoiceInfo = KittenTtsCatalog.voice(kittenLanguage, kittenVoice)
 
     // ---- voice print state ----
     val enrolled = remember(refreshTick) { store.isEnrolled() }
@@ -1660,6 +1682,264 @@ fun VoiceAndAssistantScreen(
                     }
                 )
             }
+
+            // ---- KittenTTS 2 (pico): engine, language, voice ----
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Motor de síntesis", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN)
+                            "KittenTTS 2 · pico — 100% en el teléfono"
+                        else "TextToSpeech del sistema",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box {
+                    OutlinedButton(
+                        onClick = { kittenMenu = "engine" },
+                        modifier = Modifier.testTag("kitten_engine_picker")
+                    ) {
+                        Text(
+                            if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN) "KittenTTS pico"
+                            else "Sistema"
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = kittenMenu == "engine",
+                        onDismissRequest = { kittenMenu = null }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Sistema (Android)") },
+                            onClick = {
+                                kittenMenu = null
+                                kittenEngine = KittenTtsModelStore.ENGINE_SYSTEM
+                                KittenTtsModelStore.setEngine(
+                                    context, KittenTtsModelStore.ENGINE_SYSTEM
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(KittenTtsCatalog.DISPLAY_NAME) },
+                            onClick = {
+                                kittenMenu = null
+                                kittenEngine = KittenTtsModelStore.ENGINE_KITTEN
+                                KittenTtsModelStore.setEngine(
+                                    context, KittenTtsModelStore.ENGINE_KITTEN
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Idioma", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Elige qué modelo pico se descarga",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Box {
+                        OutlinedButton(
+                            onClick = { kittenMenu = "language" },
+                            modifier = Modifier.testTag("kitten_language_picker")
+                        ) {
+                            Text(kittenLanguageInfo.label)
+                        }
+                        DropdownMenu(
+                            expanded = kittenMenu == "language",
+                            onDismissRequest = { kittenMenu = null }
+                        ) {
+                            KittenTtsCatalog.languages.forEach { language ->
+                                DropdownMenuItem(
+                                    text = { Text(language.label) },
+                                    onClick = {
+                                        kittenMenu = null
+                                        KittenTtsModelStore.setLanguage(context, language.code)
+                                        kittenLanguage = language.code
+                                        kittenVoice = KittenTtsModelStore.voice(context)
+                                        kittenMessage = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Voz", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            kittenVoiceInfo.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Box {
+                        OutlinedButton(
+                            onClick = { kittenMenu = "voice" },
+                            modifier = Modifier.testTag("kitten_voice_picker")
+                        ) {
+                            Text(kittenVoiceInfo.name)
+                        }
+                        DropdownMenu(
+                            expanded = kittenMenu == "voice",
+                            onDismissRequest = { kittenMenu = null }
+                        ) {
+                            KittenTtsCatalog.voices(kittenLanguage).forEach { voice ->
+                                DropdownMenuItem(
+                                    text = { Text("${voice.name} · ${voice.description}") },
+                                    onClick = {
+                                        kittenMenu = null
+                                        KittenTtsModelStore.setVoice(context, voice.key)
+                                        kittenVoice = voice.key
+                                        kittenLanguage = KittenTtsModelStore.language(context)
+                                        kittenMessage = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Velocidad ${String.format(Locale.getDefault(), "%.2f", kittenSpeed)}×",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Slider(
+                    value = kittenSpeed,
+                    onValueChange = {
+                        kittenSpeed = it
+                        KittenTtsModelStore.setSpeed(context, it)
+                    },
+                    valueRange = 0.6f..1.6f,
+                    steps = 9,
+                    modifier = Modifier.testTag("kitten_speed_slider")
+                )
+                Text(
+                    text = if (kittenModelReady) {
+                        "Modelo ${kittenLanguageInfo.label} instalado (" +
+                            KittenTtsModelStore.formatMb(
+                                KittenTtsModelStore.downloadedBytes(context, kittenLanguage)
+                            ) + ")"
+                    } else {
+                        "Modelo ${kittenLanguageInfo.label} sin descargar (~10 MB)"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                kittenDownload
+                    ?.takeIf { it.language == kittenLanguage && !it.done }
+                    ?.let { download ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (download.error != null) {
+                            Text(
+                                "Error: ${download.error}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                progress = { download.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                download.phase,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !kittenModelReady && !kittenBusy,
+                        onClick = {
+                            kittenBusy = true
+                            kittenMessage = null
+                            scope.launch {
+                                val ok = KittenTtsModelStore.download(context, kittenLanguage)
+                                kittenBusy = false
+                                kittenMessage = if (ok) {
+                                    "Modelo listo: ya puedes probar la voz."
+                                } else {
+                                    "No se pudo descargar el modelo."
+                                }
+                                refreshTick++
+                            }
+                        },
+                        modifier = Modifier.weight(1f).testTag("kitten_download_btn")
+                    ) {
+                        Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (kittenModelReady) "Instalado" else "Descargar", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        enabled = kittenModelReady && !kittenBusy,
+                        onClick = {
+                            kittenBusy = true
+                            kittenMessage = null
+                            scope.launch {
+                                val ok = KittenTtsEngine.speakSelected(
+                                    context,
+                                    "Hola, soy tu asistente. Así suena la voz " +
+                                        "${kittenVoiceInfo.name} en ${kittenLanguageInfo.label}."
+                                )
+                                kittenBusy = false
+                                kittenMessage = if (ok) {
+                                    "Voz reproducida."
+                                } else {
+                                    "No pude sintetizar la voz. Revisa la descarga."
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f).testTag("kitten_preview_btn")
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Probar", fontSize = 12.sp)
+                    }
+                }
+                if (kittenModelReady) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            KittenTtsEngine.release()
+                            KittenTtsModelStore.deleteLanguage(context, kittenLanguage)
+                            kittenMessage = "Modelo eliminado."
+                            refreshTick++
+                        }
+                    }) {
+                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Eliminar modelo descargado", fontSize = 12.sp)
+                    }
+                }
+                kittenMessage?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                ExpandableHint(
+                    text = "KittenTTS 2 pico (KittenML, Apache-2.0): 7 M parámetros, ~8 MB por " +
+                        "idioma, se ejecuta en la CPU del teléfono. Los fonemas se generan con " +
+                        "eSpeak-NG (GPLv3), incluido en la app. No necesita conexión después de " +
+                        "descargar el modelo; si el modelo del idioma no está descargado, el " +
+                        "asistente usa el TTS del sistema.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             if (enrolled) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

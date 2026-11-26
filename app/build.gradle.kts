@@ -176,6 +176,8 @@ dependencies {
   // ML Kit Subject Segmentation (beta, via Play Services, inference
   // on-device): "quitar fondo" / "quitar sujeto" photo surgery.
   implementation(libs.play.services.mlkit.subject.segmentation)
+  // KittenTTS 2 pico: on-device ONNX inference (int8 graphs).
+  implementation(libs.onnxruntime.android)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
