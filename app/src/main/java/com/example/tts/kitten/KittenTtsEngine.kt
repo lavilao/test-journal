@@ -59,6 +59,7 @@ object KittenTtsEngine {
         speed: Float = 1.0f
     ): Boolean = mutex.withLock {
         if (text.isBlank()) return@withLock false
+        if (KittenTtsModelStore.isNativeEngineBlocked(context)) return@withLock false
         val lang = KittenTtsCatalog.language(language)
         if (!KittenTtsModelStore.isDownloaded(context, lang.code)) return@withLock false
         if (!load(context, lang.code)) return@withLock false
@@ -138,6 +139,9 @@ object KittenTtsEngine {
 
     private suspend fun load(context: Context, language: String): Boolean {
         if (session != null && loadedLanguage == language && vocabulary != null) return true
+        // A previous native crash while creating the session: never retry on
+        // this app version, let the caller fall back to the system TTS.
+        if (KittenTtsModelStore.isNativeEngineBlocked(context)) return false
 
         if (!KittenTtsModelStore.ensureEspeakData(context)) return false
         if (!EspeakBridge.init(KittenTtsModelStore.espeakParentDir(context).absolutePath)) {
@@ -161,12 +165,18 @@ object KittenTtsEngine {
                 }
                 if (session == null || loadedLanguage != language) {
                     session?.close()
+                    // Committed synchronously before the native call: if ORT
+                    // takes the process down (32-bit ARM SIGBUS), the next
+                    // start knows the crash came from here.
+                    KittenTtsModelStore.beginNativeSessionLoad(context)
                     session = KittenTtsSession(modelFile.absolutePath)
+                    KittenTtsModelStore.endNativeSessionLoad(context)
                     loadedLanguage = language
                     voicePack = voicesFile.inputStream().use { KittenTtsNpz.parseNpz(it) }
                 }
                 vocabulary != null && voicePack.isNotEmpty()
             } catch (_: Throwable) {
+                KittenTtsModelStore.endNativeSessionLoad(context)
                 session?.close()
                 session = null
                 loadedLanguage = null

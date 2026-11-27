@@ -50,7 +50,7 @@ mlkitTextRecognition = "16.0.1"
 mlkitBarcodeScanning = "17.3.0"
 mlkitDocScanner = "16.0.0-beta1"
 mlkitSubjectSegmentation = "16.0.0-beta1"
-onnxruntime = "1.20.0"
+onnxruntime = "1.26.0"
 
 
 [libraries]

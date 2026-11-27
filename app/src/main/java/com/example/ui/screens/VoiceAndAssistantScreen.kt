@@ -172,6 +172,9 @@ fun VoiceAndAssistantScreen(
     var kittenMessage by remember { mutableStateOf<String?>(null) }
     var kittenBusy by remember { mutableStateOf(false) }
     val kittenDownload by KittenTtsModelStore.downloadState.collectAsState()
+    val kittenBlocked = remember(refreshTick) {
+        KittenTtsModelStore.isNativeEngineBlocked(context)
+    }
     val kittenModelReady = remember(kittenLanguage, refreshTick) {
         KittenTtsModelStore.isDownloaded(context, kittenLanguage)
     }
@@ -1691,7 +1694,7 @@ fun VoiceAndAssistantScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Motor de síntesis", fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN)
+                        if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN && !kittenBlocked)
                             "KittenTTS 2 · pico — 100% en el teléfono"
                         else "TextToSpeech del sistema",
                         style = MaterialTheme.typography.labelSmall,
@@ -1724,6 +1727,7 @@ fun VoiceAndAssistantScreen(
                         )
                         DropdownMenuItem(
                             text = { Text(KittenTtsCatalog.DISPLAY_NAME) },
+                            enabled = !kittenBlocked,
                             onClick = {
                                 kittenMenu = null
                                 kittenEngine = KittenTtsModelStore.ENGINE_KITTEN
@@ -1734,6 +1738,18 @@ fun VoiceAndAssistantScreen(
                         )
                     }
                 }
+            }
+
+            if (kittenBlocked) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "KittenTTS no pudo cargar en este teléfono: el motor ONNX se cerró " +
+                        "al iniciar el modelo (fallo de alineación en ARM de 32 bits). " +
+                        "El asistente usa el TTS del sistema y se reintentará en la " +
+                        "próxima actualización de la app.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             if (kittenEngine == KittenTtsModelStore.ENGINE_KITTEN) {

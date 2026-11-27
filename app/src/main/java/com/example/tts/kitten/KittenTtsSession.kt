@@ -3,6 +3,8 @@ package com.example.tts.kitten
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.os.Build
+import android.os.Process
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
@@ -18,6 +20,18 @@ class KittenTtsSession(modelPath: String) : AutoCloseable {
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
+    companion object {
+        /**
+         * Process-level 32-bit ARM (armeabi-v7a): libonnxruntime reads some
+         * int64 tensor attributes without honouring their alignment there and
+         * the process dies with SIGBUS (BUS_ADRALN) inside
+         * `OrtSession.createSession`. It has to be avoided at session build
+         * time; it cannot be caught from Kotlin.
+         */
+        val is32BitArm: Boolean =
+            !Process.is64Bit() && Build.SUPPORTED_ABIS.any { it.startsWith("arm") }
+    }
+
     private val inputNames: List<String>
     private val outputNames: List<String>
     private val waveformIndex: Int
@@ -29,6 +43,13 @@ class KittenTtsSession(modelPath: String) : AutoCloseable {
             val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
             setIntraOpNumThreads(cores.coerceAtMost(2))
             setInterOpNumThreads(1)
+            if (is32BitArm) {
+                // The misaligned read happens in the extended (level 2)
+                // transformers — CommonSubexpressionElimination reads int64
+                // tensor attributes straight out of the protobuf buffer.
+                // Basic optimizations keep the graph usable without that pass.
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ORT_ENABLE_BASIC)
+            }
         }
         session = environment.createSession(modelPath, options)
         inputNames = session.inputNames.toList()

@@ -1,6 +1,7 @@
 package com.example.tts.kitten
 
 import android.content.Context
+import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,8 @@ object KittenTtsModelStore {
     private const val KEY_LANGUAGE = "language"
     private const val KEY_VOICE = "voice"
     private const val KEY_SPEED = "speed"
+    private const val KEY_NATIVE_LOAD_PENDING = "native_load_pending"
+    private const val KEY_BLOCKED_VERSION = "blocked_version_code"
 
     private const val CONFIG_FILE = "config.json"
     private const val VOCAB_FILE = "vocab.json"
@@ -146,6 +149,37 @@ object KittenTtsModelStore {
             .putString(KEY_LANGUAGE, voiceLanguage)
             .putString(KEY_VOICE, voiceKey)
             .apply()
+    }
+
+    // ------------------------------------------------------------------
+    // Native crash guard
+    // ------------------------------------------------------------------
+
+    /**
+     * 32-bit ARM builds of libonnxruntime can kill the process with a native
+     * SIGBUS while the session is being created, which no try/catch can stop.
+     * The flag below is committed to disk right before that call, so on the
+     * next start it proves the previous process died there: KittenTTS is then
+     * disabled on this device instead of crashing again. Bumping the app
+     * version retries automatically.
+     */
+    fun beginNativeSessionLoad(context: Context) {
+        prefs(context).edit().putBoolean(KEY_NATIVE_LOAD_PENDING, true).commit()
+    }
+
+    fun endNativeSessionLoad(context: Context) {
+        prefs(context).edit().putBoolean(KEY_NATIVE_LOAD_PENDING, false).commit()
+    }
+
+    fun isNativeEngineBlocked(context: Context): Boolean {
+        val prefs = prefs(context)
+        if (prefs.getBoolean(KEY_NATIVE_LOAD_PENDING, false)) {
+            prefs.edit()
+                .putBoolean(KEY_NATIVE_LOAD_PENDING, false)
+                .putInt(KEY_BLOCKED_VERSION, BuildConfig.VERSION_CODE)
+                .commit()
+        }
+        return prefs.getInt(KEY_BLOCKED_VERSION, -1) == BuildConfig.VERSION_CODE
     }
 
     fun speed(context: Context): Float =
