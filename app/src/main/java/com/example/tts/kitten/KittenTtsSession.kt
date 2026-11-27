@@ -48,7 +48,7 @@ class KittenTtsSession(modelPath: String) : AutoCloseable {
                 // transformers — CommonSubexpressionElimination reads int64
                 // tensor attributes straight out of the protobuf buffer.
                 // Basic optimizations keep the graph usable without that pass.
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ORT_ENABLE_BASIC)
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
             }
         }
         session = environment.createSession(modelPath, options)
