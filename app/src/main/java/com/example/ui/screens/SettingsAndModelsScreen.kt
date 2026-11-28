@@ -475,6 +475,41 @@ fun SettingsAndModelsScreen(
                 onToggle = { expandHomeAndPlaces = !expandHomeAndPlaces }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().testTag("widget_config_card")) {
+                    var artefactDesk by remember {
+                        mutableStateOf(com.example.data.DeskModePreferences.isEnabled(context))
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Escritorio de artefactos",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                            )
+                            Text(
+                                text = if (artefactDesk) {
+                                    "Inicio por tarjetas: pensamiento, nota reciente, tareas, voz y personas"
+                                } else {
+                                    "Inicio clásico (páginas, tablero y noticias)"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = artefactDesk,
+                            onCheckedChange = { checked ->
+                                artefactDesk = checked
+                                com.example.data.DeskModePreferences.setEnabled(context, checked)
+                            },
+                            modifier = Modifier.testTag("artefact_desk_switch")
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+                    )
                     Text(
                         text = "Widget At a Glance",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)

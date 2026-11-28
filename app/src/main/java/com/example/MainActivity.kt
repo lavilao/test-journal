@@ -236,6 +236,10 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
     val realWeather by viewModel.realWeather.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val appContext = androidx.compose.ui.platform.LocalContext.current
+    // The Artefact desk is a Settings switch; on or off it owns the whole home
+    // route, so the two interfaces never appear side by side.
+    remember(appContext) { com.example.data.DeskModePreferences.ensureLoaded(appContext) }
+    val artefactDeskEnabled by com.example.data.DeskModePreferences.artefactDesk.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner, viewModel) {
@@ -408,28 +412,26 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     when (targetScreen) {
                         is AppScreen.Main -> {
                             when (currentTab) {
-                                MainNavTab.INICIO -> {
-                                    // Artefact-style desk: the whole second brain as
-                                    // artefact cards. The previous workspace view
-                                    // stays one tab away in Timeline.
-                                    HomeDeskScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
-                                        onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
-                                        onOpenLens = { screenState = AppScreen.Lens },
-                                        onOpenAssistant = { screenState = AppScreen.Assistant }
-                                    )
-                                }
-                                MainNavTab.TIMELINE -> {
-                                    NowBriefHomeScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
-                                        onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
-                                        onOpenLens = { screenState = AppScreen.Lens },
-                                        onOpenAssistant = { screenState = AppScreen.Assistant },
-                                        onOpenRoutines = { screenState = AppScreen.Routines },
-                                        onOpenNews = { screenState = AppScreen.News }
-                                    )
+                                MainNavTab.INICIO, MainNavTab.TIMELINE -> {
+                                    if (artefactDeskEnabled) {
+                                        HomeDeskScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
+                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                            onOpenLens = { screenState = AppScreen.Lens },
+                                            onOpenAssistant = { screenState = AppScreen.Assistant }
+                                        )
+                                    } else {
+                                        NowBriefHomeScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
+                                            onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                            onOpenLens = { screenState = AppScreen.Lens },
+                                            onOpenAssistant = { screenState = AppScreen.Assistant },
+                                            onOpenRoutines = { screenState = AppScreen.Routines },
+                                            onOpenNews = { screenState = AppScreen.News }
+                                        )
+                                    }
                                 }
                                 MainNavTab.BUSCAR, MainNavTab.VAULT, MainNavTab.SEARCH -> GoogleUniversalSearchScreen(
                                     viewModel = viewModel,
