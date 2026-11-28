@@ -59,10 +59,10 @@ jobs:
           fi
 
       # The JVM unit tests in app/src/test existed but CI only assembled the
-      # release APK. Run them on the release variant, which shares the same
-      # test source set and the committed release keystore.
+      # release APK. AGP 9 creates unit-test tasks only for the tested build
+      # type (debug), so this is the task that actually runs them.
       - name: Run JVM unit tests
-        run: ./gradlew :app:testReleaseUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Upload unit test report on failure
         if: failure()
@@ -70,8 +70,8 @@ jobs:
         with:
           name: unit-test-report
           path: |
-            app/build/reports/tests/testReleaseUnitTest
-            app/build/test-results/testReleaseUnitTest
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
           if-no-files-found: ignore
 
       - name: Prepare Signing Keystore
