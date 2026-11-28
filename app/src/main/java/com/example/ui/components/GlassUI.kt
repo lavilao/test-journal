@@ -115,7 +115,7 @@ fun LiquidGlassCard(
     val glassTint = Brush.verticalGradient(
         listOf(
             containerColor,
-            containerColor.copy(alpha = (containerColor.alpha * 0.82f).coerceAtLeast(0.55f))
+            containerColor.copy(alpha = (containerColor.alpha * 0.82f).coerceIn(0f, 1f))
         )
     )
 

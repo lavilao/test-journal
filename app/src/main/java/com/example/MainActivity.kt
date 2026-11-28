@@ -53,6 +53,7 @@ import com.example.ui.screens.EntryEditScreen
 import com.example.ui.screens.GoogleActivityScreen
 import com.example.ui.screens.GoogleNotificationsScreen
 import com.example.ui.screens.GoogleUniversalSearchScreen
+import com.example.ui.screens.HomeDeskScreen
 import com.example.ui.screens.KnowledgeGraphScreen
 import com.example.ui.screens.NewsBrowserScreen
 import com.example.ui.screens.NowBriefHomeScreen
@@ -407,7 +408,19 @@ fun MnemosyneApp(viewModel: JournalViewModel) {
                     when (targetScreen) {
                         is AppScreen.Main -> {
                             when (currentTab) {
-                                MainNavTab.INICIO, MainNavTab.TIMELINE -> {
+                                MainNavTab.INICIO -> {
+                                    // Artefact-style desk: the whole second brain as
+                                    // artefact cards. The previous workspace view
+                                    // stays one tab away in Timeline.
+                                    HomeDeskScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
+                                        onNavigateToDetail = { id -> screenState = AppScreen.Detail(id) },
+                                        onOpenLens = { screenState = AppScreen.Lens },
+                                        onOpenAssistant = { screenState = AppScreen.Assistant }
+                                    )
+                                }
+                                MainNavTab.TIMELINE -> {
                                     NowBriefHomeScreen(
                                         viewModel = viewModel,
                                         onNavigateToNewEntry = { screenState = AppScreen.Edit(null) },
