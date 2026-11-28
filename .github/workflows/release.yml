@@ -59,10 +59,11 @@ jobs:
           fi
 
       # The JVM unit tests in app/src/test existed but CI only assembled the
-      # release APK. AGP 9 creates unit-test tasks only for the tested build
-      # type (debug), so this is the task that actually runs them.
+      # release APK. gradle.properties enables unit tests for every build type
+      # (AGP 9 defaults to debug only, whose KSP task crashes headless in CI),
+      # so the release unit-test task is the one that runs them.
       - name: Run JVM unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testReleaseUnitTest --stacktrace
 
       - name: Upload unit test report on failure
         if: failure()
@@ -70,8 +71,8 @@ jobs:
         with:
           name: unit-test-report
           path: |
-            app/build/reports/tests/testDebugUnitTest
-            app/build/test-results/testDebugUnitTest
+            app/build/reports/tests/testReleaseUnitTest
+            app/build/test-results/testReleaseUnitTest
           if-no-files-found: ignore
 
       - name: Prepare Signing Keystore
