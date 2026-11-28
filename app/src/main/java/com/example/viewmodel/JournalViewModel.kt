@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.AudioRecordItem
 import com.example.data.model.AutolinkSpan
+import com.example.data.model.DeskTotals
 import com.example.data.model.EntityItem
 import com.example.data.model.EntityWithEntries
 import com.example.data.model.EntryWithRelations
@@ -42,6 +43,7 @@ import com.example.media.PlaybackState
 import com.example.media.RecordingState
 import com.example.media.VoiceJournalManager
 import com.example.repository.JournalRepository
+import com.example.semantic.JournalInsights
 import com.example.semantic.MlKitAnalyzer
 import com.example.semantic.SemanticSearchEngine
 import com.example.semantic.SemanticSearchUiState
@@ -58,9 +60,21 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Small aggregates for the desk, instead of every entry with its relations. */
+data class DeskStats(
+    val totalNotes: Int = 0,
+    val streakDays: Int = 0,
+    val words: Int = 0
+)
+
+/** The desk reads at most this many recent notes; its cards show far fewer. */
+private const val DESK_ENTRY_WINDOW = 120
+private const val DESK_ENTITY_WINDOW = 8
 
 enum class MainNavTab {
     INICIO,
@@ -137,6 +151,33 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
 
     val entities: StateFlow<List<EntityItem>> = repository.allEntities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // -----------------------------------------------------------------
+    // Desk: bounded window + aggregates. The home never loads the whole
+    // journal with all of its relations; the heavy screens still do.
+    // -----------------------------------------------------------------
+
+    val deskEntries: StateFlow<List<EntryWithRelations>> = repository
+        .deskEntriesWithRelations(DESK_ENTRY_WINDOW)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val deskEntities: StateFlow<List<EntityItem>> = repository
+        .topEntities(DESK_ENTITY_WINDOW)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val deskStats: StateFlow<DeskStats> = combine(
+        repository.deskTotals,
+        deskEntries
+    ) { totals: DeskTotals, recent: List<EntryWithRelations> ->
+        DeskStats(
+            totalNotes = totals.entries,
+            // The streak only needs the recent window, and it is computed off
+            // the main thread because it formats dates and groups days.
+            streakDays = JournalInsights.computeWritingStats(recent).streakDays,
+            words = totals.words
+        )
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DeskStats())
 
     val tags: StateFlow<List<Tag>> = repository.allTags
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -553,7 +594,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         deskConnectionsJob?.cancel()
         deskConnectionsJob = viewModelScope.launch {
             delay(350)
-            val snapshot = entries.value
+            val snapshot = deskEntries.value
             _deskConnections.value = withContext(Dispatchers.Default) {
                 runCatching {
                     com.example.semantic.DeskConnectionEngine.connectionsFor(draft, snapshot)

@@ -56,6 +56,14 @@ class JournalRepository(
 
     val allEntriesWithRelations: Flow<List<EntryWithRelations>> = dao.getAllEntriesWithRelations()
     val allEntities: Flow<List<EntityItem>> = dao.getAllEntities()
+
+    /** Window of recent active notes used by the desk (bounded, not the whole journal). */
+    fun deskEntriesWithRelations(limit: Int): Flow<List<EntryWithRelations>> =
+        dao.getDeskEntriesWithRelations(limit)
+
+    fun topEntities(limit: Int): Flow<List<EntityItem>> = dao.getTopEntities(limit)
+
+    val deskTotals: Flow<com.example.data.model.DeskTotals> = dao.observeDeskTotals()
     val allTags: Flow<List<Tag>> = dao.getAllTags()
     val allEvents: Flow<List<EventItem>> = dao.getAllEvents()
     val allReminders: Flow<List<LocalReminder>> = reminderDao.getAllReminders()
@@ -104,19 +112,29 @@ class JournalRepository(
         return dao.getForgottenThreads(cutoffTimestamp = thirtyDaysAgo, minMentions = 2)
     }
 
-    suspend fun getOnThisDayMemories(): List<JournalEntry> = withContext(Dispatchers.IO) {
-        val all = dao.getAllEntriesSnapshot()
-        val calToday = Calendar.getInstance()
-        val currentMonth = calToday.get(Calendar.MONTH)
-        val currentDay = calToday.get(Calendar.DAY_OF_MONTH)
-        val currentYear = calToday.get(Calendar.YEAR)
-
-        all.filter { entry ->
-            val cal = Calendar.getInstance().apply { timeInMillis = entry.journalDate }
-            cal.get(Calendar.MONTH) == currentMonth &&
-                    cal.get(Calendar.DAY_OF_MONTH) == currentDay &&
-                    cal.get(Calendar.YEAR) < currentYear
-        }
+    /**
+     * Same month/day in previous years, filtered and limited in SQL. Falls back
+     * to an empty list on failure so the home never crashes for one card.
+     */
+    suspend fun getOnThisDayMemories(limit: Int = 6): List<JournalEntry> = withContext(Dispatchers.IO) {
+        runCatching {
+            val today = Calendar.getInstance()
+            val monthDay = String.format(
+                Locale.US,
+                "%02d-%02d",
+                today.get(Calendar.MONTH) + 1,
+                today.get(Calendar.DAY_OF_MONTH)
+            )
+            val startOfYear = Calendar.getInstance().apply {
+                set(Calendar.MONTH, Calendar.JANUARY)
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            dao.getOnThisDayEntries(monthDay, startOfYear, limit)
+        }.getOrDefault(emptyList())
     }
 
     /**

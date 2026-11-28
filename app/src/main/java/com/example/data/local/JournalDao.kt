@@ -36,6 +36,38 @@ interface JournalDao {
     @Query("SELECT * FROM journal_entries ORDER BY journalDate DESC")
     fun getAllEntriesWithRelations(): Flow<List<EntryWithRelations>>
 
+    /**
+     * Desk window: only the newest active notes, so the home never loads the
+     * whole journal with all of its relations.
+     */
+    @Transaction
+    @Query("SELECT * FROM journal_entries WHERE isArchived = 0 ORDER BY updatedAt DESC LIMIT :limit")
+    fun getDeskEntriesWithRelations(limit: Int): Flow<List<EntryWithRelations>>
+
+    /** Two numbers for the desk stats card instead of every entry row. */
+    @Query(
+        "SELECT COUNT(*) AS entries, COALESCE(SUM(wordCount), 0) AS words " +
+            "FROM journal_entries WHERE isArchived = 0"
+    )
+    fun observeDeskTotals(): Flow<com.example.data.model.DeskTotals>
+
+    /** On this day, filtered in SQL instead of scanning the whole journal. */
+    @Query(
+        """
+        SELECT * FROM journal_entries
+        WHERE isArchived = 0
+          AND journalDate < :startOfYear
+          AND strftime('%m-%d', journalDate / 1000, 'unixepoch', 'localtime') = :monthDay
+        ORDER BY journalDate DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getOnThisDayEntries(
+        monthDay: String,
+        startOfYear: Long,
+        limit: Int
+    ): List<JournalEntry>
+
     @Transaction
     @Query("SELECT * FROM journal_entries WHERE id = :id LIMIT 1")
     fun getEntryWithRelationsFlow(id: Long): Flow<EntryWithRelations?>
@@ -146,6 +178,10 @@ interface JournalDao {
     // === Entities ===
     @Query("SELECT * FROM entities ORDER BY mentionCount DESC, canonicalName ASC")
     fun getAllEntities(): Flow<List<EntityItem>>
+
+    /** Only the people/topics the desk card can actually show. */
+    @Query("SELECT * FROM entities ORDER BY mentionCount DESC, canonicalName ASC LIMIT :limit")
+    fun getTopEntities(limit: Int): Flow<List<EntityItem>>
 
     @Query("SELECT * FROM entities WHERE type = :type ORDER BY mentionCount DESC")
     fun getEntitiesByType(type: EntityType): Flow<List<EntityItem>>

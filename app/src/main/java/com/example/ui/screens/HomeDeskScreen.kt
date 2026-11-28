@@ -76,7 +76,6 @@ import com.example.data.model.EntityType
 import com.example.data.model.EntryWithRelations
 import com.example.data.model.JournalEntry
 import com.example.semantic.DeskConnectionEngine
-import com.example.semantic.JournalInsights
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.LiquidGlassCard
 import com.example.ui.theme.AmberNode
@@ -138,12 +137,14 @@ fun HomeDeskScreen(
     onOpenLens: () -> Unit = {},
     onOpenAssistant: () -> Unit = {}
 ) {
-    val entries by viewModel.entries.collectAsState()
-    val entities by viewModel.entities.collectAsState()
+    // Bounded window + aggregates from the ViewModel: the home no longer
+    // walks the whole journal with all of its relations.
+    val entries by viewModel.deskEntries.collectAsState()
+    val entities by viewModel.deskEntities.collectAsState()
     val memories by viewModel.onThisDayMemories.collectAsState()
     val weather by viewModel.realWeather.collectAsState()
+    val stats by viewModel.deskStats.collectAsState()
 
-    val stats = remember(entries) { JournalInsights.computeWritingStats(entries) }
     val active = remember(entries) { entries.filter { !it.entry.isArchived } }
     val recent = remember(active) { active.sortedByDescending { it.entry.updatedAt } }
     val latest = recent.firstOrNull()
@@ -318,7 +319,11 @@ fun HomeDeskScreen(
                         memory?.let { old ->
                             DeskOnThisDayCard(entry = old, onClick = { onNavigateToDetail(old.id) })
                         }
-                        DeskStatsCard(stats = stats, words = active.sumOf { it.entry.wordCount })
+                        DeskStatsCard(
+                            totalNotes = stats.totalNotes,
+                            streakDays = stats.streakDays,
+                            words = stats.words
+                        )
                     }
                 }
 
@@ -330,7 +335,11 @@ fun HomeDeskScreen(
                             onOpen = { task -> onNavigateToDetail(task.entryId) },
                             maxVisible = 12
                         )
-                        DeskStatsCard(stats = stats, words = active.sumOf { it.entry.wordCount })
+                        DeskStatsCard(
+                            totalNotes = stats.totalNotes,
+                            streakDays = stats.streakDays,
+                            words = stats.words
+                        )
                     }
                 }
 
@@ -1157,7 +1166,7 @@ private fun DeskOnThisDayCard(entry: JournalEntry, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DeskStatsCard(stats: JournalInsights.WritingStats, words: Int) {
+private fun DeskStatsCard(totalNotes: Int, streakDays: Int, words: Int) {
     DeskCard(accent = MaterialTheme.colorScheme.tertiary) {
         GlassLabel(text = "Tu cerebro en números", accent = MaterialTheme.colorScheme.tertiary)
         Spacer(modifier = Modifier.height(10.dp))
@@ -1165,8 +1174,8 @@ private fun DeskStatsCard(stats: JournalInsights.WritingStats, words: Int) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            DeskStat(value = "${stats.totalNotes}", label = "notas")
-            DeskStat(value = "${stats.streakDays}", label = "días seguidos")
+            DeskStat(value = "${totalNotes}", label = "notas")
+            DeskStat(value = "${streakDays}", label = "días seguidos")
             DeskStat(value = deskCompactNumber(words), label = "palabras")
         }
     }
