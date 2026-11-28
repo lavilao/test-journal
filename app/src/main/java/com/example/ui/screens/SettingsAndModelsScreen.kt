@@ -406,7 +406,11 @@ fun SettingsAndModelsScreen(
                         SunGradientBackground(
                             weatherCode = weather.weatherCode,
                             overridePhase = previewOverridePhase,
-                            overrideWeather = previewOverrideWeather
+                            overrideWeather = previewOverrideWeather,
+                            // The preview only animates while the dynamic sky is
+                            // actually the active background: no particles are
+                            // spent on a mode the user is not using.
+                            animateParticles = surfaceMode == SunCycle.AppSurfaceMode.DYNAMIC_LOW_POWER
                         )
                     }
 

@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -84,6 +85,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -131,6 +133,7 @@ import com.example.ui.components.TagChip
 import com.example.ui.components.VoiceTranscriptionModal
 import com.example.ui.theme.AmberNode
 import com.example.ui.theme.NowBriefVitalsGreen
+import com.example.tts.NoteNarrator
 import com.example.ui.theme.TerracottaAccent
 import com.example.viewmodel.JournalViewModel
 import kotlinx.coroutines.delay
@@ -187,6 +190,23 @@ fun EntryDetailScreen(
     var showAddSectionDialog by remember { mutableStateOf(false) }
     var newSectionTitle by remember { mutableStateOf("") }
     var newSectionBody by remember { mutableStateOf("") }
+    var editingSectionId by remember { mutableStateOf<Long?>(null) }
+    var sectionPendingDelete by remember { mutableStateOf<JournalPage?>(null) }
+
+    // Read-aloud: KittenTTS when selected, system voice otherwise.
+    val narrator = remember { NoteNarrator(context) }
+    val narrationState by narrator.state.collectAsState()
+    val narrationError by narrator.error.collectAsState()
+    DisposableEffect(narrator) {
+        onDispose { narrator.close() }
+    }
+    LaunchedEffect(entryId) { narrator.stop() }
+    LaunchedEffect(narrationError) {
+        narrationError?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            narrator.clearError()
+        }
+    }
 
     var transcribingIds by remember(entryId) { mutableStateOf(setOf<Long>()) }
     val whistleUsable = remember {
@@ -340,6 +360,25 @@ fun EntryDetailScreen(
 
     val coverColor = remember(entry.coverColorHex) { parseCoverHexOrNull(entry.coverColorHex) }
 
+    fun narrationText(): String = buildString {
+        append(entry.title.ifBlank { "Nota sin título" })
+        append(". ")
+        if (entry.body.isNotBlank()) {
+            append(entry.body)
+            append(' ')
+        }
+        itemWithRelations?.pages.orEmpty().forEach { page ->
+            if (page.title.isNotBlank()) {
+                append(page.title)
+                append(". ")
+            }
+            if (page.body.isNotBlank()) {
+                append(page.body)
+                append(' ')
+            }
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -413,6 +452,18 @@ fun EntryDetailScreen(
                         modifier = Modifier.testTag("detail_translate_button")
                     ) {
                         Icon(Icons.Default.Translate, contentDescription = "Traducir", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(19.dp))
+                    }
+                    IconButton(
+                        onClick = { narrator.toggle(narrationText()) },
+                        modifier = Modifier.testTag("detail_narrate_button")
+                    ) {
+                        val reading = narrationState != NoteNarrator.State.IDLE
+                        Icon(
+                            imageVector = if (reading) Icons.Default.Stop else Icons.Default.VolumeUp,
+                            contentDescription = if (reading) "Detener lectura" else "Escuchar nota",
+                            tint = if (reading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
+                        )
                     }
                     IconButton(
                         onClick = { onEdit(entry.id) },
@@ -944,16 +995,48 @@ fun EntryDetailScreen(
                             Text("+ Añadir", style = MaterialTheme.typography.labelSmall)
                         }
                     }
+                    fun openSectionEditor(page: JournalPage) {
+                        editingSectionId = page.id
+                        newSectionTitle = page.title
+                        newSectionBody = page.body
+                        showAddSectionDialog = true
+                    }
                     pages.forEachIndexed { idx, p ->
-                        EditorialCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("entry_page_${p.id}")) {
+                        EditorialCard(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("entry_page_${p.id}"),
+                            onClick = { openSectionEditor(p) }
+                        ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = p.title.ifBlank { "Sección ${idx + 1}" },
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    IconButton(
+                                        onClick = { openSectionEditor(p) },
+                                        modifier = Modifier.size(30.dp).testTag("detail_edit_section_${p.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "Editar sección",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { sectionPendingDelete = p },
+                                        modifier = Modifier.size(30.dp).testTag("detail_delete_section_${p.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Eliminar sección",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 MarkdownText(
@@ -1477,9 +1560,13 @@ fun EntryDetailScreen(
     }
 
     if (showAddSectionDialog) {
+        val editingPage = itemWithRelations?.pages?.firstOrNull { it.id == editingSectionId }
         AlertDialog(
-            onDismissRequest = { showAddSectionDialog = false },
-            title = { Text("Añadir sección") },
+            onDismissRequest = {
+                showAddSectionDialog = false
+                editingSectionId = null
+            },
+            title = { Text(if (editingPage != null) "Editar sección" else "Añadir sección") },
             text = {
                 Column {
                     OutlinedTextField(
@@ -1504,8 +1591,9 @@ fun EntryDetailScreen(
                         if (newSectionTitle.isNotBlank() || newSectionBody.isNotBlank()) {
                             viewModel.savePage(
                                 JournalPage(
+                                    id = editingPage?.id ?: 0L,
                                     entryId = entryId,
-                                    pageIndex = itemWithRelations?.pages?.size ?: 0,
+                                    pageIndex = editingPage?.pageIndex ?: (itemWithRelations?.pages?.size ?: 0),
                                     title = newSectionTitle.trim(),
                                     body = newSectionBody.trim()
                                 ),
@@ -1513,14 +1601,42 @@ fun EntryDetailScreen(
                             )
                             newSectionTitle = ""
                             newSectionBody = ""
+                            editingSectionId = null
                             showAddSectionDialog = false
                         }
                     },
                     modifier = Modifier.testTag("confirm_add_section_btn")
-                ) { Text("Añadir") }
+                ) { Text(if (editingPage != null) "Guardar" else "Añadir") }
             },
             dismissButton = {
-                TextButton(onClick = { showAddSectionDialog = false }) { Text("Cancelar") }
+                TextButton(onClick = {
+                    showAddSectionDialog = false
+                    editingSectionId = null
+                }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    sectionPendingDelete?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { sectionPendingDelete = null },
+            title = { Text("Eliminar sección") },
+            text = {
+                Text("¿Eliminar «${pending.title.ifBlank { "Sección" }}»? No se puede deshacer.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deletePage(pending.id, entryId)
+                        sectionPendingDelete = null
+                    },
+                    modifier = Modifier.testTag("confirm_delete_section_btn")
+                ) {
+                    Text("Eliminar", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sectionPendingDelete = null }) { Text("Cancelar") }
             }
         )
     }

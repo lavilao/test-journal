@@ -170,7 +170,11 @@ class JournalRepository(
         attachedImageUri: Uri? = null,
         pages: List<JournalPage> = emptyList(),
         audioRecords: List<AudioRecordItem> = emptyList(),
-        attachedImages: List<Uri> = emptyList()
+        attachedImages: List<Uri> = emptyList(),
+        // When true the passed lists are the whole truth for this entry:
+        // sections, voice notes and photos missing from them are deleted.
+        // Only the full editor passes this; quick actions keep appending.
+        pruneMissing: Boolean = false
     ): Long = withContext(Dispatchers.IO) {
         val wordCount = entry.body.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
         val pagesText = pages.joinToString("\n") { "${it.title}\n${it.body}" }
@@ -181,7 +185,11 @@ class JournalRepository(
         val requestedUris: List<Uri> = (listOfNotNull(attachedImageUri) + attachedImages).distinct()
         val persistedUris: List<String> = requestedUris.map { persistImageToLocalStorage(it) }
 
-        val savedImageUri = persistedUris.firstOrNull() ?: entry.imageUri
+        val savedImageUri = if (pruneMissing) {
+            persistedUris.firstOrNull()
+        } else {
+            persistedUris.firstOrNull() ?: entry.imageUri
+        }
 
         val entryToSave = entry.copy(
             wordCount = wordCount,
@@ -197,27 +205,37 @@ class JournalRepository(
             entryToSave.id
         }
 
-        // Save pages
-        if (pages.isNotEmpty()) {
-            pages.forEachIndexed { idx, page ->
-                val pHash = MindForgerSemanticEngine.computeContentHash(page.title, page.body)
-                val pageToSave = page.copy(entryId = entryId, pageIndex = idx, contentHash = pHash, updatedAt = System.currentTimeMillis())
-                if (pageToSave.id == 0L) {
-                    dao.insertPage(pageToSave)
-                } else {
-                    dao.updatePage(pageToSave)
-                }
+        // Save pages. Sections removed in the editor are also removed from the
+        // database, otherwise they reappeared on the next open and broke the
+        // stored pageIndex ordering.
+        if (pruneMissing) {
+            val keptPageIds = pages.mapNotNull { p -> p.id.takeIf { it != 0L } }.toSet()
+            dao.getPagesForEntrySnapshot(entryId)
+                .filter { it.id !in keptPageIds }
+                .forEach { dao.deletePageById(it.id) }
+        }
+        pages.forEachIndexed { idx, page ->
+            val pHash = MindForgerSemanticEngine.computeContentHash(page.title, page.body)
+            val pageToSave = page.copy(entryId = entryId, pageIndex = idx, contentHash = pHash, updatedAt = System.currentTimeMillis())
+            if (pageToSave.id == 0L) {
+                dao.insertPage(pageToSave)
+            } else {
+                dao.updatePage(pageToSave)
             }
         }
 
-        // Save pending or edited audio recordings
-        if (audioRecords.isNotEmpty()) {
-            audioRecords.forEach { audio ->
-                if (audio.id == 0L) {
-                    dao.insertAudioRecord(audio.copy(entryId = entryId))
-                } else {
-                    dao.updateAudioRecord(audio.copy(entryId = entryId))
-                }
+        // Save pending or edited audio recordings, and delete the removed ones.
+        if (pruneMissing) {
+            val keptAudioIds = audioRecords.mapNotNull { a -> a.id.takeIf { it != 0L } }.toSet()
+            dao.getAudioRecordsForEntrySnapshot(entryId)
+                .filter { it.id !in keptAudioIds }
+                .forEach { dao.deleteAudioRecordById(it.id) }
+        }
+        audioRecords.forEach { audio ->
+            if (audio.id == 0L) {
+                dao.insertAudioRecord(audio.copy(entryId = entryId))
+            } else {
+                dao.updateAudioRecord(audio.copy(entryId = entryId))
             }
         }
 
@@ -240,7 +258,7 @@ class JournalRepository(
         // photos attached later (detail screen / share intake) are no
         // longer orphaned: they are now part of the synced set.
         // ------------------------------------------------------------------
-        if (requestedUris.isNotEmpty()) {
+        if (pruneMissing || requestedUris.isNotEmpty()) {
             val existing = dao.getMediaListForEntry(entryId)
             val existingByUri = existing.associateBy { it.uri }
             existing.filter { it.uri !in persistedUris }.forEach { dao.deleteMediaById(it.id) }

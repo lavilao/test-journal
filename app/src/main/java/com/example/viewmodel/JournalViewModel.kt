@@ -738,6 +738,7 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
         status: String = "Inbox",
         priority: String = "Normal",
         isPinned: Boolean = false,
+        pruneMissing: Boolean = false,
         onComplete: (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -757,7 +758,15 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
                 priority = priority,
                 isPinned = isPinned
             )
-            val savedId = repository.saveEntry(entry, manualTags, attachedImageUri, pages, audioRecords, attachedImages)
+            val savedId = repository.saveEntry(
+                entry = entry,
+                manualTags = manualTags,
+                attachedImageUri = attachedImageUri,
+                pages = pages,
+                audioRecords = audioRecords,
+                attachedImages = attachedImages,
+                pruneMissing = pruneMissing
+            )
             refreshGraph()
             refreshOnThisDay()
             onComplete(savedId)

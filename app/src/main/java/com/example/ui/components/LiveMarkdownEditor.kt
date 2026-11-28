@@ -188,7 +188,13 @@ internal class MarkdownParser(private val palette: MdPalette) {
         val merged = mutableListOf<MdSegment>()
         for (seg in segments) {
             val last = merged.lastOrNull()
+            // Only 1:1 pieces are merged. Merging a hidden marker (e.g. the
+            // closing "**" of bold text) with visible text made the cursor
+            // offset mapping interpolate across both, so taps and deletes
+            // landed a character or two away from the caret inside blocks.
             if (last != null && last.spans.isEmpty() && seg.spans.isEmpty() &&
+                last.output.length == last.origEnd - last.origStart &&
+                seg.output.length == seg.origEnd - seg.origStart &&
                 last.origEnd == seg.origStart
             ) {
                 merged[merged.size - 1] = last.copy(output = last.output + seg.output)

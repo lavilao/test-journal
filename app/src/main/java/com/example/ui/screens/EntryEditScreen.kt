@@ -387,6 +387,9 @@ fun EntryEditScreen(
             status = status,
             priority = priority,
             isPinned = isPinned,
+            // Only prune once the existing entry was fully loaded, so a
+            // fast save can never wipe sections, voice notes or photos.
+            pruneMissing = entryId != null && entryId != 0L && hasInitializedData,
             onComplete = onComplete
         )
     }
