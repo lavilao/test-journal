@@ -58,6 +58,22 @@ jobs:
             chmod +x ./gradlew
           fi
 
+      # The JVM unit tests in app/src/test existed but CI only assembled the
+      # release APK. Run them on the release variant, which shares the same
+      # test source set and the committed release keystore.
+      - name: Run JVM unit tests
+        run: ./gradlew :app:testReleaseUnitTest --stacktrace
+
+      - name: Upload unit test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: |
+            app/build/reports/tests/testReleaseUnitTest
+            app/build/test-results/testReleaseUnitTest
+          if-no-files-found: ignore
+
       - name: Prepare Signing Keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
