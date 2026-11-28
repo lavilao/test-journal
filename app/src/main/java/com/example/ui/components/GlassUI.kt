@@ -1,9 +1,12 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,9 +29,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -83,29 +88,59 @@ fun AuroraBackground(modifier: Modifier = Modifier) {
 }
 
 /**
- * Clean editorial surface card with subtle hairline border (Notion / NowBrief hybrid).
+ * Frosted card in the Artefact language: a light-to-translucent vertical tint
+ * (so whatever sits behind shows through like glass), a hairline rim and a
+ * gentle press scale on anything tappable. Panels use 20–30dp corners.
  */
 @Composable
 fun LiquidGlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 16.dp,
+    cornerRadius: Dp = 20.dp,
     contentPadding: Dp = 16.dp,
     containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
     borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
     onClick: (() -> Unit)? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
-    val base = modifier
-        .clip(RoundedCornerShape(cornerRadius))
-        .then(
-            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    val shape = RoundedCornerShape(cornerRadius)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.98f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+        ),
+        label = "glassCardPress"
+    )
+    val glassTint = Brush.verticalGradient(
+        listOf(
+            containerColor,
+            containerColor.copy(alpha = (containerColor.alpha * 0.82f).coerceAtLeast(0.55f))
         )
-    Surface(
-        color = containerColor,
-        shape = RoundedCornerShape(cornerRadius),
-        border = androidx.compose.foundation.BorderStroke(0.75.dp, borderColor),
-        tonalElevation = 0.dp,
-        modifier = base
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .clip(shape)
+            .background(glassTint, shape)
+            .border(androidx.compose.foundation.BorderStroke(0.75.dp, borderColor), shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        // The press scale is the feedback (Artefact style);
+                        // no ripple on top of frosted glass.
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
@@ -127,16 +162,24 @@ fun GlassTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        color = Color.Transparent,
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
         ),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.84f)
+                        )
+                    )
+                )
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -343,13 +386,22 @@ fun GlassBottomBar(
 ) {
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        color = Color.Transparent,
         border = androidx.compose.foundation.BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.44f)),
-        shadowElevation = 4.dp,
+        shadowElevation = 6.dp,
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                        )
+                    )
+                )
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
