@@ -48,6 +48,7 @@ import com.example.semantic.SemanticSearchUiState
 import com.example.sync.ReminderNotifications
 import com.example.sync.SyncHub
 import com.example.sync.SyncScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -59,6 +60,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class MainNavTab {
     INICIO,
@@ -498,6 +500,67 @@ class JournalViewModel(application: Application) : AndroidViewModel(application)
     val semanticSearch: StateFlow<SemanticSearchUiState> = _semanticSearch.asStateFlow()
 
     private var semanticSearchJob: Job? = null
+
+    // -----------------------------------------------------------------
+    // Desk quick capture: the draft lives here so opening a related note
+    // (or rotating the screen) never throws away what you were writing.
+    // -----------------------------------------------------------------
+
+    private val _quickCaptureOpen = MutableStateFlow(false)
+    val quickCaptureOpen: StateFlow<Boolean> = _quickCaptureOpen.asStateFlow()
+
+    private val _quickCaptureText = MutableStateFlow("")
+    val quickCaptureText: StateFlow<String> = _quickCaptureText.asStateFlow()
+
+    private val _deskConnections =
+        MutableStateFlow<List<com.example.semantic.DeskConnectionEngine.Connection>>(emptyList())
+    val deskConnections: StateFlow<List<com.example.semantic.DeskConnectionEngine.Connection>> =
+        _deskConnections.asStateFlow()
+
+    private var deskConnectionsJob: Job? = null
+
+    fun setQuickCaptureOpen(open: Boolean) {
+        _quickCaptureOpen.value = open
+        if (open) refreshDeskConnections(_quickCaptureText.value)
+    }
+
+    fun setQuickCaptureText(text: String) {
+        val changed = _quickCaptureText.value != text
+        _quickCaptureText.value = text
+        if (changed) refreshDeskConnections(text)
+    }
+
+    /** Hides the panel but keeps the draft for the next time. */
+    fun closeQuickCapture() {
+        _quickCaptureOpen.value = false
+        deskConnectionsJob?.cancel()
+        _deskConnections.value = emptyList()
+    }
+
+    /** After saving: the draft is gone and so are its suggestions. */
+    fun clearQuickCapture() {
+        _quickCaptureText.value = ""
+        _quickCaptureOpen.value = false
+        deskConnectionsJob?.cancel()
+        _deskConnections.value = emptyList()
+    }
+
+    /**
+     * «Esto se conecta con…» — debounced and computed off the main thread over
+     * the entries already loaded. No database access, no network.
+     */
+    fun refreshDeskConnections(draft: String) {
+        deskConnectionsJob?.cancel()
+        deskConnectionsJob = viewModelScope.launch {
+            delay(350)
+            val snapshot = entries.value
+            _deskConnections.value = withContext(Dispatchers.Default) {
+                runCatching {
+                    com.example.semantic.DeskConnectionEngine.connectionsFor(draft, snapshot)
+                }.getOrDefault(emptyList())
+            }
+        }
+    }
 
     /** Debounced semantic search over the journal (local AI when available). */
     fun onSemanticSearchChanged(query: String) {

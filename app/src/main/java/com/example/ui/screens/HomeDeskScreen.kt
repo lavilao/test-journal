@@ -75,6 +75,7 @@ import com.example.data.model.EntityItem
 import com.example.data.model.EntityType
 import com.example.data.model.EntryWithRelations
 import com.example.data.model.JournalEntry
+import com.example.semantic.DeskConnectionEngine
 import com.example.semantic.JournalInsights
 import com.example.ui.components.GlassLabel
 import com.example.ui.components.LiquidGlassCard
@@ -161,10 +162,13 @@ fun HomeDeskScreen(
     val partialTranscript by viewModel.partialTranscript.collectAsState()
 
     // Quick capture: write or dictate without leaving the desk, and save only
-    // when you decide to. ownDictation marks the sessions this screen started,
-    // so leaving the desk never kills the assistant's own dictation.
-    var captureOpen by rememberSaveable { mutableStateOf(false) }
-    var captureText by rememberSaveable { mutableStateOf("") }
+    // when you decide to. The draft lives in the ViewModel, so opening a
+    // related note and coming back keeps the capture in progress. ownDictation
+    // marks the sessions this screen started, so leaving the desk never kills
+    // the assistant's own dictation.
+    val captureOpen by viewModel.quickCaptureOpen.collectAsState()
+    val captureText by viewModel.quickCaptureText.collectAsState()
+    val connections by viewModel.deskConnections.collectAsState()
     var ownDictation by remember { mutableStateOf(false) }
 
     fun startCaptureDictation() {
@@ -173,11 +177,9 @@ fun HomeDeskScreen(
             onResult = { recognized ->
                 val clean = recognized.trim()
                 if (clean.isNotEmpty()) {
-                    captureText = if (captureText.isBlank()) {
-                        clean
-                    } else {
-                        captureText.trimEnd() + "\n" + clean
-                    }
+                    viewModel.setQuickCaptureText(
+                        if (captureText.isBlank()) clean else captureText.trimEnd() + "\n" + clean
+                    )
                 }
             },
             onError = { ownDictation = false }
@@ -209,7 +211,7 @@ fun HomeDeskScreen(
     }
 
     fun openCapture(dictate: Boolean) {
-        captureOpen = true
+        viewModel.setQuickCaptureOpen(true)
         if (dictate) toggleCaptureDictation()
     }
 
@@ -408,9 +410,14 @@ fun HomeDeskScreen(
         if (captureOpen) {
             DeskCapturePanel(
                 text = captureText,
-                onTextChange = { captureText = it },
+                onTextChange = { viewModel.setQuickCaptureText(it) },
                 listening = ownDictation && isDictating,
                 partial = partialTranscript,
+                connections = connections,
+                onOpenConnection = { entryId ->
+                    stopOwnDictation()
+                    onNavigateToDetail(entryId)
+                },
                 onMic = { toggleCaptureDictation() },
                 onScan = {
                     stopOwnDictation()
@@ -418,7 +425,7 @@ fun HomeDeskScreen(
                 },
                 onClose = {
                     stopOwnDictation()
-                    captureOpen = false
+                    viewModel.closeQuickCapture()
                 },
                 onSave = {
                     val text = captureText.trim()
@@ -435,8 +442,7 @@ fun HomeDeskScreen(
                             iconEmoji = "✍️",
                             status = "Inbox"
                         )
-                        captureText = ""
-                        captureOpen = false
+                        viewModel.clearQuickCapture()
                     }
                 },
                 modifier = Modifier
@@ -638,6 +644,8 @@ private fun DeskCapturePanel(
     onTextChange: (String) -> Unit,
     listening: Boolean,
     partial: String,
+    connections: List<DeskConnectionEngine.Connection>,
+    onOpenConnection: (Long) -> Unit,
     onMic: () -> Unit,
     onScan: () -> Unit,
     onClose: () -> Unit,
@@ -651,10 +659,13 @@ private fun DeskCapturePanel(
         shadowElevation = 16.dp,
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(max = 460.dp)
             .testTag("desk_capture_panel")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -693,6 +704,10 @@ private fun DeskCapturePanel(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            DeskConnectionsBlock(
+                connections = connections,
+                onOpen = onOpenConnection
+            )
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
@@ -734,6 +749,79 @@ private fun DeskCapturePanel(
                 TextButton(onClick = onSave, enabled = text.isNotBlank()) {
                     Text("Guardar")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * «Esto se conecta con…»: related notes from the journal while you capture.
+ * Tapping one opens it; the draft stays in the ViewModel, so coming back to
+ * the desk restores the capture panel with the text in place.
+ */
+@Composable
+private fun DeskConnectionsBlock(
+    connections: List<DeskConnectionEngine.Connection>,
+    onOpen: (Long) -> Unit
+) {
+    Spacer(modifier = Modifier.height(10.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "Esto se conecta con…",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        if (connections.isNotEmpty()) {
+            Text(
+                text = connections.size.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+    if (connections.isEmpty()) {
+        Text(
+            text = "Aún no encuentro notas parecidas; seguiré mirando mientras escribes.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+        )
+    } else {
+        connections.forEach { connection ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onOpen(connection.entryId) }
+                    .padding(vertical = 6.dp)
+                    .testTag("desk_connection_${connection.entryId}"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = connection.emoji, fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = connection.title,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = connection.reason,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }
